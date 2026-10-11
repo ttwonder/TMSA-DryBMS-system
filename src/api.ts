@@ -27,7 +27,7 @@ class SupabaseApi implements ApiClient {
   private invalidate(){this.epoch++;this.user=null;this.sessionToken='';this.publishSession();}
   async rpc<T=unknown>(action:string,payload:unknown={}):Promise<T>{
     if(!this.config.url || !this.config.anonKey)throw new RpcError('CONFIG_REQUIRED','尚未配置此平台自己的 Supabase。');
-    const body=JSON.stringify({p_action:action,p_session:this.sessionToken,p_client_id:this.clientId,p_payload:payload});
+    const body=JSON.stringify({p_action:action,p_session:this.sessionToken,p_client_id:this.clientId,p_payload:payload,...(action==='import_seed'?{p_import_mode:true}:{})});
     const initiatedSession=this.sessionToken,initiatedEpoch=this.epoch;
     const replaySafe=['save','role_permissions'].includes(action)&&typeof payload==='object'&&payload!==null&&typeof (payload as {operationId?:unknown}).operationId==='string';
     // Initial source upload can exceed the ordinary request window before SQL starts.
@@ -37,7 +37,11 @@ class SupabaseApi implements ApiClient {
       let result:RpcResult<T>;
       try{
         const response=await fetch(`${this.config.url}/rest/v1/rpc/compliance_rpc`,{method:'POST',headers:{'Content-Type':'application/json',apikey:this.config.anonKey,Authorization:`Bearer ${this.config.anonKey}`},body,signal:controller.signal,cache:'no-store'});
-        if(!response.ok)throw new RpcError(`HTTP_${response.status}`,'連線服務未確認操作，請保留草稿。');
+        if(!response.ok){
+          const provider=await response.json().catch(()=>null) as {code?:unknown}|null;
+          if(provider?.code==='57014')throw new RpcError('DB_57014','資料庫執行逾時；未確認匯入完成。請保留資料並先核對雲端狀態，不要直接重試。');
+          throw new RpcError(`HTTP_${response.status}`,'連線服務未確認操作，請保留草稿。');
+        }
         result=await response.json() as RpcResult<T>;
       }catch(error){
         if(error instanceof RpcError)throw error;

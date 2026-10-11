@@ -18,6 +18,8 @@ GitHub Desktop → File → Add local repository → 選 `E:\Projects\TMSA&DryBM
 
 ## 3. 私有一次性碼設定（與公開migration分開）
 
+**初始匯入 timeout 修正（新專案及既有已安裝專案）：** `001_platform.sql` 的原始安裝核驗完成後，另開 query 執行 `supabase/migrations/002_import_timeout.sql` 一次，再另開 query 執行 `supabase/import-timeout-readback.sql`，必須取得 `PASS_IMPORT_ROUTE_INSTALL_ONLY`，才發布目前前端及首次匯入。已完成 001／Owner 初始化的既有專案只需這個 002 修正及獨立讀回，**不重跑 001、初始化或資料匯入**。這個修正保留同一 RPC 名稱／URL；只有初始匯入多傳 `p_import_mode=true` 並取得 60 秒 SQL 預算。`supabase/readback.sql` 的四參數 `expected_signature` 判斷只適用原 overload；新增五參數 row 的 false 不代表安裝錯誤，新增路由必須以專用 12 項 readback 核對。完整原因、驗證及停止條件見 `docs/IMPORT_SQL_TIMEOUT_REPAIR.md`。
+
 開啟本機 `docs/BOOTSTRAP.html`，按「產生一次性初始化碼」。按之前不會產生秘密；工具不連網、不寫瀏覽器storage、不執行SQL。先把碼保管在自己的密碼管理器；不得貼到聊天或公開Git。
 
 在同一已核對專案，另開query執行工具產生的私有設定SQL一次。它只含SHA-256，不含明文碼，只設定bootstrap權限，不建立Owner或匯入資料。設定後再readback：`initialized=false`、`active_owners=0`、`bootstrap_provisioned=true`。若已初始化、錯誤或結果不明，停止，不重新產生或重跑來猜測。

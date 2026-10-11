@@ -30,4 +30,4 @@ npm run dev -- --port 4641
 
 ## 發布界線
 
-先完成本機與部署交接核對，再由使用者在GitHub Desktop加入**這一個資料夾**及Publish/Push。正式Supabase SQL、一次性Owner初始化、私有資料匯入和正式讀回核驗分開。尚未部署不能稱已上線。詳見 `docs/DEPLOYMENT.md`。
+先完成本機與部署交接核對，再由使用者在GitHub Desktop加入**這一個資料夾**及Publish/Push。正式Supabase SQL、一次性Owner初始化、私有資料匯入和正式讀回核驗分開。尚未部署不能稱已上線。詳見 `docs/DEPLOYMENT.md`。目前前端首次匯入另要求 `supabase/migrations/002_import_timeout.sql` 已安裝且通過 `supabase/import-timeout-readback.sql`；既有專案不得因此重跑 001 或初始化。修復說明見 `docs/IMPORT_SQL_TIMEOUT_REPAIR.md`。

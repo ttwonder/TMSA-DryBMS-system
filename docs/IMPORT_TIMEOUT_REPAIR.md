@@ -1,5 +1,7 @@
 # 初始匯入：上傳時間與前端等待上限修復
 
+> 本頁保存第一階段 frontend-only 修正的證據。其後正式日誌已確認後端 `57014`，第二階段的限定 SQL timeout 修復、migration/readback 與操作順序見 [IMPORT_SQL_TIMEOUT_REPAIR.md](IMPORT_SQL_TIMEOUT_REPAIR.md)。下列「尚未取得 SQLSTATE」描述的是第一階段當時狀態，不能作為目前判斷。
+
 ## 結論
 
 本次已實證一個會令完整初始資料匯入失敗的原因：前端把所有 RPC（包括大型初始匯入）的完整請求等待時間一律限制為 20 秒；實際瀏覽器對既有專用 Supabase 的完整大小只讀請求，僅上傳就用了 25.7 秒。因此，資料還沒傳完，前端便中止請求並顯示 `NETWORK_UNKNOWN`。
