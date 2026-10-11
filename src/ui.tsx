@@ -1,0 +1,10 @@
+import type {ReactNode} from 'react';
+import type {PageProps,BiText} from './types';
+export function BilingualText({value}:{value:BiText}){return <div className="bilingual"><div lang="en">{value.en}</div><div lang="zh-Hant">{value.zh}</div></div>;}
+export function Modal({title,children,onClose,wide=false}:{title:string;children:ReactNode;onClose:()=>void;wide?:boolean}){return <div className="modal-backdrop"><section className={`modal ${wide?'wide':''}`} role="dialog" aria-modal="true" aria-label={title}><header><h2>{title}</h2><button className="icon-button" aria-label="Close" onClick={onClose}>×</button></header><div className="modal-body">{children}</div></section></div>;}
+export function MultiSelect({label,options,selected,onChange}:{label:string;options:{id:string;label:string}[];selected:string[];onChange:(ids:string[])=>void}){return <fieldset className="multi-select"><legend>{label}</legend><div>{options.map(o=><label key={o.id}><input type="checkbox" checked={selected.includes(o.id)} onChange={e=>onChange(e.target.checked?[...selected,o.id]:selected.filter(id=>id!==o.id))}/>{o.label}</label>)}</div>{selected.filter(id=>!options.some(o=>o.id===id)).map(id=><label key={id} className="retained-reference"><input type="checkbox" checked onChange={()=>onChange(selected.filter(x=>x!==id))}/>{id}</label>)}</fieldset>;}
+export function EditorNotice({error,lost}:{error:string;lost:boolean}){return error?<div role="alert" className={`notice ${lost?'warning':'error'}`}>{error}</div>:null;}
+export function PageHeading({title,subtitle,actions}:{title:string;subtitle?:string;actions?:ReactNode}){return <div className="page-heading"><div><h1>{title}</h1>{subtitle&&<p>{subtitle}</p>}</div><div className="page-actions">{actions}</div></div>;}
+export const departmentOptions=(ctx:PageProps)=>ctx.state.settings.departments.filter(d=>d.active).map(d=>({id:d.id,label:d.name[ctx.lang]}));
+export const peopleOptions=(ctx:PageProps)=>ctx.state.people.filter(p=>p.active).map(p=>({id:p.id,label:p.name}));
+export function Empty({children}:{children:ReactNode}){return <div className="empty-state">{children}</div>;}

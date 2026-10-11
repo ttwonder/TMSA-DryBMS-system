@@ -1,0 +1,147 @@
+import assert from 'node:assert/strict';
+import {mkdirSync,writeFileSync,readFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {createNativeDatabase,checkedRpc,rpc,setupQaIdentities,syntheticSeed,sha256,opaque,root} from './native-postgres.mjs';
+const cases=[];let db,users;
+const contexts=new Map();
+const call=async(role,action,payload={})=>{const result=await checkedRpc(db,action,payload,users[role].sessionToken,users[role].clientId);if(action==='claim')contexts.set(result.token,{kind:payload.kind,id:payload.id});return result;};
+const raw=(role,action,payload={})=>rpc(db,action,payload,users[role].sessionToken,users[role].clientId);
+const state=()=>call('owner','read');
+const get=async(kind,id)=>{const collections={assessment:'assessments',improvement:'improvements',item:'items',inspection:'inspections',person:'people',dryScore:'dryScores'};return (await state())[collections[kind]].find(x=>x.id===id);};
+const envelope=(kind,record,lease,intent='update',op=randomUUID())=>({kind,record,expectedVersion:record.version,leaseToken:lease.token,intent,operationId:op});
+const lp=l=>({...contexts.get(l.token),leaseToken:l.token});
+async function save(role,kind,record,intent='update'){const l=await call(role,'claim',{kind,id:record.id});const result=await call(role,'save',envelope(kind,record,l,intent));await call(role,'release',lp(l));return result;}
+const base=id=>({id,version:0,createdAt:'',updatedAt:'',updatedBy:''});const bi=t=>({en:t,zh:t});
+const improvement=id=>({...base(id),title:'Native test '+id,content:bi('Work'),itemIds:['item-a','item-dry'],departmentIds:['marine'],assigneeIds:['qa-operator'],source:'non_external',urgency:'medium',status:'open',percent:0,targetDate:'2026-12-31',plan:'Test',events:[],closedAt:null,closedBy:null,sources:[]});
+async function test(id,fn){try{await fn();cases.push({id,status:'PASS'});console.log('PASS',id);}catch(e){cases.push({id,status:'FAIL',code:e.code||'ASSERTION'});throw e;}}
+try {
+  db=await createNativeDatabase();
+  await test('bootstrap-gate-roster-live-sessions',async()=>{
+    const status=await checkedRpc(db,'bootstrap_status');assert.equal(status.initialized,false);
+    assert.equal((await rpc(db,'roster',{gateToken:'invalid'})).ok,false);
+    users=await setupQaIdentities(db,{seed:null});
+    const state=await checkedRpc(db,'read',{},users.owner.sessionToken,users.owner.clientId);
+    assert.equal(state.people.length,5);assert.equal(state.people.filter(p=>p.role==='owner').length,1);
+    assert(state.people.every(p=>!('passwordHash' in p)&&!('credentialHash' in p)));
+    assert.equal((await checkedRpc(db,'bootstrap_status')).initialized,true);
+    assert.equal((await rpc(db,'bootstrap',{})).ok,false);
+  });
+  await test('seed-full-rollback-and-once',async()=>{
+    const bad=syntheticSeed();bad.assessments[0].assigneeIds=['missing'];const before=(await db.setup.query('select count(*) as n from compliance_private.records')).rows[0].n;
+    assert.equal((await raw('owner','import_seed',{seed:bad})).code,'INVALID_REFERENCE');assert.equal((await db.setup.query('select count(*) as n from compliance_private.records')).rows[0].n,before);
+    assert.equal((await call('owner','import_seed',{seed:syntheticSeed()})).imported,13);assert.equal((await state()).items.length,4);assert.equal((await raw('owner','import_seed',{seed:syntheticSeed()})).code,'WORKSPACE_NOT_FRESH');
+  });
+  await test('anon-private-table-helper-and-RLS-denied',async()=>{
+    const c=await db.connect();try{await c.query('begin');await c.query('set local role anon');await assert.rejects(c.query('select * from compliance_private.records'),e=>e.code==='42501');await c.query('rollback');await c.query('begin');await c.query('set local role anon');await assert.rejects(c.query('select compliance_private.token()'),e=>e.code==='42501');await c.query('rollback');}finally{await c.end();}
+    assert.equal((await db.setup.query("select bool_and(relrowsecurity) as enabled from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='compliance_private' and c.relkind='r'")).rows[0].enabled,true);
+  });
+  await test('same-item-holder-client-token-fences',async()=>{
+    const a=await call('operator','claim',{kind:'assessment',id:'assessment-item-a'});const denied=await raw('peer','claim',{kind:'assessment',id:'assessment-item-a'});assert.equal(denied.code,'LEASE_HELD');assert.equal(denied.holderName,users.operator.user.name);
+    assert.equal((await rpc(db,'renew',lp(a),users.operator.sessionToken,'wrong-client')).code,'LEASE_LOST');await call('operator','release',lp(a));
+  });
+  await test('different-item-two-native-connections-commit-independently',async()=>{
+    const a=await call('operator','claim',{kind:'assessment',id:'assessment-item-a'}),b=await call('peer','claim',{kind:'assessment',id:'assessment-item-b'}),ra=await get('assessment','assessment-item-a'),rb=await get('assessment','assessment-item-b');ra.selfAssessment=bi('A');rb.selfAssessment=bi('B');
+    const ca=await db.connect(),cb=await db.connect();try{
+      assert.notEqual((await ca.query('select pg_backend_pid() as pid')).rows[0].pid,(await cb.query('select pg_backend_pid() as pid')).rows[0].pid);
+      await ca.query('begin');await ca.query('set local role anon');assert.equal((await ca.query('select public.compliance_rpc($1,$2,$3,$4::jsonb) as r',['save',users.operator.sessionToken,users.operator.clientId,JSON.stringify(envelope('assessment',ra,a))])).rows[0].r.ok,true);
+      assert.equal((await rpc(db,'save',envelope('assessment',rb,b),users.peer.sessionToken,users.peer.clientId,cb)).ok,true);assert.equal((await get('assessment',rb.id)).selfAssessment.en,'B');assert.equal((await get('assessment',ra.id)).selfAssessment.en,'Initial');await ca.query('commit');assert.equal((await get('assessment',ra.id)).selfAssessment.en,'A');
+    }finally{await ca.query('rollback').catch(()=>{});await ca.end();await cb.end();await call('operator','release',lp(a));await call('peer','release',lp(b));}
+  });
+  await test('lease-75s-renew-expiry-late-renew-release-fenced',async()=>{
+    const l=await call('operator','claim',{kind:'assessment',id:'assessment-item-a'});assert(Date.parse(l.expiresAt)-Date.now()>70000);assert(Date.parse(l.expiresAt)-Date.now()<76000);assert.equal((await call('operator','renew',lp(l))).token,l.token);
+    await db.setup.query("update compliance_private.leases set expires_at=clock_timestamp()-interval '1 second' where kind='item' and id='item-a'");assert.equal((await raw('operator','renew',lp(l))).code,'LEASE_LOST');const fresh=await call('peer','claim',{kind:'assessment',id:'assessment-item-a'});assert.notEqual(fresh.token,l.token);assert.equal((await raw('operator','release',lp(l))).code,'LEASE_LOST');assert.equal((await raw('operator','save',envelope('assessment',await get('assessment','assessment-item-a'),l))).code,'LEASE_LOST');await call('peer','release',lp(fresh));
+  });
+  await test('stale-CAS-invalid-reference-zero-writes',async()=>{
+    const l=await call('operator','claim',{kind:'assessment',id:'assessment-item-a'}),r=await get('assessment','assessment-item-a');const counts=async()=>(await db.setup.query('select (select count(*) from compliance_private.audit) as audit,(select count(*) from compliance_private.operations) as ops')).rows[0];const before=await counts();const stale=envelope('assessment',r,l);stale.expectedVersion--;assert.equal((await raw('operator','save',stale)).code,'VERSION_CONFLICT');const bad=structuredClone(r);bad.assigneeIds=['missing'];assert.equal((await raw('operator','save',envelope('assessment',bad,l))).code,'INVALID_REFERENCE');assert.deepEqual(await get('assessment',r.id),r);assert.deepEqual(await counts(),before);await call('operator','release',lp(l));
+  });
+  await test('lost-ACK-same-operation-exactly-once-canonical-status',async()=>{
+    const l=await call('operator','claim',{kind:'assessment',id:'assessment-item-a'}),r=await get('assessment','assessment-item-a');r.evidence=bi('Receipt canonical');const p=envelope('assessment',r,l),ack=await call('operator','save',p);await call('operator','release',lp(l));assert.deepEqual(await call('operator','save',p),ack);assert.deepEqual((await call('operator','operation_status',{operationId:p.operationId,request:p})).record,ack);const bad=structuredClone(p);bad.record.evidence=bi('different');assert.equal((await raw('operator','save',bad)).code,'OPERATION_MISMATCH');assert.equal((await db.setup.query('select count(*) as n from compliance_private.audit where operation_id=$1',[p.operationId])).rows[0].n,'1');assert.deepEqual(await get('assessment',r.id),ack);const audit=(await call('owner','audit_query',{text:'Receipt canonical',itemCode:'1.1.1'})).rows.find(x=>x.operationId===p.operationId);assert.deepEqual(audit.after,ack);
+  });
+  await test('source-gap-and-Yes-conformity-guard',async()=>{
+    for(const [id,code,conformity] of [['assessment-item-gap','SOURCE_GAP_UNRESOLVED','all'],['assessment-item-a','YES_REQUIRES_ALL','partial']]){const l=await call('operator','claim',{kind:'assessment',id}),r=await get('assessment',id);r.response='yes';r.conformity=conformity;r.reviewed=true;assert.equal((await raw('operator','save',envelope('assessment',r,l))).code,code);await call('operator','release',lp(l));}
+  });
+  await test('operator-management-admin-Owner-self-protection',async()=>{
+    assert.equal((await raw('operator','claim',{kind:'item',id:'item-a'})).code,'FORBIDDEN');assert.equal((await raw('operator','audit_query')).code,'FORBIDDEN');assert.equal((await raw('admin','claim',{kind:'person',id:'qa-owner'})).code,'OWNER_PROTECTED');const l=await call('owner','claim',{kind:'person',id:'qa-owner'}),r=await get('person','qa-owner');r.role='operator';assert.equal((await raw('owner','save',envelope('person',r,l))).code,'OWNER_PROTECTED');await call('owner','release',lp(l));
+    const p={...base('invalid-admin'),username:'invalid-admin',name:'Invalid admin',departmentId:'marine',role:'admin',active:true,hasPassword:true},pl=await call('owner','claim',{kind:'person',id:p.id});assert.equal((await raw('owner','save',envelope('person',p,pl,'create'))).code,'PASSWORD_REQUIRED');await call('owner','release',lp(pl));assert.equal(await get('person',p.id),undefined);
+  });
+  await test('cross-framework-improvement-append-only-close-reopen-independent',async()=>{
+    const i=improvement('improve-a');i.events=[{id:'event-1',at:'fake',by:'fake',content:'First',status:'open',percent:10}];let row=await save('operator','improvement',i,'create');assert.equal(row.events[0].by,'qa-operator');assert.notEqual(row.events[0].at,'fake');const l=await call('operator','claim',{kind:'improvement',id:row.id});const bad=structuredClone(row);bad.events[0].content='tampered';assert.equal((await raw('operator','save',envelope('improvement',bad,l))).code,'EVENTS_APPEND_ONLY');await call('operator','release',lp(l));row.events.push({id:'event-2',at:'fake',by:'fake',content:'Next',status:'in_progress',percent:25});row=await save('operator','improvement',row);const a=await get('assessment','assessment-item-a');row=await save('operator','improvement',row,'close');assert.equal(row.status,'closed');assert(row.closedAt);assert.equal(row.closedBy,'qa-operator');assert.deepEqual(await get('assessment',a.id),a);row=await save('operator','improvement',row,'reopen');assert.equal(row.status,'open');assert.equal(row.closedAt,null);
+  });
+  await test('inspection-full-server-freeze-unknown-grades-final-new-revision',async()=>{
+    let i={...base('inspection-a'),frameworkId:'TMSA',title:'Native inspection',organization:'Synthetic',date:'2026-10-01',type:'formal',status:'draft',snapshot:{},results:[],findings:[{id:'finding-a',itemIds:['item-a'],classification:'finding',observation:bi('Deficiency'),recommendation:bi('Improve'),sources:[]}],imported:false};i=await save('admin','inspection',i,'create');assert.equal(i.snapshot.items.length,3);assert.equal(i.results.length,3);assert(i.results.every(r=>r.response===null&&!r.reviewed));const frozen=structuredClone(i.snapshot),item=await get('item','item-b');item.code='1.1.22';assert((await save('admin','item',item)).aliases.includes('1.1.2'));assert((await call('owner','audit_query',{kind:'item',itemCode:'1.1.2'})).total>=1);assert.deepEqual((await get('inspection',i.id)).snapshot,frozen);i=await save('admin','inspection',i,'finalize');assert.equal(i.status,'final');const l=await call('admin','claim',{kind:'inspection',id:i.id});assert.equal((await raw('admin','save',envelope('inspection',{...i,title:'Overwrite'},l))).code,'FINAL_SNAPSHOT_IMMUTABLE');await call('admin','release',lp(l));const copy={...i,...base('inspection-revision'),supersedesId:i.id,status:'draft',imported:false};assert.deepEqual((await save('admin','inspection',copy,'create')).snapshot,i.snapshot);
+    const ext={...improvement('external-a'),source:'external',inspectionId:i.id,findingId:'finding-a',itemIds:['item-a']};assert.equal((await save('operator','improvement',ext,'create')).sourceKey,'inspection-a:finding-a');const bad={...improvement('external-b'),source:'external',inspectionId:i.id,findingId:'fake'},bl=await call('operator','claim',{kind:'improvement',id:bad.id});assert.equal((await raw('operator','save',envelope('improvement',bad,bl,'create'))).code,'INVALID_EXTERNAL_SOURCE');await call('operator','release',lp(bl));
+  });
+  await test('dry-percent-and-unknown-kind-rejection',async()=>{
+    const l=await call('operator','claim',{kind:'dryScore',id:'dry-score'}),r=await get('dryScore','dry-score');r.levels=[99,null,null,null];assert.equal((await raw('operator','save',envelope('dryScore',r,l))).code,'INVALID_DRY_LEVEL');await call('operator','release',lp(l));assert.equal((await raw('owner','claim',{kind:'bad',id:'item-a'})).code,'INVALID_RESOURCE');
+  });
+  await test('export-current-complete-selected-filter-snapshot-audited',async()=>{
+    const s=await call('operator','read'),p={format:'pdf',kind:'improvements',ids:['improve-a'],filters:{status:'open'},snapshotToken:s.snapshotToken};const output=await call('operator','export_authorize',p);assert.deepEqual(output.improvements,s.improvements);assert.equal(output.items.length,4);assert.equal((await raw('operator','export_authorize',{...p,ids:[]})).code,'EMPTY_SELECTION');assert.equal((await raw('operator','export_authorize',{...p,filters:{status:'closed'}})).code,'INVALID_SELECTION');assert.equal((await raw('operator','export_authorize',{...p,snapshotToken:'stale'})).code,'SNAPSHOT_STALE');assert.equal((await db.setup.query('select count(*) as n from compliance_private.exports')).rows[0].n,'1');const audit=await call('owner','audit_query',{kind:'export'});assert.equal(audit.total,1);assert.deepEqual(audit.rows[0].after.selectedIds,['improve-a']);assert.deepEqual(audit.rows[0].itemCodes,['1.1.1','D-1']);
+  });
+  await test('audit-pagination-search-total-no-heartbeats',async()=>{
+    const a=await call('owner','audit_query',{kind:'assessment',limit:1,offset:0}),b=await call('owner','audit_query',{kind:'assessment',limit:1,offset:1});assert(a.total>=3);assert.equal(a.rows.length,1);assert.equal(b.total,a.total);assert.notEqual(a.rows[0].id,b.rows[0].id);const before=(await call('owner','audit_query')).total,l=await call('operator','claim',{kind:'assessment',id:'assessment-item-a'});await call('operator','renew',lp(l));await call('operator','release',lp(l));assert.equal((await call('owner','audit_query')).total,before);
+  });
+  await test('credential-save-idempotent-canonical-without-secret',async()=>{
+    const p={...base('password-operator'),username:'password-operator',name:'Password operator',departmentId:'marine',role:'operator',active:true,hasPassword:true,credentialHash:sha256(opaque())},l=await call('owner','claim',{kind:'person',id:p.id}),request=envelope('person',p,l,'create'),first=await call('owner','save',request);assert.deepEqual(await call('owner','save',request),first);assert(!('credentialHash' in first));await call('owner','release',lp(l));
+  });
+  await test('vessel-create-lease-renew-and-release',async()=>{
+    const p={...improvement('vessel-improvement'),assigneeIds:[]},l=await call('vessel','claim',{kind:'improvement',id:p.id});assert.equal((await call('vessel','renew',lp(l))).token,l.token);const saved=await call('vessel','save',envelope('improvement',p,l,'create'));assert.equal(saved.updatedBy,'qa-vessel');await call('vessel','release',lp(l));
+  });
+  await test('single-business-item-lease-definition-assessment-interlock',async()=>{
+    let a=await get('assessment','assessment-item-a');a.response='yes';a.conformity='all';a.reviewed=true;a=await save('operator','assessment',a);
+    const al=await call('operator','claim',{kind:'assessment',id:a.id});assert.equal(al.resourceKey,'item:item-a');assert.equal(al.baseVersion,a.version);assert.equal((await raw('admin','claim',{kind:'item',id:'item-a'})).code,'LEASE_HELD');await call('operator','release',lp(al));
+    let item=await get('item','item-a');const il=await call('admin','claim',{kind:'item',id:item.id});assert.equal(il.resourceKey,'item:item-a');assert.equal(il.baseVersion,item.version);assert.equal((await raw('operator','claim',{kind:'assessment',id:a.id})).code,'LEASE_HELD');item.kpi=bi('Requirement really changed');const p=envelope('item',item,il),saved=await call('admin','save',p),changed=await get('assessment',a.id);assert.equal(changed.reviewed,false);assert.equal(changed.response,'yes');assert.equal(changed.version,a.version+1);assert.deepEqual(changed.selfAssessment,a.selfAssessment);assert.deepEqual(changed.evidence,a.evidence);assert.equal((await db.setup.query('select count(*) as n from compliance_private.audit where operation_id=$1',[p.operationId])).rows[0].n,'2');assert.deepEqual(await call('admin','save',p),saved);assert.deepEqual(await get('assessment',a.id),changed);
+    const inactive=await call('admin','save',envelope('item',saved,il,'archive'));assert.equal((await raw('admin','save',envelope('assessment',changed,il))).code,'INACTIVE_ITEM');await call('admin','save',envelope('item',inactive,il,'activate'));await call('admin','release',lp(il));
+    a=await get('assessment',a.id);a.reviewed=true;a=await save('operator','assessment',a);item=await get('item',item.id);item.code='1.1.111';await save('admin','item',item);assert.deepEqual(await get('assessment',a.id),a);
+  });
+  await test('source-gap-resolution-requires-additional-located-evidence',async()=>{
+    let i=await get('item','item-gap');const l=await call('admin','claim',{kind:'item',id:i.id});i.sourceGapResolved=true;assert.equal((await raw('admin','save',envelope('item',i,l))).code,'SOURCE_GAP_EVIDENCE_REQUIRED');i.sources.push({source:'Synthetic supplemental source',file:'fixture.pdf',pages:[1],note:'Missing requirement recovered; synthetic evidence.'});i=await call('admin','save',envelope('item',i,l));assert.equal(i.sourceGapResolved,true);await call('admin','release',lp(l));
+  });
+  await test('fixed-role-matrix-via-dedicated-CAS-lease-save',async()=>{
+    let settings=(await state()).settings;const l=await call('owner','claim',{kind:'settings',id:settings.id});const p=envelope('settings',settings,l);settings.rolePermissions.operator.enterManagement=true;assert.equal((await raw('owner','role_permissions',p)).code,'FIXED_ROLE_BOUNDARY');settings.rolePermissions.operator.enterManagement=false;settings.rolePermissions.admin.enterManagement=false;assert.equal((await raw('owner','role_permissions',envelope('settings',settings,l))).code,'FIXED_ROLE_BOUNDARY');settings.rolePermissions.admin.enterManagement=true;settings.rolePermissions.vessel.exportReports=true;const valid=envelope('settings',settings,l);const saved=await call('owner','role_permissions',valid);assert.equal(saved.rolePermissions.vessel.exportReports,true);assert.deepEqual(await call('owner','role_permissions',valid),saved);await call('owner','release',lp(l));
+    settings=(await state()).settings;const adminLease=await call('admin','claim',{kind:'settings',id:settings.id});settings.departments[0].name.zh='測試管理部門';const canonical=await call('admin','save',envelope('settings',settings,adminLease));assert.equal(canonical.departments[0].name.zh,'測試管理部門');settings=canonical;settings.rolePermissions.vessel.exportReports=false;assert.equal((await raw('admin','save',envelope('settings',settings,adminLease))).code,'USE_OWNER_SETTINGS_ACTION');await call('admin','release',lp(adminLease));
+  });
+  await test('dedicated-site-password-and-Owner-transfer-rechecked-audited',async()=>{
+    assert.equal((await raw('admin','site_password',{credentialHash:db.qaCredentials.adminHash,newGateHash:sha256(opaque())})).code,'FORBIDDEN');assert.equal((await raw('owner','transfer_owner',{credentialHash:sha256(opaque()),targetId:'qa-admin'})).code,'CREDENTIAL_RECHECK_FAILED');
+    const gateHash=sha256(opaque());assert.equal((await call('owner','site_password',{credentialHash:db.qaCredentials.ownerHash,newGateHash:gateHash})).changed,true);assert.equal((await rpc(db,'gate',{passwordHash:db.qaCredentials.gateHash})).code,'GATE_DENIED');assert((await checkedRpc(db,'gate',{passwordHash:gateHash})).gateToken);
+  });
+  await test('deactivate-role-change-revoke-old-sessions',async()=>{
+    const p=await get('person','qa-peer');p.active=false;await save('admin','person',p,'archive');assert.equal((await raw('peer','read')).code,'SESSION_INVALID');assert.equal((await raw('peer','operation_status',{operationId:'any'})).code,'SESSION_INVALID');const o=await get('person','qa-operator');o.role='vessel';await save('admin','person',o);assert.equal((await raw('operator','claim',{kind:'assessment',id:'assessment-item-a'})).code,'SESSION_INVALID');
+  });
+  await test('Owner-transfer-unique-two-person-audits-revoked-sessions',async()=>{
+    const before=(await call('owner','audit_query',{kind:'person'})).total;assert.equal((await call('owner','transfer_owner',{credentialHash:db.qaCredentials.ownerHash,targetId:'qa-admin'})).transferred,true);assert.equal((await raw('owner','read')).code,'SESSION_INVALID');assert.equal((await raw('admin','read')).code,'SESSION_INVALID');
+    const rows=(await db.setup.query("select body from compliance_private.records where kind='person'")).rows.map(r=>r.body);assert.equal(rows.filter(p=>p.role==='owner').length,1);assert.equal(rows.find(p=>p.id==='qa-admin').role,'owner');assert.equal(rows.find(p=>p.id==='qa-owner').role,'admin');assert.equal((await db.setup.query("select count(*) as n from compliance_private.audit where kind='person'")).rows[0].n,String(before+2));
+  });
+  await test('real-ApiClient-REST-restore-holder-lost-ACK-no-stale-retry',async()=>{
+    const {startQaServer}=await import('./qa-server.mjs');const {createApiClient,RpcError}=await import('../src/api.ts');let drop=true,holdRead=false,releaseRead,readSeen,notifyRead;const calls=[];
+    const qa=await startQaServer({evidenceDir:join(root,'qa-evidence','http'),afterCommit:async({action,result,backendPid})=>{if(action==='read'&&holdRead){holdRead=false;notifyRead();await new Promise(ok=>{releaseRead=ok;});}calls.push({action,code:result.code||'OK',backendPid});if(action==='save'&&result.ok&&drop){drop=false;return true;}return false;}});
+    const original=Object.getOwnPropertyDescriptor(globalThis,'sessionStorage');const data=new Map();const storage={getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,String(v)),removeItem:k=>data.delete(k)};Object.defineProperty(globalThis,'sessionStorage',{value:storage,configurable:true});
+    const restore=(role,fake=false)=>{const u=qa.users[role];storage.setItem('fpmc-compliance-client-id',u.clientId);storage.setItem('fpmc-compliance-session',JSON.stringify({user:fake?{...u.user,id:'fake-id',role:'owner'}:u.user,sessionToken:u.sessionToken}));return createApiClient(qa.config);};
+    try{
+      const health=await fetch(qa.url+'/health');assert.equal((await health.json()).engine,'native PostgreSQL');const api=restore('operator',true);assert.equal((await api.status()).initialized,true);let s=await api.read();assert.equal(api.user.id,'qa-operator');assert.equal(api.user.role,'operator');const peer=restore('peer');
+      const l=await api.claim('assessment','assessment-item-a');await assert.rejects(peer.claim('assessment','assessment-item-a'),e=>e instanceof RpcError&&e.code==='LEASE_HELD'&&e.holderName===qa.users.operator.user.name&&e.message.includes(e.holderName));
+      const r=s.assessments.find(x=>x.id==='assessment-item-a');r.evidence=bi('HTTP lost ACK');const op=randomUUID();const ack=await api.save('assessment',r,r.version,l,'update',op);assert.equal(ack.version,r.version+1);assert.equal(calls.filter(c=>c.action==='save').length,2);assert.equal((await qa.db.setup.query('select count(*) as n from compliance_private.audit where operation_id=$1',[op])).rows[0].n,'1');
+      const before=calls.filter(c=>c.action==='save').length;await assert.rejects(api.save('assessment',r,r.version,l,'update',randomUUID()),e=>e.code==='VERSION_CONFLICT');assert.equal(calls.filter(c=>c.action==='save').length,before+1);await api.release(l);assert.deepEqual(await api.save('assessment',r,r.version,l,'update',op),ack);
+      const [a,b]=await Promise.all([api.claim('assessment','assessment-item-a'),peer.claim('assessment','assessment-item-b')]);const recent=calls.filter(c=>c.action==='claim').slice(-2);assert.notEqual(recent[0].backendPid,recent[1].backendPid);await Promise.all([api.release(a),peer.release(b)]);
+      const owner=restore('owner');s=await owner.read();const ls=await owner.claim('settings',s.settings.id);s.settings.rolePermissions.vessel.closeImprovements=true;const saved=await owner.save('settings',s.settings,s.settings.version,ls,'update',randomUUID());assert.equal(saved.rolePermissions.vessel.closeImprovements,true);assert(calls.some(c=>c.action==='role_permissions'));await owner.release(ls);
+      holdRead=true;readSeen=new Promise(ok=>{notifyRead=ok;});const stale=owner.read();await readSeen;const ownSession=owner.sessionToken;owner.sessionToken=qa.users.operator.sessionToken;releaseRead();await assert.rejects(stale,e=>e.code==='STALE_SESSION');owner.sessionToken=ownSession;
+      await api.logout();assert.equal(api.sessionToken,'');assert.equal(storage.getItem('fpmc-compliance-session'),null);
+      const denial=await fetch(qa.url+'/rest/v1/rpc/compliance_rpc',{method:'POST',headers:{Origin:'https://external.example','Content-Type':'application/json'},body:'{}'});assert.equal(denial.status,403);
+      writeFileSync(join(root,'qa-evidence','http-tests.json'),JSON.stringify({passed:true,requests:calls.length,trace:calls,cleanup:'owned HTTP and PostgreSQL stopped in finally'},null,2));
+    }finally{if(original)Object.defineProperty(globalThis,'sessionStorage',original);else delete globalThis.sessionStorage;await qa.stop();}
+  });
+  await test('existing-public-pgcrypto-parent-bootstrap-payload',async()=>{
+    const other=await createNativeDatabase({install:false,evidenceDir:join(root,'qa-evidence','public-extension')});
+    try{
+      await other.setup.query('create extension pgcrypto with schema public');await other.setup.query(readFileSync(join(root,'supabase/migrations/001_platform.sql'),'utf8'));const code=opaque();await other.setup.query('select compliance_private.provision_bootstrap($1)',[sha256(code)]);
+      assert.equal((await checkedRpc(other,'bootstrap',{bootstrapCode:code,name:'Parent bootstrap fixture',username:'fixture-owner',departmentId:'management',credentialHash:sha256(opaque()),gateHash:sha256(opaque())})).initialized,true);
+      const readback=await other.setup.query(readFileSync(join(root,'supabase/readback.sql'),'utf8'));assert(readback[0].rows.every(r=>r.security_definer&&r.expected_signature));assert(readback[1].rows.every(r=>r.rls_enabled&&!r.anon_has_any_direct_grant));assert(readback[2].rows.every(r=>r.security_definer&&!r.anon_can_execute_helper));assert.equal(readback[3].rows[0].anon_private_schema_usage,false);assert.equal(readback[3].rows[0].anon_rpc_execute,true);const rows=readback.flatMap(result=>result.rows);assert.equal(rows.find(row=>'roster_must_be_denied' in row)?.roster_must_be_denied.code,'GATE_INVALID');assert.equal(rows.find(row=>'sessionless_read_must_be_denied' in row)?.sessionless_read_must_be_denied.code,'SESSION_INVALID');
+      const ns=(await other.setup.query("select n.nspname from pg_extension e join pg_namespace n on n.oid=e.extnamespace where e.extname='pgcrypto'")).rows[0].nspname;assert.equal(ns,'public');assert.deepEqual((await other.setup.query("select pronargs,prosecdef,proconfig from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='compliance_rpc'")).rows.map(r=>[r.pronargs,r.prosecdef,r.proconfig]),[[4,true,['search_path=\"\"']]]);
+    }finally{await other.stop();}
+  });
+} catch(e){console.error('NATIVE FAIL',e.code??'',e.message, 'position',e.position??'', 'routine', e.routine??'');process.exitCode=1;}
+finally {
+  if(db)await db.stop();
+  mkdirSync(join(root,'qa-evidence'),{recursive:true});
+  writeFileSync(join(root,'qa-evidence','native-tests.json'),JSON.stringify({layer:'native PostgreSQL / real anon RPC / synthetic data',cases,total:cases.length,passed:!process.exitCode,sqlSha256:sha256(readFileSync(join(root,'supabase/migrations/001_platform.sql'))),apiSha256:sha256(readFileSync(join(root,'src/api.ts'))),cleanup:db?'owned cluster stopped; files retained':'startup failed; owned cleanup attempted'},null,2));
+}

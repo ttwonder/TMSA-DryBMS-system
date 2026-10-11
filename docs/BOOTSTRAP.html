@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>TMSA／DRYBMS 一次性初始化碼（離線）</title>
+<style>
+:root{color-scheme:light dark}body{font-family:system-ui,sans-serif;margin:0;padding:16px;background:var(--card,#f5f7fa);color:var(--foreground,#162b3a);line-height:1.5}h1{font-size:20px;margin:0 0 8px}h2{font-size:16px;margin:16px 0 5px}p{margin:5px 0;font-size:14px}.warning{border:1px solid #b7791f;border-radius:6px;padding:8px 10px;margin:8px 0}button{font:inherit;font-size:14px;padding:6px 10px;margin:5px 4px 0 0;cursor:pointer}button:disabled{cursor:default}input,textarea{box-sizing:border-box;width:100%;font:14px ui-monospace,monospace;border:1px solid var(--border,#aab8c5);border-radius:4px;padding:8px;background:var(--card,#fff);color:inherit}textarea{height:90px;resize:vertical;white-space:pre-wrap;overflow-wrap:anywhere}.muted{color:var(--muted-foreground,#53697a)}#setup-status{font-size:14px;font-weight:600;margin:8px 0}
+</style>
+</head>
+<body>
+<h1>一次性初始化碼 · 離線工具</h1>
+<p class="warning">僅供<strong>新的專用 TMSA／DRYBMS Supabase 專案</strong>。先安裝 <code>001_platform.sql</code> 並完成唯讀核驗；未核對正式目標前，不要執行下方 SQL。此工具不連網、不執行 SQL、不發布網站。</p>
+<p>只有按下按鈕後才會在本機產生碼。它不是 Owner 密碼或進站密碼；Owner 建立後即失效。<strong>不要貼到聊天、Git 或公開網頁。</strong></p>
+<button id="generate" type="button">產生一次性初始化碼</button>
+<div id="setup-status" role="status" data-state="empty">尚未產生。</div>
+<h2>1. 私有設定 SQL</h2>
+<p>在已核對的 Supabase SQL Editor 新建一個 query；全選下方內容，自行 Ctrl+C、貼上並 Run 一次。這會設定初始化權限，但<strong>不會建立 Owner 或匯入資料</strong>。</p>
+<textarea id="setup-sql" aria-label="私有設定 SQL" readonly spellcheck="false" autocomplete="off"></textarea>
+<button id="select-sql" type="button" disabled>選取設定 SQL</button>
+<h2>2. 保管並使用一次性碼</h2>
+<p>先存到自己的密碼管理器，再在網站的「初始化 Owner」畫面輸入這個碼。Owner 名稱、帳號、Owner 密碼及進站密碼由你自行設定。</p>
+<input id="setup-code" aria-label="一次性初始化碼" type="password" readonly autocomplete="off" spellcheck="false">
+<button id="reveal" type="button" disabled>顯示／隱藏初始化碼</button><button id="select-code" type="button" disabled>選取初始化碼</button>
+<p class="muted">選取按鈕只選文字，不使用剪貼簿 API。請先顯示碼再 Ctrl+C。關閉／重載此頁會丟失尚未保管的碼；此頁不使用 localStorage 或 sessionStorage。若設定 SQL 已執行，不要重新產生或重跑設定來猜測結果；先核對是否已建立 Owner。</p>
+<script>
+const byId=id=>document.getElementById(id);
+byId('generate').addEventListener('click',async()=>{
+ const button=byId('generate');button.disabled=true;
+ try{
+  if(!globalThis.crypto?.getRandomValues||!globalThis.crypto?.subtle)throw new Error('請以本機 HTML 或 localhost 開啟，瀏覽器須支援 Web Crypto。');
+  const bytes=crypto.getRandomValues(new Uint8Array(32));
+  const code=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(code));
+  const hash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+  byId('setup-code').value=code;
+  byId('setup-sql').value=`select compliance_private.provision_bootstrap('${hash}');`;
+  for(const id of ['select-sql','select-code','reveal'])byId(id).disabled=false;
+  byId('setup-status').textContent='已產生。請先保管一次性碼，再於已核對的正式專案執行設定 SQL。';
+  byId('setup-status').dataset.state='ready';
+ }catch(error){byId('setup-status').textContent=error.message;byId('setup-status').dataset.state='error';button.disabled=false;}
+});
+byId('select-sql').addEventListener('click',()=>{byId('setup-sql').focus();byId('setup-sql').select();});
+byId('reveal').addEventListener('click',()=>{const field=byId('setup-code');field.type=field.type==='password'?'text':'password';});
+byId('select-code').addEventListener('click',()=>{const field=byId('setup-code');field.type='text';field.focus();field.select();});
+</script>
+</body>
+</html>

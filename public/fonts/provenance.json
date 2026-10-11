@@ -1,0 +1,15 @@
+{
+  "family": "Noto Sans CJK TC / static Regular",
+  "license": "SIL OFL 1.1",
+  "upstreamRepository": "https://github.com/notofonts/noto-cjk",
+  "upstreamCommit": "165c01b46ea533872e002e0785ff17e44f6d97d8",
+  "upstreamUrl": "https://raw.githubusercontent.com/notofonts/noto-cjk/165c01b46ea533872e002e0785ff17e44f6d97d8/Sans/Variable/TTF/NotoSansCJKtc-VF.ttf",
+  "licenseUrl": "https://raw.githubusercontent.com/notofonts/noto-cjk/165c01b46ea533872e002e0785ff17e44f6d97d8/LICENSE",
+  "upstreamSha256": "6b40dd16cf1b73b5a7a0ed2472d641b60e3e85e87211abd20009f67d841425da",
+  "conversion": "fonttools 4.60.1; remove Hangul unicode, retain all other Unicode mappings; instantiateVariableFont(wght=400); glyf padding=4; per-report browser fontkit subset",
+  "basicCjkCoverage": "U+4E00–U+9FEF complete; U+9FF0–U+9FFF absent upstream (fail closed)",
+  "unicodeGlyphs": 33638,
+  "file": "NotoSansTC-Regular.ttf",
+  "bytes": 19002240,
+  "sha256": "1fb8c870b683c2a18bf0c0f593c766bfff99c588f4eb4325150a7fe3bdf1d8eb"
+}

@@ -1,0 +1,15 @@
+# Project operating rules
+
+- Work only in this single repository: `E:\Projects\TMSA&DryBMS-system`. Do not clone a second or nested repository, rename the user-selected path or edit sibling applications.
+- Read `docs/IMPLEMENTATION_CONTRACT.md` before changing business semantics. Preserve the seven-page navigation, businesslike density, original FPMC logo and Traditional Chinese/English UI.
+- Company/source datasets live in `private-seed/` (ignored). They must never be committed, embedded in client code, copied to public assets, exported to telemetry or included in `dist`. The publicly served Excel template contains styles and Item codes only, no standard paragraphs, responses, evidence or comments.
+- Stable entity IDs, current assessments, frozen inspection snapshots, improvement lifecycle/progress and framework definitions are separate facts. Use ID references, never display-code joins or duplicate improvement stores. Changes to Y/N must be explicit; closure cannot manufacture compliance.
+- Keep TMSA company 20-section scoring distinct from OCIMF 13-element terminology. Keep DRYBMS Guidance percentage scoring independent. Source gaps and incomplete grading cannot be presented as verified full compliance or fabricated historical scores.
+- Reuse `useRecordEditor`: per-record server lease, fenced session/client/token, CAS version and immutable operation ID. Do not add local optimistic success, whole-workspace overwrites, automatic stale-version retries or any autosave on cancel/navigation. Preserve dirty drafts on lease/network failure.
+- Roles and shared credentials are server authority. Owner-only role/gate/ownership actions stay Owner-only; admin cannot change Owner; disabled or changed accounts lose write access. No email authentication redesign without a user decision.
+- Do not hard-delete source/user/history records; use explicit reversible activation. Ask before deleting files or folders, even temporary ones. Tests may stop only their owned localhost processes and retain artifacts.
+- Keep secrets out of chat, logs, source and commits. Never put a Supabase service-role key in a frontend config. First-Owner setup code belongs to a private local handoff, not the public migration or website.
+- Use Windows native forward-slash paths for node/python/git. The terminal uses bash. Its `workdir` field rejects `&`: quote the exact path in `cd 'E:/Projects/TMSA&DryBMS-system' && ...`; do not change the path as a workaround.
+- Gates: `npm test`, `npm run typecheck`, `npm run build`, actual native PostgreSQL QA, mounted two-client/browser QA, actual Excel/PDF outputs and public-artifact hygiene. Label local/native testing separately from hosted Supabase/GitHub Pages acceptance.
+- Commit locally in verified batches. User performs Push and formal deployment/SQL. After external writes, verify the exact target by reading it back; a tool ACK, local test or green source review is not hosted completion.
+- Use one finite review pass over the agreed requirements, then only targeted fixes/rechecks for reproducible in-scope defects. No unrelated architecture hardening or review treadmill.

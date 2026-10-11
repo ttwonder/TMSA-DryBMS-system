@@ -1,0 +1,73 @@
+import {useRef,useState} from 'react';
+import type {ExportRequest,FrameworkId,PageProps} from './types';
+import {bi,filteredImprovements,hasPermission,overviewChapterScope,type Filters} from './domain';
+import {PageHeading,MultiSelect,Empty} from './ui';
+import {authorizeReportSnapshot,buildFrameworkExcel,buildFrameworkPdf,buildImprovementsPdf,buildInspectionPdf,buildOverviewPdf,downloadReportBytes} from './reports.ts';
+
+export default function Reports(ctx:PageProps) {
+  const {state,lang,t}=ctx;
+  const [kind,setKind]=useState<ExportRequest['kind']>('framework');
+  const [format,setFormat]=useState<ExportRequest['format']>('xlsx');
+  const [frameworkId,setFrameworkId]=useState<FrameworkId>('TMSA');
+  const [chapterIds,setChapterIds]=useState<string[]>(()=>state.chapters.filter(c=>c.active&&c.frameworkId==='TMSA').map(c=>c.id));
+  const [inspectionId,setInspectionId]=useState('');
+  const [filters,setFilters]=useState<Filters>({frameworkId:'all'});
+  const [selectedIds,setSelectedIds]=useState<string[]>([]);
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const actor=useRef({id:ctx.user.id,session:ctx.api.sessionToken,api:ctx.api});
+  actor.current={id:ctx.user.id,session:ctx.api.sessionToken,api:ctx.api};
+  const allowed=hasPermission(state.settings.rolePermissions,ctx.user,'exportReports');
+  const chapters=state.chapters.filter(c=>c.active&&c.frameworkId===frameworkId).sort((a,b)=>a.order-b.order);
+  const visible=filteredImprovements(state,filters);
+  const effectiveSelection=selectedIds.filter(id=>visible.some(row=>row.id===id));
+  const selectedChapters=chapterIds.filter(id=>chapters.some(ch=>ch.id===id));
+  const overviewScope=selectedChapters.filter(id=>overviewChapterScope(state,frameworkId,{...filters,frameworkId}).includes(id));
+  const changeFilter=(key:keyof Filters,value:string)=>setFilters(previous=>({...previous,[key]:value||undefined}));
+  const changeKind=(value:ExportRequest['kind'])=>{setKind(value);setError('');if(value!=='framework')setFormat('pdf');};
+  const exportReport=async()=>{
+    if(busy||!allowed)return;
+    const ids=kind==='improvements'?effectiveSelection:kind==='inspection'?(inspectionId?[inspectionId]:[]):kind==='overview'?overviewScope:selectedChapters;
+    if(!ids.length){setError(t('請明選仍符合篩選的有效項目。空選不會輸出全部。','Select valid records still matching the filters. An empty selection never means all.'));return;}
+    if(filters.from&&filters.to&&filters.from>filters.to){setError(t('起始日期不可晚於結束日期。','The start date must not be after the end date.'));return;}
+    const initiating=actor.current;
+    const unchanged=()=>actor.current.id===initiating.id&&actor.current.session===initiating.session&&actor.current.api===initiating.api;
+    setBusy(true);setError('');
+    try {
+      const request:Omit<ExportRequest,'snapshotToken'>={format,kind,ids,frameworkId:kind==='framework'||kind==='overview'?frameworkId:undefined,filters:kind==='improvements'?filters:kind==='overview'?{...filters,frameworkId,chapterIds:ids}: {chapterIds:kind==='framework'?ids:undefined}};
+      // This RPC authorizes and records the export; no builder receives the live page state.
+      const canonical=await authorizeReportSnapshot(ctx,request);
+      if(!unchanged())throw new Error(t('登入已變更，已停止輸出。','The signed-in session changed; export stopped.'));
+      const bytes=kind==='framework'?(format==='xlsx'?await buildFrameworkExcel(canonical,frameworkId,lang,ids):await buildFrameworkPdf(canonical,frameworkId,lang,ids)):kind==='improvements'?await buildImprovementsPdf(canonical,ids,lang):kind==='inspection'?await buildInspectionPdf(canonical,ids[0],lang):await buildOverviewPdf(canonical,frameworkId,lang,ids,{filters});
+      if(!unchanged())throw new Error(t('登入已變更，已停止下載。','The signed-in session changed; download stopped.'));
+      downloadReportBytes(bytes,`${kind==='framework'||kind==='overview'?frameworkId+'-':''}${kind}-${canonical.serverTime.slice(0,10)}.${format}`,format==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'application/pdf');
+      ctx.notify(t('文件已產生並啟動下載；保存位置由瀏覽器決定。','The document was generated and download started; the browser controls where it is saved.'),'success');
+    } catch(problem) {
+      const message=problem instanceof Error?problem.message:String(problem);setError(message);ctx.notify(message,'error');
+    } finally {setBusy(false);}
+  };
+  return <>
+    <PageHeading title={t('報告中心','Report center')} subtitle={t('授權快照 · 原樣式 XLSX · 可選取中文 PDF','Authorized snapshot · Source-style XLSX · Selectable-text PDF')}/>
+    {!allowed&&<div className="notice warning" role="status">{t('目前角色沒有報告輸出權限。','Your role does not permit report export.')}</div>}
+    <section className="panel">
+      <div className="toolbar">
+        <label><span>{t('報告種類','Report type')}</span><select aria-label={t('報告種類','Report type')} value={kind} disabled={busy} onChange={event=>changeKind(event.target.value as ExportRequest['kind'])}><option value="framework">{t('框架完整自評','Full framework assessment')}</option><option value="improvements">{t('明選改善項目','Selected improvements')}</option><option value="inspection">{t('凍結歷史檢查','Frozen inspection')}</option><option value="overview">{t('管控總覽','Management overview')}</option></select></label>
+        <label><span>{t('文件格式','File format')}</span><select aria-label={t('文件格式','File format')} disabled={busy||kind!=='framework'} value={format} onChange={event=>setFormat(event.target.value as ExportRequest['format'])}><option value="xlsx">Excel (.xlsx)</option><option value="pdf">PDF (.pdf)</option></select></label>
+        {(kind==='framework'||kind==='overview')&&<label><span>{t('框架','Framework')}</span><select aria-label={t('報告框架','Report framework')} value={frameworkId} disabled={busy} onChange={event=>{const fw=event.target.value as FrameworkId;setFrameworkId(fw);setChapterIds(state.chapters.filter(c=>c.active&&c.frameworkId===fw).map(c=>c.id));}}><option>TMSA</option><option>DRYBMS</option></select></label>}
+        <button className="btn primary" disabled={!allowed||busy} onClick={()=>void exportReport()}>{busy?t('產生中…','Generating…'):t('生成並下載','Generate and download')}</button>
+      </div>
+      <p className="calculation-note">{t('Excel 原樣式／同 Item 續列；PDF 正文15pt、輔助≥14pt，不縮字、不裁文。','Source-style Excel with Item continuations; PDF body 15pt, auxiliary ≥14pt. No shrinking or clipping.')}</p>
+      {(kind==='framework'||kind==='overview')&&<MultiSelect label={t('完整分章選取','Complete chapter selection')} options={chapters.map(ch=>({id:ch.id,label:`${ch.code} · ${bi(ch.name,lang)}`}))} selected={selectedChapters} onChange={setChapterIds}/>}
+      {kind==='inspection'&&<label className="field"><span>{t('檢查快照','Inspection snapshot')}</span><select aria-label={t('檢查快照','Inspection snapshot')} value={inspectionId} disabled={busy} onChange={event=>setInspectionId(event.target.value)}><option value="">{t('請選取一筆檢查','Select an inspection')}</option>{state.inspections.map(i=><option key={i.id} value={i.id}>{i.frameworkId} · {i.date} · {i.title} · {i.status==='final'?t('已發布','Published'):t('草稿','Draft')}</option>)}</select><p className="muted">{t('歷史報告保留凍結條文、完整觀察與建議；未完整評定顯示未完整記分，不當成0分。','Historical reports retain frozen definitions and complete observations/recommendations. Incomplete coverage is marked unscored, never zero.')}</p></label>}
+      {(kind==='improvements'||kind==='overview')&&<div className="toolbar overview-filters">
+        {kind==='improvements'&&<><label><span>{t('搜尋','Search')}</span><input aria-label={t('報告搜尋','Report search')} value={filters.query??''} onChange={event=>changeFilter('query',event.target.value)} placeholder={t('事項、條目、計劃或進度','Title, Item, plan or progress')}/></label><label><span>{t('改善框架','Improvement framework')}</span><select aria-label={t('改善框架','Improvement framework')} value={filters.frameworkId??'all'} onChange={event=>{changeFilter('frameworkId',event.target.value);changeFilter('chapterId','');}}><option value="all">{t('全部','All')}</option><option>TMSA</option><option>DRYBMS</option></select></label><label><span>{t('改善章節','Improvement chapter')}</span><select aria-label={t('改善章節','Improvement chapter')} value={filters.chapterId??''} onChange={event=>changeFilter('chapterId',event.target.value)}><option value="">{t('全部','All')}</option>{state.chapters.filter(ch=>filters.frameworkId==='all'||ch.frameworkId===filters.frameworkId).map(ch=><option key={ch.id} value={ch.id}>{ch.frameworkId} {ch.code} · {bi(ch.name,lang)}</option>)}</select></label></>}
+        <label><span>{t('部門','Department')}</span><select aria-label={t('報告部門','Report department')} value={filters.departmentId??''} onChange={event=>changeFilter('departmentId',event.target.value)}><option value="">{t('全部部門','All departments')}</option>{state.settings.departments.map(d=><option key={d.id} value={d.id}>{bi(d.name,lang)}</option>)}</select></label>
+        <label><span>{t('執行人','Assignee')}</span><select aria-label={t('報告執行人','Report assignee')} value={filters.personId??''} onChange={event=>changeFilter('personId',event.target.value)}><option value="">{t('全部人員','All people')}</option>{state.people.map(person=><option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+        <label><span>{t('最近更新 / 匯入・起','Updated / imported · from')}</span><input type="date" aria-label={t('報告起始日期','Report from date')} value={filters.from??''} onChange={event=>changeFilter('from',event.target.value)}/></label><label><span>{t('至','To')}</span><input type="date" aria-label={t('報告結束日期','Report to date')} value={filters.to??''} onChange={event=>changeFilter('to',event.target.value)}/></label>
+        {kind==='improvements'&&<><label><span>{t('狀態','Status')}</span><select aria-label={t('報告改善狀態','Report improvement status')} value={filters.status??''} onChange={event=>changeFilter('status',event.target.value)}><option value="">{t('全部','All')}</option><option value="open">{t('開啟','Open')}</option><option value="in_progress">{t('進行中','In progress')}</option><option value="closed">{t('結案','Closed')}</option></select></label><label><span>{t('急迫程度','Urgency')}</span><select aria-label={t('報告急迫程度','Report urgency')} value={filters.urgency??''} onChange={event=>changeFilter('urgency',event.target.value)}><option value="">{t('全部','All')}</option><option value="urgent">{t('緊急','Urgent')}</option><option value="high">{t('高','High')}</option><option value="medium">{t('中','Medium')}</option><option value="low">{t('低','Low')}</option></select></label></>}
+      </div>}
+      {kind==='improvements'&&<><p className="muted">{t('符合篩選','Matching')}: {visible.length} · {t('明選且仍有效','Selected and still valid')}: {effectiveSelection.length}. {t('未選取項目不輸出；全部進度保留。','Unselected records are excluded; all progress is retained.')}</p>{visible.length?<MultiSelect label={t('明選改善項目（搜尋後選取）','Select improvements after searching')} options={visible.map(row=>({id:row.id,label:`${row.title} · ${row.id.slice(0,12)} · ${row.percent}%`}))} selected={effectiveSelection} onChange={setSelectedIds}/>:<Empty>{t('沒有符合篩選條件的改善項目。','No improvements match the filters.')}</Empty>}</>}
+      {kind==='overview'&&<p className="muted">{t('納入完整分章','Complete chapters included')}: {overviewScope.length}. {t('部門、人員與日期只選定相關完整分章，不刪除章內 No；分章改善分佈可重疊，試算不混入本報告。','Department, person and date filters select related complete chapters without removing any No. Chapter issue counts may overlap; simulation is not included.')}</p>}
+      {error&&<div className="notice error" role="alert">{error}</div>}
+    </section>
+  </>;
+}

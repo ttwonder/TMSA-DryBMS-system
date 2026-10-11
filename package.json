@@ -1,0 +1,34 @@
+{
+  "name": "fpmc-tmsa-drybms-platform",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node node_modules/vite/bin/vite.js --host 127.0.0.1",
+    "build": "node node_modules/typescript/bin/tsc --noEmit && node node_modules/vite/bin/vite.js build",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "qa:native": "node scripts/verify-native.mjs",
+    "qa:browser": "node scripts/verify-browser.mjs",
+    "qa:layout": "node --experimental-strip-types scripts/verify-layout.mjs",
+    "qa:handoff": "node scripts/verify-deployment-handoff.mjs",
+    "import:sources": "python3 scripts/import_sources.py"
+  },
+  "dependencies": {
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "exceljs": "4.4.0",
+    "jszip": "3.10.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "vite": "8.1.3",
+    "typescript": "6.0.3",
+    "pg": "8.16.3",
+    "pdf-lib": "1.17.1",
+    "@pdf-lib/fontkit": "1.1.1",
+    "@playwright/test": "1.58.2"
+  }
+}
