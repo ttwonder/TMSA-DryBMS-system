@@ -30,8 +30,10 @@ class SupabaseApi implements ApiClient {
     const body=JSON.stringify({p_action:action,p_session:this.sessionToken,p_client_id:this.clientId,p_payload:payload});
     const initiatedSession=this.sessionToken,initiatedEpoch=this.epoch;
     const replaySafe=['save','role_permissions'].includes(action)&&typeof payload==='object'&&payload!==null&&typeof (payload as {operationId?:unknown}).operationId==='string';
+    // Initial source upload can exceed the ordinary request window before SQL starts.
+    const requestDeadlineMs=action==='import_seed'?180000:20000;
     for(let attempt=0;attempt<(replaySafe?2:1);attempt++){
-      const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),20000);
+      const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),requestDeadlineMs);
       let result:RpcResult<T>;
       try{
         const response=await fetch(`${this.config.url}/rest/v1/rpc/compliance_rpc`,{method:'POST',headers:{'Content-Type':'application/json',apikey:this.config.anonKey,Authorization:`Bearer ${this.config.anonKey}`},body,signal:controller.signal,cache:'no-store'});
