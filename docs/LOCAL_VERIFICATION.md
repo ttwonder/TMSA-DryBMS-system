@@ -37,9 +37,17 @@ browser receipt的全部product hashes與現有產品檔相符；native SQL/ApiC
 
 B01為已修正並實際重驗；新候選不沿用舊tree的獨立PASS，也沒有宣稱全部交錯窮盡或正式provider驗收。依有限收尾邊界，不另啟動廣泛review。完整來源缺口及正式部署限制照實保留。
 
+## 首次推送後：乾淨安裝建置補正
+
+首版 `1437c0952d60f04d51c25055818ea05e6692a944` 已推至公開 `ttwonder/TMSA-DryBMS-system`，遠端main與本機一致。GitHub Actions run `38116797447` 的安裝及測試步驟成功，但build出現Node型別缺失；尚未到Pages設定、產物上傳或部署。
+
+使用首版58個raw Git blobs建立無`.git`、無私有seed、無既有node_modules的scratch驗證目錄，執行`npm ci`後確實重現相同TS2591。根因是`@types/node`只在原lockfile標為extraneous，未列入根package的devDependencies；本機既有安裝遮住了此缺口。最小修正將既有`@types/node`版本`26.6.5`明列為devDependency，並把它及其既有`undici-types`依賴的lock標記改為dev；未更新其他套件版本，未改src、UI、權限或SQL。
+
+再以補正後兩份建置輸入及其餘56個不變的原始blob建立全新目錄：`npm ci`、`npm run build`（含typecheck）及53/53測試均PASS，無fail/cancelled/skipped。這是本機Windows的乾淨安裝驗證，不冒稱GitHub Linux runner或正式Pages已通過。有限補正不重啟業務／SQL／版面review；新的GitHub建置仍需使用者Push後另外讀回。詳見gitignored `qa-evidence/closing/ci-clean-install-repair.json`。
+
 ## 限制與未完成正式節點
 
-- **未Push、未配置remote、未部署Pages、未執行正式SQL、未初始化正式Owner、未做正式資料匯入及hosted readback。** 最終commit／tree及Preview blob receipt由交接另報，本文不先宣稱。
+- **首版程式碼已公開推送；Pages尚未驗證成功，正式SQL、Owner初始化、私有資料匯入及hosted readback仍未確認完成。** 本次補正只在本機提交，由使用者進行後續Push；SQL交接仍使用原commit中內容未變的安裝／唯讀原始blob。
 - 本機RPC bridge不是Supabase provider；正式專案的版本/角色/網路/快取與多人保存仍按`DEPLOYMENT.md`驗收。
 - 原來源20缺口/19列、`2.4.2`衝突、general定位及結案佐證仍待業務確認；維持未核實/未評，不偷偷造分。
 - build有bundle大小警告（部分chunk >1000kB）。建構成功；目前是較大的Excel/PDF工具bundle，並未做未授權的架構重寫。
