@@ -12,6 +12,7 @@
     "qa:browser": "node scripts/verify-browser.mjs",
     "qa:layout": "node --experimental-strip-types scripts/verify-layout.mjs",
     "qa:handoff": "node scripts/verify-deployment-handoff.mjs",
+    "qa:read-timeout": "node --experimental-strip-types scripts/verify-read-timeout.mjs",
     "import:sources": "python3 scripts/import_sources.py"
   },
   "dependencies": {

@@ -18,7 +18,9 @@ GitHub Desktop → File → Add local repository → 選 `E:\Projects\TMSA&DryBM
 
 ## 3. 私有一次性碼設定（與公開migration分開）
 
-**初始匯入 timeout 修正（新專案及既有已安裝專案）：** `001_platform.sql` 的原始安裝核驗完成後，另開 query 執行 `supabase/migrations/002_import_timeout.sql` 一次，再另開 query 執行 `supabase/import-timeout-readback.sql`，必須取得 `PASS_IMPORT_ROUTE_INSTALL_ONLY`，才發布目前前端及首次匯入。已完成 001／Owner 初始化的既有專案只需這個 002 修正及獨立讀回，**不重跑 001、初始化或資料匯入**。這個修正保留同一 RPC 名稱／URL；只有初始匯入多傳 `p_import_mode=true` 並取得 60 秒 SQL 預算。`supabase/readback.sql` 的四參數 `expected_signature` 判斷只適用原 overload；新增五參數 row 的 false 不代表安裝錯誤，新增路由必須以專用 12 項 readback 核對。完整原因、驗證及停止條件見 `docs/IMPORT_SQL_TIMEOUT_REPAIR.md`。
+**初始匯入 timeout 修正（新專案及既有已安裝專案）：** `001_platform.sql` 的原始安裝核驗完成後，另開 query 執行 `supabase/migrations/002_import_timeout.sql` 一次，再另開 query 執行 `supabase/import-timeout-readback.sql`，必須取得 `PASS_IMPORT_ROUTE_INSTALL_ONLY`，才完成初始匯入路由安裝。新版前端還須先完成下方 003 與 15 項核驗，再發布／首次匯入。已完成 001／Owner 初始化、但尚缺 002 的既有專案只需這個 002 修正及獨立讀回，**不重跑 001、初始化或資料匯入**。這個修正保留同一 RPC 名稱／URL；只有初始匯入多傳 `p_import_mode=true` 並取得 60 秒 SQL 預算。`supabase/readback.sql` 的四參數 `expected_signature` 判斷只適用原 overload；新增五參數 row 的 false 不代表安裝錯誤，新增路由必須以專用 12 項 readback 核對。完整原因、驗證及停止條件見 `docs/IMPORT_SQL_TIMEOUT_REPAIR.md`。
+
+**登入後完整讀取修正：** 002 已安装並核對後，另開 query 執行 `supabase/migrations/003_read_timeout.sql` 一次，再另開 query 執行 `supabase/read-timeout-readback.sql`，必須取得完整 15 項 `PASS_READ_ROUTE_INSTALL_ONLY` 才發布目前前端。既有已完成匯入的專案只補 003，不重做任何初始化／匯入。只有完整 read 多傳 `p_import_mode=false,p_read_mode=true` 並取得固定 15s SQL／60s 客戶端預算；普通操作與初始匯入不變。003 後已共有三個 overload，舊 002 的 exact-two 檢查不再適用。這是後端安装核驗，不是正式 Owner 登入成功證明。完整操作／證據邊界見 `docs/READ_TIMEOUT_REPAIR.md`。
 
 開啟本機 `docs/BOOTSTRAP.html`，按「產生一次性初始化碼」。按之前不會產生秘密；工具不連網、不寫瀏覽器storage、不執行SQL。先把碼保管在自己的密碼管理器；不得貼到聊天或公開Git。
 
@@ -46,7 +48,7 @@ Owner登入 → 管理 → 資料匯入 → 選本機 `private-seed/platform-see
 
 ## 6. 正式網站有限驗收（尚未執行）
 
-使用 `supabase/readback.sql` 的唯讀核驗SQL；再在真正網站驗證：Owner/admin/operator角色、人員改動refresh後保持、一個Item兩位編輯者互斥且顯姓名、不同Item可同時保存、取消零資料變更、失鎖留稿、保存後新頁面讀到同一版本、改善列表與條目共用、歷史快照不受新版定義變動、Excel及PDF下載。
+使用 `supabase/readback.sql` 的基線唯讀核驗 SQL，003 後另用 `supabase/read-timeout-readback.sql` 核對新增路由；再在真正網站驗證：Owner/admin/operator角色、人員改動refresh後保持、一個Item兩位編輯者互斥且顯姓名、不同Item可同時保存、取消零資料變更、失鎖留稿、保存後新頁面讀到同一版本、改善列表與條目共用、歷史快照不受新版定義變動、Excel及PDF下載。
 
 正式核驗與本機native測試是兩份證據。遇到錯誤先查UI、資料讀回、版本及network/快取，不重設或拿初始seed覆蓋正式庫。
 

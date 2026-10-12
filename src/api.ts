@@ -27,11 +27,13 @@ class SupabaseApi implements ApiClient {
   private invalidate(){this.epoch++;this.user=null;this.sessionToken='';this.publishSession();}
   async rpc<T=unknown>(action:string,payload:unknown={}):Promise<T>{
     if(!this.config.url || !this.config.anonKey)throw new RpcError('CONFIG_REQUIRED','尚未配置此平台自己的 Supabase。');
-    const body=JSON.stringify({p_action:action,p_session:this.sessionToken,p_client_id:this.clientId,p_payload:payload,...(action==='import_seed'?{p_import_mode:true}:{})});
+    const body=JSON.stringify({p_action:action,p_session:this.sessionToken,p_client_id:this.clientId,p_payload:payload,...(action==='import_seed'?{p_import_mode:true}:action==='read'?{p_import_mode:false,p_read_mode:true}:{})});
     const initiatedSession=this.sessionToken,initiatedEpoch=this.epoch;
     const replaySafe=['save','role_permissions'].includes(action)&&typeof payload==='object'&&payload!==null&&typeof (payload as {operationId?:unknown}).operationId==='string';
     // Initial source upload can exceed the ordinary request window before SQL starts.
-    const requestDeadlineMs=action==='import_seed'?180000:20000;
+    // The full snapshot also needs a bounded transfer/parse window after SQL.
+    // Neither exception changes ordinary writer deadlines or replay policy.
+    const requestDeadlineMs=action==='import_seed'?180000:action==='read'?60000:20000;
     for(let attempt=0;attempt<(replaySafe?2:1);attempt++){
       const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),requestDeadlineMs);
       let result:RpcResult<T>;
@@ -39,7 +41,7 @@ class SupabaseApi implements ApiClient {
         const response=await fetch(`${this.config.url}/rest/v1/rpc/compliance_rpc`,{method:'POST',headers:{'Content-Type':'application/json',apikey:this.config.anonKey,Authorization:`Bearer ${this.config.anonKey}`},body,signal:controller.signal,cache:'no-store'});
         if(!response.ok){
           const provider=await response.json().catch(()=>null) as {code?:unknown}|null;
-          if(provider?.code==='57014')throw new RpcError('DB_57014','資料庫執行逾時；未確認匯入完成。請保留資料並先核對雲端狀態，不要直接重試。');
+          if(provider?.code==='57014')throw new RpcError('DB_57014',action==='import_seed'?'資料庫執行逾時；未確認匯入完成。請保留資料並先核對雲端狀態，不要直接重試。':action==='read'?'最新資料讀取逾時；尚未確認完整讀回。這不代表先前寫入失敗，請勿因此重複保存。':action==='bootstrap_status'?'連線檢查逾時；目前尚未通過核對。這不代表 Owner 不存在。':'資料庫執行逾時；本次操作結果尚未確認。請保留草稿並先核對雲端狀態。');
           throw new RpcError(`HTTP_${response.status}`,'連線服務未確認操作，請保留草稿。');
         }
         result=await response.json() as RpcResult<T>;
@@ -99,6 +101,14 @@ class SupabaseApi implements ApiClient {
   queryAudit(query:AuditQuery){return this.rpc<{rows:AuditLog[];total:number}>('audit_query',query);}
   authorizeExport(request:ExportRequest){return this.rpc<PlatformState>('export_authorize',request);}
   importSeed(seed:SeedBundle){return this.rpc<{imported:number}>('import_seed',{seed,operationId:id()});}
+}
+export type SeedImportOutcome = {status:'confirmed';imported:number}|{status:'committed_readback_pending';imported:number;error:unknown};
+// A successful write ACK and the subsequent read are separate boundaries.
+// Never replay an initial import merely because authoritative refresh failed.
+export async function runSeedImport(api:ApiClient,seed:SeedBundle,refresh:()=>Promise<void>):Promise<SeedImportOutcome>{
+  const acknowledged=await api.importSeed(seed);
+  try{await refresh();return {status:'confirmed',imported:acknowledged.imported};}
+  catch(error){return {status:'committed_readback_pending',imported:acknowledged.imported,error};}
 }
 export function createApiClient(config:SupabaseConfig):ApiClient{return new SupabaseApi(config);}
 export const createApi=createApiClient;
