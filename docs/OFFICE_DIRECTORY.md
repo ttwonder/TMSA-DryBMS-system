@@ -15,12 +15,12 @@ Source Owner對接當前唯一Owner：名稱／department採來源，target ID�
 | # | 檔案 | 行為及繼續条件 |
 |---|---|---|
 | 01 | `01-preflight-readonly.sql` | READ ONLY，版本／700 Item／唯一Owner／部門重用／lease。必須`PASS_READY_FOR_004_AND_PRIVATE_IMPORT`。 |
-| 02 | `02-004-office-directory.sql` | 完整004 additive migration，只在已确认缺004及01 PASS時Run一次。已安装跳過02；非Owner密碼optional＋gated名冊dept display＋SQL-admin-only helper，非公開import RPC。 |
+| 02 | `02-004-office-directory.sql` | 完整004 additive migration；確定本批004從未執行且01 PASS時Run一次，已證實安裝則跳過02。非Owner密碼optional＋gated名冊dept display＋SQL-admin-only helper，非公開import RPC。 |
 | 03 | `03-install-verify-readonly.sql` | READ ONLY、18 checks：有效函數body/signature/固定config、3 overload、ACL及receipt RLS。必須PASS。 |
 | 04 | `04-private-office-import.sql` | 一筆transaction完整108/11＋21 checks，來源逐欄、保留完整業務／控制／credential／sessions／leases／舊部門／audit。讀回確認才COMMIT；晚期失敗全回滾。只輸出safe check names/counts。 |
 | 05 | `05-private-reconcile-readonly.sql` | 完全獨立READ ONLY，21 checks及來源counts，必須PASS。不能select私有receipt、names或credential/session digest。 |
 
-若以前004／import結果未知，先03／05 READ ONLY。**FAIL／SQL錯誤／逾時或不明結果立即停止，不猜測重Run，不Push。** 01不是已匯入後的健康check；import後01 fresh-state STOP不能當重匯授權。精確replay在本機證明零寫入，仍不建議用重匯猜未知结果。
+確定本批004／import從未執行時，按01→02→03→04→05處理，每步只在本表預期結果下繼續。若以前004／import結果未知，先03／05 READ ONLY；03的FAIL只代表未通過完整安裝核驗，不能單憑它判定004不存在或授權安裝／重跑。**FAIL／SQL錯誤／逾時或不明結果立即停止，不猜測重Run，不Push。** 01不是已匯入後的健康check；import後01 fresh-state STOP不能當重匯授權。精確replay在本機證明零寫入，仍不建議用重匯猜未知结果。
 
 ## 人工Dashboard身份與執行
 
