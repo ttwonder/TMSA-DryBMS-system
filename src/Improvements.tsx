@@ -46,7 +46,8 @@ export function resolveImprovementFocus(state: PlatformState, focusId?: string):
   if (state.items.some(row => row.id === focusId)) return { kind: 'item', id: focusId };
   return null;
 }
-export default function Improvements(ctx: PageProps & { focusId?: string }) {
+export type InlineImprovementTarget = { itemId: string; action: 'create' | 'progress' | 'full' | 'view'; improvementId?: string };
+export default function Improvements(ctx: PageProps & { focusId?: string; inlineTarget?: InlineImprovementTarget; onInlineClose?: () => void }) {
   const { state, t } = ctx;
   const editor = useRecordEditor<Improvement>(ctx, 'improvement');
   const [filters, setFilters] = useState<Filters & { itemId?: string }>({ frameworkId: 'all' });
@@ -67,9 +68,10 @@ export default function Improvements(ctx: PageProps & { focusId?: string }) {
   const setFilter = (key: keyof Filters, value: string) => setFilters(old => ({ ...old, [key]: value }));
   const patch = (value: Partial<Improvement>) => editor.setDraft(old => old ? { ...old, ...value } : old);
   const changeTitle = (lang: 'en' | 'zh', value: string) => { if (draft) { const parts = improvementTitle(draft.title); parts[lang] = value; patch({ title: `${parts.en}\n${parts.zh}` }); } };
-  const discard = () => { if (editor.busy) return; if (!editor.isDirty || window.confirm(t('放棄此草稿？取消不會保存。', 'Discard this draft? Cancel does not save.'))) void editor.cancel(); };
+  const discard = () => { if (editor.busy) return; if (!editor.isDirty || window.confirm(t('放棄此草稿？取消不會保存。', 'Discard this draft? Cancel does not save.'))) void editor.cancel().then(() => ctx.onInlineClose?.()); };
 
   useEffect(() => {
+    if (ctx.inlineTarget) return;
     const query = new URLSearchParams(window.location.hash.split('?')[1] ?? window.location.search);
     const focus = resolveImprovementFocus(state, ctx.focusId || query.get('improvementId') || query.get('focus') || undefined);
     if (!focus) { handledFocus.current = ''; return; }
@@ -78,7 +80,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string }) {
     handledFocus.current = key;
     if (focus.kind === 'case') setDetailId(focus.id);
     else if (focus?.kind === 'item') { setDetailId(''); setFilters({ frameworkId: 'all', itemId: focus.id }); }
-  }, [ctx.focusId, state.improvements, state.items]);
+  }, [ctx.focusId, ctx.inlineTarget, state.improvements, state.items]);
 
   const start = async (record: Improvement, nextMode: typeof mode = 'full') => {
     setValidation(''); setMode(nextMode); setStagedId('');
@@ -94,9 +96,35 @@ export default function Improvements(ctx: PageProps & { focusId?: string }) {
     }
   };
   const create = () => {
-    const record: Improvement = { ...newBase(), title: '', content: { en: '', zh: '' }, itemIds: filters.itemId ? [filters.itemId] : [], departmentIds: filters.itemId ? state.items.find(row => row.id === filters.itemId)?.departmentIds || [] : [], assigneeIds: [], source: 'non_external', urgency: 'medium', status: 'open', percent: 0, targetDate: '', plan: '', events: [], closedAt: null, closedBy: null, sources: [] };
+    const itemId = ctx.inlineTarget?.itemId ?? filters.itemId;
+    const record: Improvement = { ...newBase(), title: '', content: { en: '', zh: '' }, itemIds: itemId ? [itemId] : [], departmentIds: itemId ? state.items.find(row => row.id === itemId)?.departmentIds || [] : [], assigneeIds: [], source: 'non_external', urgency: 'medium', status: 'open', percent: 0, targetDate: '', plan: '', events: [], closedAt: null, closedBy: null, sources: [] };
     void start(record);
   };
+  useEffect(() => {
+    if (!ctx.inlineTarget) return;
+    let live = true;
+    // Defer the initial claim so StrictMode's cancelled setup cannot claim twice.
+    queueMicrotask(() => {
+      if (!live) return;
+      const target = ctx.inlineTarget!;
+      if (!state.items.some(item => item.id === target.itemId && item.active)) {
+        setValidation(t('條目已不存在或停用。', 'The item is missing or inactive.')); return;
+      }
+      if (target.action === 'create') {
+        if (!can('createImprovements')) { setValidation(t('沒有新增改善的權限。', 'Creating an action is not permitted.')); return; }
+        create(); return;
+      }
+      const record = state.improvements.find(row => row.id === target.improvementId && row.itemIds.includes(target.itemId));
+      if (!record) { setValidation(t('此條目的改善記錄已不可用。', 'The linked action is no longer available.')); return; }
+      if (target.action === 'view') { setDetailId(record.id); return; }
+      if (!can('updateImprovements') || target.action === 'progress' && record.status === 'closed') {
+        setValidation(t('此改善目前不可更新。', 'This action cannot currently be updated.')); return;
+      }
+      void start(record, target.action);
+    });
+    return () => { live = false; };
+  }, [ctx.inlineTarget]);
+
   const updateStaged = (changes: Partial<ProgressEvent>) => {
     editor.setDraft(current => {
       if (!current) return current;
@@ -115,7 +143,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string }) {
       catch { setValidation(t('請填寫本次進度，完成百分比須為0–100。', 'Enter progress text and a percentage between 0 and 100.')); return; }
     }
     const intent: SaveIntent = draft.version === 0 ? 'create' : mode === 'close' ? 'close' : mode === 'reopen' ? 'reopen' : 'update';
-    await editor.save(intent);
+    if (await editor.save(intent)) ctx.onInlineClose?.();
   };
   const exportPdf = async () => {
     const ids = effectiveSelection(selected, filteredImprovements(state, filters).filter(row => !filters.itemId || row.itemIds.includes(filters.itemId)));
@@ -135,6 +163,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string }) {
   const eventList = (record: Improvement) => <div className="progress-history"><h3>{t('已保存進度（不可修改）', 'Saved progress (immutable)')}</h3>{record.events.filter(event => event.id !== stagedId).length ? record.events.filter(event => event.id !== stagedId).map(event => <article key={event.id} className="notice"><small>{event.at} · {state.people.find(person => person.id === event.by)?.name || event.by} · {statusLabel(event.status)} · {event.percent}%</small><p className="preserve-lines">{event.content}</p></article>) : <Empty>{t('尚無進度。', 'No progress events yet.')}</Empty>}</div>;
 
   return <>
+    {!ctx.inlineTarget && <>
     <PageHeading title={t('待改善項目', 'Improvement actions')} subtitle={t('每筆改善只有一份進度；更新日期篩選為UTC，並非回溯快照。', 'One event stream per action. Update date filters use UTC, not historical reconstruction.')} actions={<>{can('createImprovements') && <button className="btn primary" disabled={editor.busy || !!draft} onClick={create}>{t('新增改善', 'New action')}</button>}{can('exportReports') && <button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportPdf()}>{exporting ? t('產生中…', 'Generating…') : `${t('匯出已選PDF', 'Export selected PDF')} (${ids.length})`}</button>}</>} />
     <div className="toolbar">
       <label className="field">{t('搜尋', 'Search')}<input value={filters.query || ''} onChange={event => setFilter('query', event.target.value)} placeholder={t('標題、內容、Item或進度', 'Title, content, item or progress')} /></label>
@@ -154,7 +183,9 @@ export default function Improvements(ctx: PageProps & { focusId?: string }) {
     <div className="list-selection-summary"><span>{t('符合篩選', 'Matching')}: {visible.length} · {t('已選', 'Selected')}: {ids.length}</span><button className="btn neutral small" onClick={() => setSelected([])}>{t('取消全部勾選', 'Clear selection')}</button><span className="list-hint">{t('清單顯示全文；點標題查看詳情', 'Full content shown; open the title for details')}</span></div>
     <EditorNotice error={draft ? '' : editor.error} lost={editor.lost} />
     {!visible.length ? <Empty>{t('沒有符合篩選的改善記錄。', 'No matching improvement records.')}</Empty> : <div className="table-wrap"><table className="data-table improvement-table"><thead><tr><th>{t('選取', 'Select')}</th><th>{t('內容／相關Item', 'Action / related items')}</th><th>{t('部門／執行人', 'Departments / assignees')}</th><th>{t('狀態／急迫程度', 'Status / urgency')}</th><th>{t('目標／更新', 'Target / updated')}</th><th>{t('操作', 'Actions')}</th></tr></thead><tbody>{visible.map(record => <tr key={record.id}><td><input type="checkbox" aria-label={`${t('選取', 'Select')} ${record.title}`} checked={ids.includes(record.id)} onChange={event => setSelected(old => event.target.checked ? [...old, record.id] : old.filter(id => id !== record.id))} /></td><td><button className="text-button" onClick={() => setDetailId(record.id)}><BilingualText value={improvementTitle(record.title)} /></button><div className="improvement-content"><BilingualText value={record.content} /></div><div className="item-references">{record.itemIds.map(id => <button key={id} className="btn neutral" onClick={() => { const item = state.items.find(row => row.id === id); if (item) ctx.navigate(item.frameworkId, id); }}>{openIssuesFor(state, id).length > 0 ? '⭐ ' : ''}{state.items.find(item => item.id === id)?.code || id}</button>)}</div></td><td>{departmentsLabel(state, record.departmentIds, ctx.lang)}<br />{peopleLabel(state, record.assigneeIds)}</td><td><span className={`status-pill ${record.status}`}>{statusLabel(record.status)}</span><br />{urgencyLabel(record.urgency)} · {record.percent}%</td><td>{record.targetDate || '—'}<br /><small>{record.updatedAt}</small></td><td><div className="page-actions">{can('updateImprovements') && record.status !== 'closed' && <button className="btn primary" disabled={!!draft || editor.busy} onClick={() => void start(record, 'progress')}>{t('直接更新', 'Update progress')}</button>}{can('updateImprovements') && <button className="btn neutral" disabled={!!draft || editor.busy} onClick={() => void start(record)}>{t('完整編輯', 'Full edit')}</button>}{can('closeImprovements') && <button className={`btn ${record.status === 'closed' ? 'warning' : 'success'}`} disabled={!!draft || editor.busy} onClick={() => void start(record, record.status === 'closed' ? 'reopen' : 'close')}>{record.status === 'closed' ? t('重開', 'Reopen') : t('結案', 'Close')}</button>}</div></td></tr>)}</tbody></table></div>}
-    {detail && !draft && <Modal title={t('改善詳情', 'Action detail')} wide onClose={() => setDetailId('')}><BilingualText value={improvementTitle(detail.title)} /><BilingualText value={detail.content} /><p>{t('計劃', 'Plan')}: {detail.plan}</p>{sourceDetails(detail)}{eventList(detail)}</Modal>}
+    </>}
+    {ctx.inlineTarget && !draft && !detail && <Modal title={t('改善事項', 'Improvement action')} wide onClose={discard}><EditorNotice error={editor.error || validation} lost={editor.lost} />{!editor.error && !validation && <p>{t('正在準備編輯視窗…', 'Preparing the editor…')}</p>}</Modal>}
+    {detail && !draft && <Modal title={t('改善詳情', 'Action detail')} wide onClose={() => { setDetailId(''); ctx.onInlineClose?.(); }}><BilingualText value={improvementTitle(detail.title)} /><BilingualText value={detail.content} /><p>{t('計劃', 'Plan')}: {detail.plan}</p>{sourceDetails(detail)}{eventList(detail)}{ctx.inlineTarget && can('updateImprovements') && <button className="btn neutral" disabled={editor.busy} onClick={() => void start(detail)}>{t('完整編輯', 'Full edit')}</button>}</Modal>}
     {draft && <Modal title={mode === 'close' ? t('確認結案', 'Confirm close') : mode === 'reopen' ? t('確認重開', 'Confirm reopen') : mode === 'progress' ? t('更新進度', 'Update progress') : draft.version === 0 ? t('新增改善', 'New improvement') : t('編輯改善', 'Edit improvement')} wide onClose={discard}>
       <EditorNotice error={editor.error || validation} lost={editor.lost} />
       {mode === 'full' ? <div className="form-grid">

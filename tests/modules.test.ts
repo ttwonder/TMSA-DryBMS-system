@@ -235,7 +235,7 @@ test('source gap resolution requires added located source evidence', () => {
 });
 
 test('focus wiring and fixed administrator management capabilities remain explicit', () => {
-  assert.match(source('Improvements'), /PageProps & \{ focusId\?: string \}/);
+  assert.match(source('Improvements'), /PageProps & \{ focusId\?: string(?:;[^}]+)? \}/);
   assert.match(source('Improvements'), /resolveImprovementFocus\(state, ctx\.focusId/);
   assert.match(source('Improvements'), /row\.itemIds\.includes\(filters\.itemId\)/);
   const management = source('Management');
