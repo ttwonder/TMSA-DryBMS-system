@@ -16,6 +16,8 @@ export interface InspectionResult { itemId:string; response:'yes'|'no'|null; con
 export interface Finding { id:string; itemIds:string[]; classification:'finding'|'positive'|'guidance'|'no_finding'|'general'; observation:BiText; recommendation:BiText; sources:SourceLocator[]; warning?:string }
 export interface Inspection extends BaseEntity { frameworkId:FrameworkId; title:string; organization:string; date:string; type:'formal'|'informal'; status:'draft'|'final'; snapshot:{framework:Framework;chapters:Chapter[];items:StandardItem[];scoringVersion:string}; results:InspectionResult[]; findings:Finding[]; dryLevels?:Record<string,[number|null,number|null,number|null,number|null]>; supersedesId?:string; imported:boolean; scoreNote?:BiText }
 export interface Person extends BaseEntity { username:string; name:string; departmentId:string; role:Role; active:boolean; hasPassword:boolean }
+/** Gate-authorized display enrichment; never persisted as a person record. */
+export interface RosterPerson extends Person { departmentName?:BiText }
 export interface Department { id:string; name:BiText; active:boolean }
 export type Capability = 'editAssessments'|'createImprovements'|'updateImprovements'|'closeImprovements'|'manageInspections'|'exportReports'|'enterManagement'|'manageUsers'|'manageFrameworks'|'viewAuditLogs'|'manageRolePermissions'|'manageSystemSettings';
 export type RolePermissions = Record<Role,Record<Capability,boolean>>;
@@ -36,7 +38,7 @@ export interface ApiClient {
  rpc<T=unknown>(action:string,payload?:unknown):Promise<T>;
  status():Promise<{initialized:boolean;siteGateConfigured:boolean}>;
  gate(passwordHash:string):Promise<{gateToken:string}>;
- roster(gateToken:string):Promise<Person[]>;
+ roster(gateToken:string):Promise<RosterPerson[]>;
  login(gateToken:string,personId:string,passwordHash:string):Promise<{user:Person;sessionToken:string}>;
  logout():Promise<void>; read():Promise<PlatformState>;
  claim(kind:RecordKind,id:string,intent?:SaveIntent):Promise<Lease>; renew(lease:Lease):Promise<Lease>; release(lease:Lease):Promise<void>;

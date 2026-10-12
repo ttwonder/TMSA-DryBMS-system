@@ -2,6 +2,9 @@
 
 此文件是操作流程，不是「已部署」證明。正式目標的GitHub repository名稱/公開性、Supabase project及使用者執行狀態仍須在交接時核對。不要把這個平台的SQL安裝到Ship Dynamics或其他舊專案。
 
+## 既有已安裝平台的office追加
+本次人員／UI交接使用 `docs/OFFICE_DIRECTORY.md`，只追加004及獨立private名冊交易／readback。以下001／Owner／業務seed段落屬原首次建置歷史，不是本次重跑指令。正式已安裝狀態、Dashboard身份與新前端仍由使用者／父端核對。
+
 ## 1. 一個資料夾、一個repository
 
 GitHub Desktop → File → Add local repository → 選 `E:\Projects\TMSA&DryBMS-system`。不要Create/Clone到巢狀資料夾，也不要另外複製一份ready版。新remote用Publish repository；已有remote用Push origin。先核對remote與account，不猜不存在的URL。

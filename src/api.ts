@@ -1,4 +1,4 @@
-import type {ApiClient, AuditQuery, AuditLog, BaseEntity, ExportRequest, Lease, Person, PlatformState, RecordKind, RpcResult, SaveIntent, SeedBundle, SupabaseConfig, SystemSettings} from './types';
+import type {ApiClient, AuditQuery, AuditLog, BaseEntity, ExportRequest, Lease, Person, RosterPerson, PlatformState, RecordKind, RpcResult, SaveIntent, SeedBundle, SupabaseConfig, SystemSettings} from './types';
 
 const SESSION_KEY='fpmc-compliance-session';
 const CLIENT_KEY='fpmc-compliance-client-id';
@@ -8,7 +8,11 @@ export async function hashPassword(value:string):Promise<string>{
   const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));
   return Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
 }
+export type ExportFailureClassification='abort'|'SyntaxError'|'network'|'unknown';
+export interface ExportFailureDiagnostic {action:'export_authorize';phase:'fetch'|'body-read-or-parse';elapsedMs:number;httpStatus:number|null;classification:ExportFailureClassification}
+const exportFailureClassification=(error:unknown,signal:AbortSignal):ExportFailureClassification=>signal.aborted||error instanceof Error&&error.name==='AbortError'?'abort':error instanceof SyntaxError?'SyntaxError':error instanceof TypeError?'network':'unknown';
 export class RpcError extends Error {
+  declare readonly diagnostic?:ExportFailureDiagnostic;
   readonly code:string; readonly holderName?:string;
   constructor(code:string,message?:string,holderName?:string){super(`${code}: ${message||'伺服器未確認操作。'}${holderName?`（${holderName}）`:''}`);this.name='RpcError';this.code=code;this.holderName=holderName;}
 }
@@ -37,26 +41,29 @@ class SupabaseApi implements ApiClient {
     for(let attempt=0;attempt<(replaySafe?2:1);attempt++){
       const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),requestDeadlineMs);
       let result:RpcResult<T>;
+      const startedAt=performance.now();let phase:ExportFailureDiagnostic['phase']='fetch',httpStatus:number|null=null,bodyFailureClassification:ExportFailureClassification|undefined;
+      const withDiagnostic=(error:RpcError,classification:ExportFailureClassification)=>{if(action==='export_authorize'&&!error.diagnostic)Object.defineProperty(error,'diagnostic',{enumerable:true,value:{action:'export_authorize',phase,elapsedMs:Math.max(0,Math.round(performance.now()-startedAt)),httpStatus,classification} satisfies ExportFailureDiagnostic});return error;};
       try{
         const response=await fetch(`${this.config.url}/rest/v1/rpc/compliance_rpc`,{method:'POST',headers:{'Content-Type':'application/json',apikey:this.config.anonKey,Authorization:`Bearer ${this.config.anonKey}`},body,signal:controller.signal,cache:'no-store'});
+        httpStatus=response.status;phase='body-read-or-parse';
         if(!response.ok){
-          const provider=await response.json().catch(()=>null) as {code?:unknown}|null;
+          const provider=await response.json().catch(error=>{bodyFailureClassification=exportFailureClassification(error,controller.signal);return null;}) as {code?:unknown}|null;
           if(provider?.code==='57014')throw new RpcError('DB_57014',action==='import_seed'?'資料庫執行逾時；未確認匯入完成。請保留資料並先核對雲端狀態，不要直接重試。':action==='read'?'最新資料讀取逾時；尚未確認完整讀回。這不代表先前寫入失敗，請勿因此重複保存。':action==='bootstrap_status'?'連線檢查逾時；目前尚未通過核對。這不代表 Owner 不存在。':'資料庫執行逾時；本次操作結果尚未確認。請保留草稿並先核對雲端狀態。');
           throw new RpcError(`HTTP_${response.status}`,'連線服務未確認操作，請保留草稿。');
         }
         result=await response.json() as RpcResult<T>;
       }catch(error){
-        if(error instanceof RpcError)throw error;
+        if(error instanceof RpcError)throw withDiagnostic(error,bodyFailureClassification??'unknown');
         if(attempt===0&&replaySafe&&this.sessionToken===initiatedSession&&this.epoch===initiatedEpoch)continue;
         // Never echo remote body, payload, token, credential, or raw transport error.
-        throw new RpcError('NETWORK_UNKNOWN','無法確認伺服器結果。請保留草稿，使用原操作編號核對或重播。');
+        throw withDiagnostic(new RpcError('NETWORK_UNKNOWN',action==='export_authorize'?'匯出授權結果尚未確認，下載尚未建立。請保留目前選取與畫面，先核對連線及伺服器狀態，勿反覆匯出。':'無法確認伺服器結果。請保留草稿，使用原操作編號核對或重播。'),exportFailureClassification(error,controller.signal));
       }finally{clearTimeout(timer);}
       if(this.sessionToken!==initiatedSession||this.epoch!==initiatedEpoch)throw new RpcError('STALE_SESSION','此回覆屬於先前登入，未套用至目前身分。');
       if(!result || typeof result.ok!=='boolean')throw new RpcError('INVALID_RESPONSE','伺服器回覆格式不正確。');
       if(!result.ok){
         const code=result.code||'RPC_REJECTED';
         if(code==='SESSION_INVALID'&&this.sessionToken===initiatedSession)this.invalidate();
-        throw new RpcError(code,result.message,result.holderName);
+        throw withDiagnostic(new RpcError(code,result.message,result.holderName),'unknown');
       }
       return result.data as T;
     }
@@ -65,7 +72,7 @@ class SupabaseApi implements ApiClient {
   status(){return this.rpc<{initialized:boolean;siteGateConfigured:boolean}>('bootstrap_status');}
   gate(passwordHash:string){return this.rpc<{gateToken:string}>('gate',{passwordHash});}
   // Gate-authorized sanitized Person roster; never stored credential hashes.
-  roster(gateToken:string){return this.rpc<Person[]>('roster',{gateToken});}
+  roster(gateToken:string){return this.rpc<RosterPerson[]>('roster',{gateToken});}
   async login(gateToken:string,personId:string,passwordHash:string){
     this.epoch++;
     const result=await this.rpc<{user:Person;sessionToken:string}>('login',{gateToken,personId,passwordHash});

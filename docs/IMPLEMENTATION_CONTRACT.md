@@ -12,7 +12,7 @@
 - 僅重排TMSA／DRYBMS右側，左側章節導航、七頁導航、品牌與角色矩陣不變。頂部章節名稱、Item／級別／星號與狀態／Edit；KPI橫列左側正文，右側Y/N、符合程度、執行狀態及完成更新；本章分數直接在上方可見，不收入更多資訊。
 - 桌面中段左側Best-Practice Guidance；右側自評在上、Implementation / evidence在下。右側兩塊自然相接，不因左側長文而在右側中間製造大片空白。手機依KPI／評定、Guidance／自評／佐證順序垂直排列。
 - 下方滿寬為本條目同一份未結案改善的緊湊表格：編號／來源／完整內容／部門／人員／進度／操作；增加及更新在原條目開既有改善視窗，成功保存或明確放棄後仍在原條目。不複製資料、不改Y/N、不合併自評與改善的保存交易。
-- 底部僅兩個主要責任欄：涉及部門／執行跟進人。欄位仍保存原departmentIds／assigneeIds；來源及DRYBMS四級百分比的既有功能保留。
+- 最新追加UI-U3：涉及部門／執行跟進人移到Best-Practice Guidance左欄下方，上下兩行；人員採可收合多選，不改departmentIds／assigneeIds。只有原評估編輯權及同筆lease有效時可修改；閱讀態顯示已保存值。右側自評／佐證、全寬改善表及DRYBMS四級百分比保留。
 - 正文不截斷、不縮字、不設大固定高度。新視窗沿用既有useRecordEditor、lease／CAS／操作ID、伺服器ACK後保存關閉及失敗保留草稿；不樂觀顯示成功、不自動重試。
 
 ## 來源及計分
@@ -31,7 +31,15 @@
 - 條目刪減採停用/再啟用，歷史及關聯保存；不硬刪。人員停用保存歷史，已停用人員/改角色之舊session不可繼續寫。新增條目/章節、改標準文字/代碼/排序只限Owner/admin。
 
 ## 人員
-沿用Ship Dynamics mounted `src/permissions.ts`：Owner全權；admin可管理非Owner/框架/稽核/操作紀錄；operator業務自評、改善新增更新/結案及報告；vessel保留角色但不能進管理，預設僅改善新增。Owner/admin需密碼，operator/vessel可選個人密碼；人員按部門/姓名選擇，無Email要求。進站密碼、Owner轉移與角色能力矩陣僅Owner；管理員不能修改/停用Owner。密碼只以雜湊/伺服器crypt保存；不包含在日誌、seed、讀取結果、原始碼。雲端權限在RPC再次驗證，不只是隱藏按鈕。第一位Owner須使用專用一次性初始化碼，不開放任意網路訪客搶先註冊。
+沿用Ship Dynamics的辦公室人員／部門及管理操作，但依使用者本次決定，畫面與新增人員只提供Owner／管理員／操作員三角色，不轉入船端或分管船舶。Owner全權；admin可管理非Owner/框架/稽核/操作紀錄；operator保留原業務自評、改善及報告權限。舊vessel資料型別及後端相容契約保留，不改既有業務能力矩陣，也不提供新建vessel的UI。Owner必須保留個人密碼；admin/operator個人密碼可選，沒有密碼時仍須通過公司進站密碼，已設定密碼的帳戶仍須正確驗證。人員按真部門名稱/姓名選擇，無Email要求；缺英文部門名稱則顯示來源中文，不造譯。進站密碼、Owner轉移與角色能力矩陣僅Owner；管理員不能修改/停用Owner。密碼只以雜湊/伺服器crypt保存；不包含在日誌、seed、讀取結果、原始碼。雲端權限在RPC再次驗證，不只是隱藏按鈕。第一位Owner仍須專用一次性初始化碼，不重跑或新建第二Owner。
+
+辦公室遷入另用私有名冊（108人／11來源部門）及受保護的SQL交易，不與已完成的業務seed重匯混用。來源Owner對接現有唯一Owner：保留target穩定ID、登入名稱、密碼及session，僅姓名/部門採來源；其餘107人帶入真姓名、帳號、部門、啟用及三角色，不帶任何來源密碼/雜湊或個人Email。既有部門ID/業務關聯原樣保留，按來源部門名稱重用或追加。正式SQL、Push由使用者執行；完成migration/名冊commit及唯讀readback之前，不稱正式名冊已遷入。
+
+## 最新有限UI追加（U1–U6）
+- 更新進度視窗顯示同筆改善的完整中英文content，不顯示來源技術metadata；sources及詳情／完整編輯的來源呈現保留。進度為主要寬欄；百分比／原status縮為可讀小控制，部門／人員多選及既有urgency和本次事件走同一lease／CAS／單次保存。100%不自動結案或改Y/N；取消不寫、失鎖保稿、既有進度不可改。
+- 單條頁只移除匯入來源自述提示及各部門原始回覆details的顯示，不刪note／initialDepartmentResponses／來源或改reviewed／source-gap／計分。管理Items的KPI／Guidance復用sentence顯示formatter；原文編輯、取消及其他metadata保存不得重寫原文。
+- TMSA／DRYBMS索引新增緊湊可收合部門多選：A+B為OR，與keyword／stage／status為AND；空選全部。使用assessment.departmentIds??item.departmentIds，已保存[]不回退、不借用改善／人員部門。部門篩選時前後項走篩後序列；零結果不回退全部。assessment／dryScore／inline草稿存在時不因篩選丟稿或換entity。完整score／export範圍、role、保存協議及SQL不變。
+- 正式報告中心NETWORK_UNKNOWN仍未證根因；不得把本批office/UI驗證當成正式Excel匯出修復。匯出專用未知訊息及safe action／phase／elapsed／HTTP status／分類已在原ApiClient最小seam修正；保留NETWORK_UNKNOWN／原domain errors、單次20秒dispatch及原session行為。不猜測延長budget或改SQL，訊息修正不等於正式故障修復。
 
 ## 條文呈現補充
 TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，保留條列、編號、冒號、縮寫、數字、Item代碼及所有非空白字元；中文不額外插空格。兩框架的自評/執行佐證/附註/關聯改善僅去除顯示空行，不重排人員自己寫的行。雙語順序、正文尺寸、來源提示、原始來源全文、編輯原值、輸出、雲端資料、ID、計分及歷史不變。

@@ -16,7 +16,7 @@ export async function startQaServer({seed=syntheticSeed(),port=0,evidenceDir=joi
     if(pool)await pool.end();await db.stop();
   };
   try {
-    for(const file of ['002_import_timeout.sql','003_read_timeout.sql'])await db.setup.query(readFileSync(join(root,'supabase','migrations',file),'utf8'));
+    for(const file of ['002_import_timeout.sql','003_read_timeout.sql','004_office_directory.sql'])await db.setup.query(readFileSync(join(root,'supabase','migrations',file),'utf8'));
     const users=await setupQaIdentities(db,{seed,handlesPath});
     pool=new pg.Pool({...db.connection,max:12,idleTimeoutMillis:10000});
     server=http.createServer(async(req,res)=>{

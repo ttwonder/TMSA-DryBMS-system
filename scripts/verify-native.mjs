@@ -17,6 +17,7 @@ const improvement=id=>({...base(id),title:'Native test '+id,content:bi('Work'),i
 async function test(id,fn){try{await fn();cases.push({id,status:'PASS'});console.log('PASS',id);}catch(e){cases.push({id,status:'FAIL',code:e.code||'ASSERTION'});throw e;}}
 try {
   db=await createNativeDatabase();
+  for(const file of ['002_import_timeout.sql','003_read_timeout.sql','004_office_directory.sql'])await db.setup.query(readFileSync(join(root,'supabase','migrations',file),'utf8'));
   await test('bootstrap-gate-roster-live-sessions',async()=>{
     const status=await checkedRpc(db,'bootstrap_status');assert.equal(status.initialized,false);
     assert.equal((await rpc(db,'roster',{gateToken:'invalid'})).ok,false);
@@ -63,7 +64,7 @@ try {
   });
   await test('operator-management-admin-Owner-self-protection',async()=>{
     assert.equal((await raw('operator','claim',{kind:'item',id:'item-a'})).code,'FORBIDDEN');assert.equal((await raw('operator','audit_query')).code,'FORBIDDEN');assert.equal((await raw('admin','claim',{kind:'person',id:'qa-owner'})).code,'OWNER_PROTECTED');const l=await call('owner','claim',{kind:'person',id:'qa-owner'}),r=await get('person','qa-owner');r.role='operator';assert.equal((await raw('owner','save',envelope('person',r,l))).code,'OWNER_PROTECTED');await call('owner','release',lp(l));
-    const p={...base('invalid-admin'),username:'invalid-admin',name:'Invalid admin',departmentId:'marine',role:'admin',active:true,hasPassword:true},pl=await call('owner','claim',{kind:'person',id:p.id});assert.equal((await raw('owner','save',envelope('person',p,pl,'create'))).code,'PASSWORD_REQUIRED');await call('owner','release',lp(pl));assert.equal(await get('person',p.id),undefined);
+    const p={...base('invalid-admin'),username:'invalid-admin',name:'Invalid admin',departmentId:'marine',role:'admin',active:true,hasPassword:true},pl=await call('owner','claim',{kind:'person',id:p.id});const passwordless=await call('owner','save',envelope('person',p,pl,'create'));assert.equal(passwordless.hasPassword,false);await call('owner','release',lp(pl));assert.deepEqual(await get('person',p.id),passwordless);
   });
   await test('cross-framework-improvement-append-only-close-reopen-independent',async()=>{
     const i=improvement('improve-a');i.events=[{id:'event-1',at:'fake',by:'fake',content:'First',status:'open',percent:10}];let row=await save('operator','improvement',i,'create');assert.equal(row.events[0].by,'qa-operator');assert.notEqual(row.events[0].at,'fake');const l=await call('operator','claim',{kind:'improvement',id:row.id});const bad=structuredClone(row);bad.events[0].content='tampered';assert.equal((await raw('operator','save',envelope('improvement',bad,l))).code,'EVENTS_APPEND_ONLY');await call('operator','release',lp(l));row.events.push({id:'event-2',at:'fake',by:'fake',content:'Next',status:'in_progress',percent:25});row=await save('operator','improvement',row);const a=await get('assessment','assessment-item-a');row=await save('operator','improvement',row,'close');assert.equal(row.status,'closed');assert(row.closedAt);assert.equal(row.closedBy,'qa-operator');assert.deepEqual(await get('assessment',a.id),a);row=await save('operator','improvement',row,'reopen');assert.equal(row.status,'open');assert.equal(row.closedAt,null);
