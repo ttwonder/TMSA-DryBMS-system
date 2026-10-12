@@ -33,23 +33,23 @@
  .list-hint{display:none}
 }
 
-/* Compact list previews never change stored/exported/detail text. */
+/* Full improvement-list text; density comes from column allocation and padding. */
 .text-button{border:0;background:transparent;padding:0;color:var(--blue);font:inherit;text-align:left;cursor:pointer}
 .text-button:hover{text-decoration:underline}
 .preserve-lines{white-space:pre-wrap;overflow-wrap:anywhere}
 .improvement-table{table-layout:fixed;min-width:980px}
+.improvement-table th{white-space:normal;overflow-wrap:anywhere}
 .improvement-table th:nth-child(1){width:60px}
-.improvement-table th:nth-child(2){width:38%}
-.improvement-table th:nth-child(3){width:16%}
-.improvement-table th:nth-child(4){width:12%}
-.improvement-table th:nth-child(5){width:14%}
+.improvement-table th:nth-child(2){width:auto}
+.improvement-table th:nth-child(3){width:11%}
+.improvement-table th:nth-child(4){width:9%}
+.improvement-table th:nth-child(5){width:11%}
 .improvement-table th:nth-child(6){width:17%}
 .improvement-table .bilingual{font-size:15px;line-height:1.45}
 .improvement-table .bilingual>div+div{padding:0;margin:0;border:0}
 .improvement-table .text-button{display:block;font-weight:600;margin-bottom:3px}
-.improvement-table .text-button .bilingual>div{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden}
-.list-text-preview .bilingual>div{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden}
-.improvement-table .list-text-preview{margin-bottom:4px;color:#516c7e}
+.improvement-table .improvement-content{margin-bottom:4px;color:#516c7e}
+.improvement-table .status-pill{max-width:100%;white-space:normal}
 .improvement-table .page-actions{flex:none;gap:4px;align-items:flex-start}
 .improvement-table .btn{min-height:29px;padding:3px 7px;font-size:14px}
 .improvement-table .item-references{display:flex;flex-wrap:wrap;gap:4px}
