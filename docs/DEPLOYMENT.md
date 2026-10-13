@@ -39,6 +39,8 @@ GitHub Desktop → File → Add local repository → 選 `E:\Projects\TMSA&DryBM
 
 repo Settings → Pages → Build and deployment → Source → GitHub Actions。Workflow `.github/workflows/pages.yml`使用鎖定的npm依賴建構並上傳`dist`，不上传repository整个目录或private-seed。
 
+PDF 自動測試另需 Python 工具：workflow 在 `npm test` 前安裝固定版 uv、選用 Python 3.12，下載兩種測試實際使用的固定版依賴組合，並先驗證它們可以離線匯入。這不依賴開發機或上一次 Actions 的套件快取；任何準備或原測試失敗仍會阻止部署，不跳過 PDF 檢查。若只修改這段 CI 準備，不需要重新執行 Supabase SQL。
+
 若不用網站內連線設定，可在GitHub repository variables設定`SUPABASE_URL`及`SUPABASE_ANON_KEY`（前端公開值，不是service_role）。Workflow將其注入build。使用者Push後等待最新Pages run為green，再核對真正Pages URL與頁腳commit識別；raw main更新不等於Pages已更新。
 
 ## 5. 在網站建立Owner及私有資料首次匯入
