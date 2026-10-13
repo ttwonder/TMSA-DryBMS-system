@@ -1,4 +1,4 @@
-import type {ApiClient, AuditQuery, AuditLog, BaseEntity, ExportRequest, Lease, Person, RosterPerson, PlatformState, BrowseState, Inspection, ReadonlyInspectionSummary, RecordKind, RpcResult, SaveIntent, SeedBundle, SupabaseConfig, SystemSettings} from './types';
+import type {ApiClient, Assessment, FrameworkId, AuditQuery, AuditLog, BaseEntity, ExportRequest, Lease, Person, RosterPerson, PlatformState, BrowseState, Inspection, ReadonlyInspectionSummary, RecordKind, RpcResult, SaveIntent, SeedBundle, SupabaseConfig, SystemSettings} from './types';
 import {collectionFor,mergeAcknowledgement,mergeSync,inspectionSummary,type SyncEnvelope} from './syncState.ts';
 
 const SESSION_KEY='fpmc-compliance-session';
@@ -36,7 +36,7 @@ class SupabaseApi implements ApiClient {
   private invalidate(){this.epoch++;this.user=null;this.sessionToken='';this.cache=null;this.cacheContext='';this.publishSession();}
   async rpc<T=unknown>(action:string,payload:unknown={},performanceRoute=false):Promise<T>{
     if(!this.config.url || !this.config.anonKey)throw new RpcError('CONFIG_REQUIRED','尚未配置此平台自己的 Supabase。');
-    const body=JSON.stringify({p_action:action,p_session:this.sessionToken,p_client_id:this.clientId,p_payload:payload,...(performanceRoute?{p_sync_mode:'performance-v1'}:action==='import_seed'?{p_import_mode:true}:action==='read'?{p_import_mode:false,p_read_mode:true}:{})});
+    const body=JSON.stringify({p_action:action,p_session:this.sessionToken,p_client_id:this.clientId,p_payload:payload,...(performanceRoute||action==='restart_updates'?{p_sync_mode:'performance-v1'}:action==='import_seed'?{p_import_mode:true}:action==='read'?{p_import_mode:false,p_read_mode:true}:{})});
     const initiatedSession=this.sessionToken,initiatedEpoch=this.epoch;
     const replaySafe=['save','role_permissions'].includes(action)&&typeof payload==='object'&&payload!==null&&typeof (payload as {operationId?:unknown}).operationId==='string';
     // Initial source upload can exceed the ordinary request window before SQL starts.
@@ -69,6 +69,15 @@ class SupabaseApi implements ApiClient {
         const code=result.code||'RPC_REJECTED';
         if(code==='SESSION_INVALID'&&this.sessionToken===initiatedSession)this.invalidate();
         throw withDiagnostic(new RpcError(code,result.message,result.holderName),'unknown');
+      }
+      if(action==='restart_updates'){
+        const ack=validateRestartAck(result.data,payload as {frameworkId:FrameworkId;operationId:string});
+        if(this.cache&&this.cacheContext===this.context()){
+          const frames=new Map(this.cache.items.map(item=>[item.id,item.frameworkId]));
+          if(ack.records.some(record=>frames.get(record.itemId)!==ack.frameworkId))throw new RpcError('INVALID_RESPONSE','重新開始回覆含非所選框架資料；請保留原操作。');
+          this.ackSerial++;
+          for(const record of ack.records)this.cache=mergeAcknowledgement(this.cache,'assessment',record);
+        }
       }
       return result.data as T;
     }
@@ -156,6 +165,12 @@ class SupabaseApi implements ApiClient {
   queryAudit(query:AuditQuery){return this.rpc<{rows:AuditLog[];total:number}>('audit_query',query);}
   authorizeExport(request:ExportRequest){return this.rpc<PlatformState>('export_authorize',request,request.snapshotToken.startsWith('performance-v1:'));}
   importSeed(seed:SeedBundle){return this.rpc<{imported:number}>('import_seed',{seed,operationId:id()});}
+}
+export interface FrameworkRestartAck {frameworkId:FrameworkId;operationId:string;changedCount:number;records:Assessment[]}
+export function validateRestartAck(value:unknown,request:{frameworkId:FrameworkId;operationId:string}):FrameworkRestartAck{
+ const ack=value as FrameworkRestartAck|null;
+ if(!ack||ack.frameworkId!==request.frameworkId||ack.operationId!==request.operationId||!Number.isSafeInteger(ack.changedCount)||ack.changedCount<0||!Array.isArray(ack.records)||ack.records.length!==ack.changedCount||ack.records.some(r=>!r||typeof r.id!=='string'||!r.id||typeof r.itemId!=='string'||!r.itemId||!Number.isSafeInteger(r.version)||r.version<1||r.reviewed!==false)||new Set(ack.records.map(r=>r.id)).size!==ack.changedCount||new Set(ack.records.map(r=>r.itemId)).size!==ack.changedCount)throw new RpcError('INVALID_RESPONSE','重新開始結果尚未核對；請保留原操作，不要建立另一個批次。');
+ return ack;
 }
 export type SeedImportOutcome = {status:'confirmed';imported:number}|{status:'committed_readback_pending';imported:number;error:unknown};
 // A successful write ACK and the subsequent read are separate boundaries.

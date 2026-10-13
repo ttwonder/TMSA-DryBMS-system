@@ -3,6 +3,7 @@ import type { AuditLog, AuditQuery, BaseEntity, BiText, Chapter, Framework, Fram
 import { CAPABILITIES, bi, hasPermission, newBase, roleName } from './domain';
 import { BilingualText, EditorNotice, Empty, Modal, MultiSelect, PageHeading, departmentOptions } from './ui';
 import { useRecordEditor } from './useRecordEditor';
+import { useFrameworkRestart } from './useFrameworkRestart';
 import { runSeedImport } from './api';
 
 export async function credentialDigest(value: string): Promise<string> {
@@ -54,6 +55,7 @@ export default function Management(ctx: PageProps) {
   const chapterEditor = useRecordEditor<Chapter>(ctx, 'chapter');
   const itemEditor = useRecordEditor<StandardItem>(ctx, 'item');
   const settingsEditor = useRecordEditor<SystemSettings>(ctx, 'settings');
+  const restart = useFrameworkRestart(ctx);
   const [section, setSection] = useState<'people' | 'frameworks' | 'departments' | 'audit' | 'system'>('people');
   const [frameworkId, setFrameworkId] = useState<FrameworkId>('TMSA');
   const [chapterFilter, setChapterFilter] = useState('');
@@ -77,7 +79,8 @@ export default function Management(ctx: PageProps) {
   const [seedName, setSeedName] = useState('');
   const [seedError, setSeedError] = useState('');
   const [seedImportAcknowledged, setSeedImportAcknowledged] = useState(false);
-  const [systemBusy, setSystemBusy] = useState(false);
+  const [systemWorking, setSystemBusy] = useState(false);
+  const systemBusy = systemWorking || restart.busy;
   const [gatePassword, setGatePassword] = useState('');
   const [ownerPassword, setOwnerPassword] = useState('');
   const [transferPassword, setTransferPassword] = useState('');
@@ -87,7 +90,7 @@ export default function Management(ctx: PageProps) {
   const can = (cap: Parameters<typeof hasPermission>[2]) => hasPermission(state.settings.rolePermissions, ctx.user, cap);
   const allowed = (owner || ctx.user.role === 'admin') && can('enterManagement');
   const anyDraft = !!(personEditor.draft || frameworkEditor.draft || chapterEditor.draft || itemEditor.draft || settingsEditor.draft);
-  const anyBusy = personEditor.busy || frameworkEditor.busy || chapterEditor.busy || itemEditor.busy || settingsEditor.busy;
+  const anyBusy = personEditor.busy || frameworkEditor.busy || chapterEditor.busy || itemEditor.busy || settingsEditor.busy || restart.busy;
   const fieldPair = (label: string, value: BiText, onChange: (text: BiText) => void) => <>{(['en', 'zh'] as const).map(lang => <label className="field" key={`${label}-${lang}`}>{label} · {lang === 'en' ? t('英文', 'English') : t('繁中', 'Traditional Chinese')}<textarea rows={3} value={value[lang]} onChange={event => onChange({ ...value, [lang]: event.target.value })} /></label>)}</>;
   const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
   const discard = (cancel: () => Promise<void>) => { if (!anyBusy && !hashing && (!(personEditor.isDirty || frameworkEditor.isDirty || chapterEditor.isDirty || itemEditor.isDirty || settingsEditor.isDirty || personPassword) || window.confirm(t('放棄此草稿？取消不會保存。', 'Discard this draft? Cancel does not save.')))) { hashGeneration.current++; setPersonPassword(''); setValidation(''); void cancel(); } };
@@ -155,10 +158,10 @@ export default function Management(ctx: PageProps) {
   useEffect(() => {
     const key = 'management:transient-credentials';
     const dirty = !!(personPassword || ownerPassword || gatePassword || transferPassword);
-    const busy = hashing || systemBusy;
+    const busy = hashing || systemWorking;
     window.dispatchEvent(new CustomEvent('compliance-editor-status', { detail: { key, dirty, busy } }));
     return () => { window.dispatchEvent(new CustomEvent('compliance-editor-status', { detail: { key, dirty: false, busy: false } })); };
-  }, [personPassword, ownerPassword, gatePassword, transferPassword, hashing, systemBusy]);
+  }, [personPassword, ownerPassword, gatePassword, transferPassword, hashing, systemWorking]);
   const openRoleSettings = async () => {
     if (!owner) return;
     setSettingsMode('permissions'); setValidation('');
@@ -251,8 +254,10 @@ export default function Management(ctx: PageProps) {
       <div className="table-wrap"><table className="data-table"><thead><tr><th>{t('時間／使用者', 'Time / actor')}</th><th>{t('動作／種類', 'Action / kind')}</th><th>{t('Item／實體', 'Items / entity')}</th><th>{t('摘要', 'Summary')}</th></tr></thead><tbody>{auditRows.map(log => <tr key={log.id}><td>{log.at}<br />{log.actorName}</td><td>{log.action}<br />{log.kind}</td><td>{log.itemCodes.join(' / ')}<br /><small>{log.entityId}</small></td><td className="preserve-lines">{log.summary}</td></tr>)}</tbody></table></div>{!auditBusy && !auditRows.length && <Empty>{t('沒有符合的操作紀錄。', 'No matching audit records.')}</Empty>}
       {submittedQuery && <div className="page-actions"><button className="btn neutral" disabled={auditBusy || !(submittedQuery.offset || 0)} onClick={() => void loadAudit({ ...submittedQuery, offset: Math.max(0, (submittedQuery.offset || 0) - (submittedQuery.limit || 25)) })}>{t('上一頁', 'Previous')}</button><span>{auditRows.length ? (submittedQuery.offset || 0) + 1 : 0}–{auditRows.length ? (submittedQuery.offset || 0) + auditRows.length : 0} / {auditTotal}</span><button className="btn neutral" disabled={auditBusy || (submittedQuery.offset || 0) + (submittedQuery.limit || 25) >= auditTotal} onClick={() => void loadAudit({ ...submittedQuery, offset: (submittedQuery.offset || 0) + (submittedQuery.limit || 25) })}>{t('下一頁', 'Next')}</button></div>}
     </>}
+    {owner && restart.dialogOpen && <Modal title={t('一鍵重新開始', 'Start over')} onClose={restart.close}><EditorNotice error={restart.error} lost={false} /><p>{restart.pending ? t('先前操作結果尚未確認。請使用原操作核對／重播，不會另建批次。', 'The previous result is unconfirmed. Check/replay the original operation; no new batch will be created.') : t('要將TMSA還是DRYBMS所有項目的「已完成本次更新」恢復為未勾選？選「否」保持不變。', 'Reset all “completed this update” flags for TMSA or DRYBMS? Choose No to leave everything unchanged.')}</p><p className="notice warning">{t('只清除完成更新勾選，其他資料與歷史保留。TMSA現行分數依原計分規則重算；DRYBMS四級自評百分比不清空。有人編輯所選框架時，整批不執行。', 'Only completion flags are cleared; other data and history are retained. Current TMSA scores recalculate under existing rules; DRYBMS maturity percentages remain. Active edits in the selected framework block the entire batch.')}</p>{restart.pending && <p>{restart.pending.frameworkId} · {t('原操作編號', 'Original operation')}: <code>{restart.pending.operationId}</code></p>}<div className="page-actions">{restart.pending ? <><button className="btn warning" disabled={restart.busy} onClick={()=>void restart.submit()}>{restart.busy ? t('核對中…', 'Checking…') : t('核對／重播原操作', 'Check / replay original operation')}</button><button className="btn neutral" disabled={restart.busy} onClick={restart.close}>{t('關閉（保留原操作）', 'Close (retain original operation)')}</button></> : <><button className="btn neutral" disabled={restart.busy} onClick={restart.close}>{t('否', 'No')}</button>{(['TMSA','DRYBMS'] as FrameworkId[]).map(fw=><button key={fw} className="btn warning" disabled={restart.busy} onClick={()=>void restart.submit(fw)}>{fw}</button>)}</>}</div></Modal>}
     {section === 'system' && owner && <>
       {systemError && <div role="alert" className="notice error">{systemError}</div>}
+      <section className="notice"><h3>{t('本次更新狀態', 'Current update-completion state')}</h3><p>{t('只恢復所選框架的完成更新勾選，包含停用條目；不刪除自評、佐證、Y/N、改善或歷史。', 'Reset only the selected framework’s completion flags, including inactive items. Assessments, evidence, Y/N, improvements and history are retained.')}</p>{restart.error && <div role="alert" className="notice error">{restart.error}</div>}<button className="btn warning" disabled={systemBusy || anyDraft || anyBusy || !restart.ready} onClick={restart.open}>{restart.pending ? t('核對原操作', 'Check original operation') : t('一鍵重新開始', 'Start over')}</button></section>
       <section className="notice"><h3>{t('公開連線設定', 'Public connection configuration')}</h3><p>{t('Supabase URL', 'Supabase URL')}: {ctx.api.config.url}</p><label className="field">{t('公開anon key（不是service-role）', 'Public anon key (not service-role)')}<textarea readOnly rows={3} value={ctx.api.config.anonKey} /></label><p>{t('SQL安裝及連線初始化請使用登入設定面板；此處不接受service-role。', 'Use the login setup panel for SQL installation and connection initialization. This panel never accepts service-role credentials.')}</p></section>
       <section className="notice"><h3>{t('角色權限矩陣（僅Owner）', 'Role capabilities (Owner only)')}</h3><button className="btn primary" disabled={anyDraft || anyBusy} onClick={() => void openRoleSettings()}>{t('編輯角色權限', 'Edit role capabilities')}</button></section>
       <form className="notice form-grid" onSubmit={event => { event.preventDefault(); void sensitive('site_password'); }}><h3>{t('進站密碼（專用動作）', 'Site entry password (dedicated action)')}</h3><label className="field">{t('目前Owner個人密碼', 'Current Owner personal password')}<input type="password" autoComplete="current-password" value={ownerPassword} onChange={e => setOwnerPassword(e.target.value)} /></label><label className="field">{t('新進站密碼', 'New site entry password')}<input type="password" autoComplete="new-password" value={gatePassword} onChange={e => setGatePassword(e.target.value)} /></label><button className="btn warning" disabled={systemBusy || anyDraft}>{t('確認更新進站密碼', 'Confirm site password change')}</button></form>
