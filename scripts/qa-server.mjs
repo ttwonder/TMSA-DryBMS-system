@@ -5,7 +5,7 @@ import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createNativeDatabase,setupQaIdentities,syntheticSeed,rpc,root} from './native-postgres.mjs';
 
-export async function startQaServer({seed=syntheticSeed(),port=0,evidenceDir=join(root,'qa-evidence'),afterCommit}={}) {
+export async function startQaServer({seed=syntheticSeed(),port=0,evidenceDir=join(root,'qa-evidence'),afterCommit,performance=true}={}) {
   mkdirSync(evidenceDir,{recursive:true});
   const db=await createNativeDatabase({evidenceDir});
   const handlesPath=join(evidenceDir,'session-handles.json');
@@ -17,6 +17,7 @@ export async function startQaServer({seed=syntheticSeed(),port=0,evidenceDir=joi
   };
   try {
     for(const file of ['002_import_timeout.sql','003_read_timeout.sql','004_office_directory.sql'])await db.setup.query(readFileSync(join(root,'supabase','migrations',file),'utf8'));
+    if(performance)await db.setup.query(readFileSync(join(root,'supabase','migrations','005_performance.sql'),'utf8'));
     const users=await setupQaIdentities(db,{seed,handlesPath});
     pool=new pg.Pool({...db.connection,max:12,idleTimeoutMillis:10000});
     server=http.createServer(async(req,res)=>{
@@ -35,7 +36,12 @@ export async function startQaServer({seed=syntheticSeed(),port=0,evidenceDir=joi
         if(!body||typeof body.p_action!=='string'||typeof body.p_session!=='string'||typeof body.p_client_id!=='string'||!body.p_payload||typeof body.p_payload!=='object'||Array.isArray(body.p_payload)){json(400,{ok:false,code:'INVALID_TRANSPORT'});return;}
         c=await pool.connect();const pid=(await c.query('select pg_backend_pid() as pid')).rows[0].pid;
         let result;
-        if(Object.hasOwn(body,'p_read_mode')||Object.hasOwn(body,'p_import_mode')){
+        if(Object.hasOwn(body,'p_sync_mode')){
+          if(Object.hasOwn(body,'p_read_mode')||Object.hasOwn(body,'p_import_mode')){json(400,{ok:false,code:'INVALID_TRANSPORT'});return;}
+          await c.query('begin');await c.query('set local role anon');
+          try{result=(await c.query('select public.compliance_rpc($1,$2,$3,$4::jsonb,$5::text) as result',[body.p_action,body.p_session,body.p_client_id,JSON.stringify(body.p_payload),body.p_sync_mode])).rows[0].result;await c.query('commit');}
+          catch(error){await c.query('rollback');throw error;}
+        }else if(Object.hasOwn(body,'p_read_mode')||Object.hasOwn(body,'p_import_mode')){
           const readRoute=Object.hasOwn(body,'p_read_mode');
           const args=[body.p_action,body.p_session,body.p_client_id,JSON.stringify(body.p_payload),body.p_import_mode];
           if(readRoute)args.push(body.p_read_mode);
@@ -44,7 +50,7 @@ export async function startQaServer({seed=syntheticSeed(),port=0,evidenceDir=joi
           catch(error){await c.query('rollback');throw error;}
         }else result=await rpc(db,body.p_action,body.p_payload,body.p_session,body.p_client_id,c);
         // Optional in-process test hook is after real COMMIT, never a public SQL endpoint.
-        if(afterCommit&&await afterCommit({action:body.p_action,result,backendPid:pid})) {res.destroy();return;}
+        if(afterCommit&&await afterCommit({action:body.p_action,result,backendPid:pid,clientId:body.p_client_id})) {res.destroy();return;}
         json(200,result);
       }catch(error){if(!res.headersSent)json(error instanceof SyntaxError?400:500,{ok:false,code:error instanceof SyntaxError?'INVALID_JSON':'QA_TRANSPORT_ERROR',message:'Local QA transport failed; no secrets are logged.'});}
       finally{c?.release();}

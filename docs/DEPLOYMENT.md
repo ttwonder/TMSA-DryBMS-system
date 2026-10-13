@@ -2,6 +2,10 @@
 
 此文件是操作流程，不是「已部署」證明。正式目標的GitHub repository名稱/公開性、Supabase project及使用者執行狀態仍須在交接時核對。不要把這個平台的SQL安裝到Ship Dynamics或其他舊專案。
 
+## 既有已安裝平台的性能／Excel／PDF追加
+
+本次依 `docs/PERFORMANCE_REPORT_DELIVERY.md`：只追加005性能SQL＋獨立13項唯讀readback，通過後由使用者Push新前端。舊001–004／Owner／名冊／業務seed已完成，不重Run、不清草稿。新SQL及正式多人／匯出驗收尚未執行；本機PASS不等於正式故障已復原。完整commit-bound唯讀Preview由本機交付提供，助手不代貼／Run／Push。
+
 ## 既有已安裝平台的office追加
 本次人員／UI交接使用 `docs/OFFICE_DIRECTORY.md`，只追加004及獨立private名冊交易／readback。以下001／Owner／業務seed段落屬原首次建置歷史，不是本次重跑指令。正式已安裝狀態、Dashboard身份與新前端仍由使用者／父端核對。
 

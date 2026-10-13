@@ -38,7 +38,7 @@ export function validateSeedPreview(value: unknown): SeedBundle {
 }
 export function freshBusinessDatabase(ctx: Pick<PageProps, 'state'>): boolean {
   const state = ctx.state;
-  return ['frameworks', 'chapters', 'items', 'assessments', 'improvements', 'inspections', 'dryScores', 'cycles', 'provenance'].every(key => (state[key as keyof typeof state] as unknown[]).length === 0);
+  return ['frameworks', 'chapters', 'items', 'assessments', 'improvements', 'inspections', 'dryScores'].every(key => (state[key as keyof typeof state] as unknown[]).length === 0) && ('controlSummary' in state ? state.controlSummary.cycles===0&&state.controlSummary.provenance===0 : state.cycles.length===0&&state.provenance.length===0);
 }
 export function gapResolutionSupported(item: StandardItem, baseline?: StandardItem): boolean {
   if (!item.sourceGapResolved || !item.sourceGap || baseline?.sourceGapResolved) return true;

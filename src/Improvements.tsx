@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { BiText, Improvement, PageProps, PlatformState, ProgressEvent, SaveIntent } from './types';
+import type { BiText, Improvement, PageProps, BrowseState, Inspection, ProgressEvent, SaveIntent } from './types';
 import { bi, departmentsLabel, filteredImprovements, hasPermission, isoNow, newBase, openIssuesFor, peopleLabel } from './domain';
 import type { Filters } from './domain';
 import { BilingualText, EditorNotice, Empty, Modal, MultiSelect, MultiSelectDropdown, PageHeading, departmentOptions, peopleOptions } from './ui';
 import { useRecordEditor } from './useRecordEditor';
+import { withHydratedInspection } from './syncState';
 
 // The persisted title remains a string; a newline separates EN and ZH.
 export function improvementTitle(title: string): BiText {
@@ -25,7 +26,7 @@ export function improvementValidation(record: Improvement, ctx: Pick<PageProps, 
   const { state, t } = ctx;
   if (!record.title.trim() || !record.content.en.trim() && !record.content.zh.trim()) return t('請填寫標題及改善內容。', 'A title and improvement content are required.');
   const inspection = record.source === 'external' ? state.inspections.find(row => row.id === record.inspectionId) : undefined;
-  const finding = inspection?.findings.find(row => row.id === record.findingId);
+  const finding = inspection && 'findings' in inspection ? inspection.findings.find(row => row.id === record.findingId) : undefined;
   const original = state.improvements.find(row => row.id === record.id);
   // Already-imported general themes deliberately have no guessed Item locator.
   // Permit their existing event stream, not creation of arbitrary unlocated cases.
@@ -40,7 +41,7 @@ export function improvementValidation(record: Improvement, ctx: Pick<PageProps, 
   return '';
 }
 
-export function resolveImprovementFocus(state: PlatformState, focusId?: string): { kind: 'case' | 'item'; id: string } | null {
+export function resolveImprovementFocus(state: Pick<BrowseState,'items'|'improvements'>, focusId?: string): { kind: 'case' | 'item'; id: string } | null {
   if (!focusId) return null;
   if (state.improvements.some(row => row.id === focusId)) return { kind: 'case', id: focusId };
   if (state.items.some(row => row.id === focusId)) return { kind: 'item', id: focusId };
@@ -48,7 +49,11 @@ export function resolveImprovementFocus(state: PlatformState, focusId?: string):
 }
 export type InlineImprovementTarget = { itemId: string; action: 'create' | 'progress' | 'full' | 'view'; improvementId?: string };
 export default function Improvements(ctx: PageProps & { focusId?: string; inlineTarget?: InlineImprovementTarget; onInlineClose?: () => void }) {
-  const { state, t } = ctx;
+  const { t } = ctx;
+  const [sourceInspection,setSourceInspection]=useState<Inspection|null>(null);
+  const sourceGeneration=useRef(0),sourceOwner=useRef({api:ctx.api,session:ctx.api.sessionToken,actor:ctx.user.id});
+  if(sourceOwner.current.api!==ctx.api||sourceOwner.current.session!==ctx.api.sessionToken||sourceOwner.current.actor!==ctx.user.id){sourceGeneration.current++;sourceOwner.current={api:ctx.api,session:ctx.api.sessionToken,actor:ctx.user.id};}
+  const state=sourceInspection?withHydratedInspection(ctx.state,sourceInspection):ctx.state;
   const editor = useRecordEditor<Improvement>(ctx, 'improvement');
   const [filters, setFilters] = useState<Filters & { itemId?: string }>({ frameworkId: 'all' });
   const [selected, setSelected] = useState<string[]>([]);
@@ -62,6 +67,13 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   const ids = effectiveSelection(selected, visible);
   const can = (cap: Parameters<typeof hasPermission>[2]) => hasPermission(state.settings.rolePermissions, ctx.user, cap);
   const draft = editor.draft;
+  useEffect(()=>{
+    const id=draft?.source==='external'?draft.inspectionId:undefined,summary=ctx.state.inspections.find(i=>i.id===id),g=++sourceGeneration.current,owner=sourceOwner.current;
+    if(!summary){setSourceInspection(null);return;}
+    const pending=ctx.api.hydrateInspection?ctx.api.hydrateInspection(summary):ctx.api.read().then(s=>s.inspections.find(i=>i.id===id));
+    void pending.then(full=>{if(g===sourceGeneration.current&&owner===sourceOwner.current&&ctx.api.sessionToken===owner.session&&full?.version===summary.version)setSourceInspection(full);}).catch(error=>{if(g===sourceGeneration.current)setValidation(error instanceof Error?error.message:String(error));});
+    return()=>{sourceGeneration.current++;};
+  },[draft?.inspectionId,draft?.source,ctx.api,ctx.user.id,ctx.api.sessionToken,ctx.state.inspections]);
   const detail = state.improvements.find(row => row.id === detailId);
   const statusLabel = (value: Improvement['status']) => value === 'closed' ? t('已結案', 'Closed') : value === 'in_progress' ? t('進行中', 'In progress') : t('待處理', 'Open');
   const urgencyLabel = (value: Improvement['urgency']) => ({ urgent: t('盡快', 'As soon as possible'), high: t('高', 'High'), medium: t('中', 'Medium'), low: t('低', 'Low') }[value]);
@@ -135,7 +147,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   };
   const submit = async () => {
     if (!draft) return;
-    const issue = improvementValidation(draft, ctx);
+    const issue = improvementValidation(draft, {...ctx,state});
     const event = draft.events.find(row => row.id === stagedId);
     if (issue) { setValidation(issue); return; }
     if (event) {
@@ -196,7 +208,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
         <label className="field">{t('急迫程度', 'Urgency')}<select value={draft.urgency} onChange={event => patch({ urgency: event.target.value as Improvement['urgency'] })}>{(['urgent', 'high', 'medium', 'low'] as const).map(value => <option key={value} value={value}>{urgencyLabel(value)}</option>)}</select></label>
         <label className="field">{t('目標日期', 'Target date')}<input type="date" value={draft.targetDate} onChange={event => patch({ targetDate: event.target.value })} /></label><label className="field">{t('改善計劃', 'Action plan')}<textarea rows={4} value={draft.plan} onChange={event => patch({ plan: event.target.value })} /></label>
         <label className="field">{t('來源', 'Source')}<select value={draft.source} disabled={draft.version > 0} onChange={event => patch({ source: event.target.value as Improvement['source'], inspectionId: undefined, findingId: undefined, sourceKey: undefined, sources: [] })}><option value="non_external">{t('非外部', 'Non-external')}</option><option value="external">{t('外部檢查', 'External inspection')}</option></select></label>
-        {draft.source === 'external' && <><label className="field">{t('來源檢查', 'Source inspection')}<select disabled={draft.version > 0} value={draft.inspectionId || ''} onChange={event => patch({ inspectionId: event.target.value, findingId: undefined, sourceKey: undefined, sources: [] })}><option value="">{t('請選擇', 'Select')}</option>{state.inspections.map(row => <option key={row.id} value={row.id}>{row.date} · {row.title}</option>)}</select></label><label className="field">{t('來源發現', 'Source finding')}<select disabled={draft.version > 0} value={draft.findingId || ''} onChange={event => { const finding = state.inspections.find(row => row.id === draft.inspectionId)?.findings.find(row => row.id === event.target.value); patch({ findingId: finding?.id, sourceKey: finding ? `${draft.inspectionId}:${finding.id}` : undefined, sources: finding ? structuredClone(finding.sources) : [] }); }}><option value="">{t('請選擇', 'Select')}</option>{state.inspections.find(row => row.id === draft.inspectionId)?.findings.filter(row => row.classification === 'finding').map(row => <option key={row.id} value={row.id}>{bi(row.observation, ctx.lang)}</option>)}</select></label></>}
+        {draft.source === 'external' && <><label className="field">{t('來源檢查', 'Source inspection')}<select disabled={draft.version > 0} value={draft.inspectionId || ''} onChange={event => patch({ inspectionId: event.target.value, findingId: undefined, sourceKey: undefined, sources: [] })}><option value="">{t('請選擇', 'Select')}</option>{state.inspections.map(row => <option key={row.id} value={row.id}>{row.date} · {row.title}</option>)}</select></label><label className="field">{t('來源發現', 'Source finding')}<select disabled={draft.version > 0} value={draft.findingId || ''} onChange={event => { const finding = (sourceInspection&&sourceInspection.id===draft.inspectionId&&state.inspections.some(i=>i.id===sourceInspection.id&&i.version===sourceInspection.version)?sourceInspection.findings:[]).find(row => row.id === event.target.value); patch({ findingId: finding?.id, sourceKey: finding ? `${draft.inspectionId}:${finding.id}` : undefined, sources: finding ? structuredClone(finding.sources) : [] }); }}><option value="">{t('請選擇', 'Select')}</option>{(sourceInspection&&sourceInspection.id===draft.inspectionId&&state.inspections.some(i=>i.id===sourceInspection.id&&i.version===sourceInspection.version)?sourceInspection.findings:[]).filter(row => row.classification === 'finding').map(row => <option key={row.id} value={row.id}>{bi(row.observation, ctx.lang)}</option>)}</select></label></>}
       </div> : <BilingualText value={improvementTitle(draft.title)} />}
       {mode === 'progress' ? <section className="progress-action-content" aria-label={t('完整改善內容', 'Full action content')}><BilingualText value={draft.content}/></section> : sourceDetails(draft)}
       {stagedId && (() => { const event = draft.events.find(row => row.id === stagedId); if (!event) return null; const progressFields = <><label className="field"><span>{t('完成百分比', 'Completion percentage')}</span><input aria-label={t('完成百分比', 'Completion percentage')} type="number" min={0} max={100} disabled={mode === 'close' || editor.busy} value={event.percent} onChange={e => updateStaged({ percent: Number(e.target.value) })} /></label>{mode === 'progress' && <label className="field"><span>{t('執行狀態', 'Execution status')}</span><select aria-label={t('執行狀態', 'Execution status')} disabled={editor.busy} value={event.status} onChange={e => updateStaged({ status: e.target.value as ProgressEvent['status'] })}><option value="open">{t('待處理', 'Open')}</option><option value="in_progress">{t('進行中', 'In progress')}</option></select></label>}</>; return <div className={mode === 'progress' ? 'progress-editor-grid' : 'form-grid'}><label className="field progress-text">{t('本次新增進度（保存前可修改）', 'New progress (editable until saved)')}<textarea disabled={editor.busy} rows={mode === 'progress' ? 8 : 5} value={event.content} onChange={e => updateStaged({ content: e.target.value })} /></label>{mode === 'progress' ? <div className="progress-controls">{progressFields}<label className="field progress-urgency"><span>{t('急迫程度', 'Urgency')}</span><select aria-label={t('急迫程度', 'Urgency')} disabled={editor.busy} value={draft.urgency} onChange={e => patch({urgency:e.target.value as Improvement['urgency']})}>{(['urgent','high','medium','low'] as const).map(value=><option key={value} value={value}>{urgencyLabel(value)}</option>)}</select></label><MultiSelectDropdown label={t('涉及部門','Departments')} options={departmentOptions(ctx)} selected={draft.departmentIds} onChange={departmentIds=>patch({departmentIds})} disabled={!editor.canSave}/><MultiSelectDropdown label={t('執行跟進人','Assignees')} options={peopleOptions(ctx)} selected={draft.assigneeIds} onChange={assigneeIds=>patch({assigneeIds})} disabled={!editor.canSave}/></div> : progressFields}</div>; })()}

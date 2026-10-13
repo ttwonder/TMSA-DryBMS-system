@@ -122,7 +122,7 @@ test('selectable-text Chinese PDF emits complete explicit improvements and refus
   assert.equal(new TextDecoder().decode(output.slice(0,5)),'%PDF-');
   const {PDFDocument}=await import('pdf-lib');
   const document=await PDFDocument.load(output);assert.ok(document.getPageCount()>1);
-  if(process.env.REPORT_QA_DIR){await mkdir(process.env.REPORT_QA_DIR,{recursive:true});await writeFile(resolve(process.env.REPORT_QA_DIR,'improvements.pdf'),output);await writeFile(resolve(process.env.REPORT_QA_DIR,'pdf-expectations.json'),JSON.stringify({required:['明選改善測試','中文改善結尾','SELECTED_EN_END','PLAN_FULL_MARKER','FIRST_PROGRESS_MARKER','SECOND_PROGRESS_MARKER','1,1,1'],forbidden:['UNSELECTED_SECRET'],fullText:[issue.content.en,issue.content.zh],contentColumn:2,ratios:[19,16,28,17,25],minimumBody:15,minimumOther:14}));}
+  if(process.env.REPORT_QA_DIR){await mkdir(process.env.REPORT_QA_DIR,{recursive:true});await writeFile(resolve(process.env.REPORT_QA_DIR,'improvements.pdf'),output);await writeFile(resolve(process.env.REPORT_QA_DIR,'pdf-expectations.json'),JSON.stringify({required:['明選改善測試','中文改善結尾','SELECTED_EN_END','PLAN_FULL_MARKER','FIRST_PROGRESS_MARKER','SECOND_PROGRESS_MARKER','1,1,1'],forbidden:['UNSELECTED_SECRET'],fullText:[issue.content.en,issue.content.zh],contentColumn:0,ratios:[1],layout:'content-bands',minimumBody:15,minimumOther:14}));}
 });
 
 test('inspection PDF preserves frozen inactive definitions and reports missing assessments rather than zero', async()=>{

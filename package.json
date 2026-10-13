@@ -13,6 +13,12 @@
     "qa:layout": "node --experimental-strip-types scripts/verify-layout.mjs",
     "qa:handoff": "node scripts/verify-deployment-handoff.mjs",
     "qa:read-timeout": "node --experimental-strip-types scripts/verify-read-timeout.mjs",
+    "qa:performance": "node --experimental-strip-types scripts/verify-performance.mjs",
+    "qa:performance-native": "node --experimental-strip-types scripts/verify-performance-native.mjs",
+    "qa:performance-races": "node --experimental-strip-types scripts/verify-performance-races.mjs",
+    "qa:report-mounted": "node --experimental-strip-types scripts/verify-report-mounted.mjs",
+    "qa:report-fallback": "node --experimental-strip-types scripts/verify-report-fallback-browser.mjs",
+    "qa:export-person-references": "node --experimental-strip-types scripts/verify-export-person-references.mjs --ui",
     "import:sources": "python3 scripts/import_sources.py"
   },
   "dependencies": {

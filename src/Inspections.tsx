@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react';
-import type { BiText, Finding, FrameworkId, Improvement, Inspection, InspectionResult, PageProps, PlatformState } from './types';
+import { useMemo, useState, useRef, useEffect } from 'react';
+import type { BiText, Finding, FrameworkId, Improvement, Inspection, InspectionResult, PageProps, BrowseState, ReadonlyInspectionSummary } from './types';
 import { bi, hasPermission, inspectionScore, newBase, openIssuesFor } from './domain';
 import { BilingualText, EditorNotice, Empty, Modal, MultiSelect, PageHeading, departmentOptions, peopleOptions } from './ui';
 import { useRecordEditor } from './useRecordEditor';
+import { withHydratedInspection } from './syncState';
 import { improvementValidation } from './Improvements';
 
-export function createInspectionDraft(state: PlatformState, frameworkId: FrameworkId): Inspection {
+export function createInspectionDraft(state: BrowseState, frameworkId: FrameworkId): Inspection {
   const framework = state.frameworks.find(row => row.id === frameworkId && row.active);
   if (!framework) throw new Error('ACTIVE_FRAMEWORK_REQUIRED');
   const chapters = state.chapters.filter(row => row.active && row.frameworkId === frameworkId).sort((a, b) => a.order - b.order);
@@ -32,6 +33,20 @@ export default function Inspections(ctx: PageProps) {
   const [framework, setFramework] = useState<FrameworkId>('TMSA');
   const [filters, setFilters] = useState({ framework: '', from: '', to: '', type: '', query: '' });
   const [view, setView] = useState<Inspection | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
+  const detailGeneration = useRef(0), detailOwner = useRef({api:ctx.api,session:ctx.api.sessionToken,actor:ctx.user.id});
+  if(detailOwner.current.api!==ctx.api||detailOwner.current.session!==ctx.api.sessionToken||detailOwner.current.actor!==ctx.user.id){detailGeneration.current++;detailOwner.current={api:ctx.api,session:ctx.api.sessionToken,actor:ctx.user.id};}
+  useEffect(()=>()=>{detailGeneration.current++;},[]);
+  const hydrate = async (summary: Inspection | ReadonlyInspectionSummary) => {
+    const g=++detailGeneration.current,owner=detailOwner.current;setDetailBusy(true);
+    try {
+      const full=summary.version===0&&'snapshot' in summary?summary:ctx.api.hydrateInspection?await ctx.api.hydrateInspection(summary):(await ctx.api.read()).inspections.find(i=>i.id===summary.id);
+      if(g!==detailGeneration.current||owner!==detailOwner.current||ctx.api.sessionToken!==owner.session)return null;
+      if(!full||full.version!==summary.version)throw Error('STALE_DETAIL');
+      return full;
+    } catch(error){if(g===detailGeneration.current)ctx.notify(error instanceof Error?error.message:String(error),'error');return null;}
+    finally{if(g===detailGeneration.current)setDetailBusy(false);}
+  };
   const [chapterId, setChapterId] = useState('');
   const [validation, setValidation] = useState('');
   const [actionError, setActionError] = useState('');
@@ -43,15 +58,15 @@ export default function Inspections(ctx: PageProps) {
   const canCreateAction = hasPermission(state.settings.rolePermissions, ctx.user, 'createImprovements');
   const visible = useMemo(() => state.inspections.filter(row => (!filters.framework || row.frameworkId === filters.framework) && (!filters.from || row.date >= filters.from) && (!filters.to || row.date <= filters.to) && (!filters.type || row.type === filters.type) && (!filters.query || `${row.organization} ${row.title}`.toLocaleLowerCase().includes(filters.query.trim().toLocaleLowerCase()))).sort((a, b) => b.date.localeCompare(a.date)), [state.inspections, filters]);
   const patch = (value: Partial<Inspection>) => editor.setDraft(old => old ? { ...old, ...value } : old);
-  const scoreText = (inspection: Inspection) => {
+  const scoreText = (inspection: Inspection | ReadonlyInspectionSummary) => {
     const score = inspectionScore(inspection);
     if (score.score === null) return t('未完整記分（不是0分）', 'Not fully graded (not zero)');
     return `${score.score.toFixed(2)} / 4${score.provisional ? ` · ${t('暫估／来源缺口', 'Provisional / source gaps')}` : ''}`;
   };
-  const show = (inspection: Inspection) => { if (editor.draft || actionEditor.draft || editor.busy) return; setView(inspection); setChapterId(inspection.snapshot.chapters[0]?.id || ''); setValidation(''); };
-  const edit = async (inspection: Inspection) => { setView(null); setValidation(''); setChapterId(inspection.snapshot.chapters[0]?.id || ''); await editor.open(inspection); };
+  const show = async (summary: Inspection | ReadonlyInspectionSummary) => { if (editor.draft || actionEditor.draft || editor.busy) return;const inspection=await hydrate(summary);if(!inspection)return;setView(inspection);setChapterId(inspection.snapshot.chapters[0]?.id || '');setValidation(''); };
+  const edit = async (summary: Inspection | ReadonlyInspectionSummary,revision=false) => {const full=await hydrate(summary);if(!full)return;const inspection=revision?reviseInspection(full):full;setView(null);setValidation('');setChapterId(inspection.snapshot.chapters[0]?.id || '');await editor.open(inspection);};
   const create = async () => { try { await edit(createInspectionDraft(state, framework)); } catch (error) { ctx.notify(error instanceof Error ? error.message : String(error), 'error'); } };
-  const closeEditor = () => { if (editor.busy || actionEditor.draft) return; if (editor.isDirty && !window.confirm(t('放棄檢查草稿？取消不會保存。', 'Discard the inspection draft? Cancel does not save.'))) return; setView(null); void editor.cancel(); };
+  const closeEditor = () => { if (editor.busy || actionEditor.draft) return; if (editor.isDirty && !window.confirm(t('放棄檢查草稿？取消不會保存。', 'Discard the inspection draft? Cancel does not save.'))) return; detailGeneration.current++;setView(null); void editor.cancel(); };
   const updateResult = (itemId: string, changes: Partial<InspectionResult>) => {
     if (!editor.draft) return;
     const current = editor.draft.results.find(row => row.itemId === itemId) || { itemId, response: null, conformity: 'none', reviewed: false, observation: { en: '', zh: '' }, recommendation: { en: '', zh: '' } };
@@ -81,7 +96,7 @@ export default function Inspections(ctx: PageProps) {
       await editor.save('finalize');
     } else await editor.save(editor.draft.version === 0 ? 'create' : 'update');
   };
-  const exportPdf = async (inspection: Inspection) => {
+  const exportPdf = async (inspection: Inspection | ReadonlyInspectionSummary) => {
     setExporting(true);
     try {
       const canonical = await ctx.api.authorizeExport({ format: 'pdf', kind: 'inspection', ids: [inspection.id], frameworkId: inspection.frameworkId, snapshotToken: state.snapshotToken, filters: { inspectionId: inspection.id } });
@@ -95,7 +110,8 @@ export default function Inspections(ctx: PageProps) {
   const createAction = async (inspection: Inspection, finding: Finding) => {
     const existing = state.improvements.find(row => row.sourceKey === `${inspection.id}:${finding.id}` || row.inspectionId === inspection.id && row.findingId === finding.id);
     if (existing) { ctx.navigate('improvements', existing.id); return; }
-    const canonical = state.inspections.find(row => row.id === inspection.id);
+    const summary = state.inspections.find(row => row.id === inspection.id);
+    const canonical = summary?await hydrate(summary):null;
     const originalFinding = canonical?.findings.find(row => row.id === finding.id);
     if (!canonical || !originalFinding || editor.isDirty) { ctx.notify(t('請先保存檢查發現，再由已保存來源建立改善。', 'Save the finding first, then create an action from the saved source.'), 'error'); return; }
     try { setActionError(''); await actionEditor.open(improvementFromFinding(canonical, originalFinding)); }
@@ -103,7 +119,7 @@ export default function Inspections(ctx: PageProps) {
   };
   const saveAction = async () => {
     if (!actionEditor.draft) return;
-    const issue = improvementValidation(actionEditor.draft, ctx);
+    const issue = improvementValidation(actionEditor.draft, {...ctx,state:record?withHydratedInspection(state,record):state});
     if (issue) { setActionError(issue); return; }
     if (!window.confirm(t('確認建立此發現的唯一改善記錄？', 'Create the single improvement record for this finding?'))) return;
     await actionEditor.save('create');
@@ -115,8 +131,9 @@ export default function Inspections(ctx: PageProps) {
   return <>
     <PageHeading title={t('歷史檢查記錄', 'Inspection history')} subtitle={t('檢查快照與目前自評獨立。公司TMSA按20分章等權；DRYBMS按30主題四級減權。未完整逐項評定不產生成績。', 'Inspection snapshots are independent of current self-assessment. Company TMSA uses 20 equal-weight chapters; DRYBMS uses 30 themes with four-level weighting. Incomplete grading has no complete score.')} actions={canManage && <><label className="field">{t('新檢查框架', 'New inspection framework')}<select value={framework} onChange={e => setFramework(e.target.value as FrameworkId)}><option>TMSA</option><option>DRYBMS</option></select></label><button className="btn primary" disabled={!!record || editor.busy} onClick={() => void create()}>{t('新增檢查', 'New inspection')}</button></>} />
     <div className="toolbar"><label className="field">{t('框架', 'Framework')}<select value={filters.framework} onChange={e => setFilters({ ...filters, framework: e.target.value })}><option value="">{t('全部', 'All')}</option><option>TMSA</option><option>DRYBMS</option></select></label><label className="field">{t('起日', 'From')}<input type="date" value={filters.from} onChange={e => setFilters({ ...filters, from: e.target.value })} /></label><label className="field">{t('迄日', 'To')}<input type="date" value={filters.to} onChange={e => setFilters({ ...filters, to: e.target.value })} /></label><label className="field">{t('檢查類型', 'Inspection type')}<select value={filters.type} onChange={e => setFilters({ ...filters, type: e.target.value })}><option value="">{t('全部', 'All')}</option><option value="formal">{t('正式', 'Formal')}</option><option value="informal">{t('非正式', 'Informal')}</option></select></label><label className="field">{t('組織／標題關鍵字', 'Organization / title keyword')}<input value={filters.query} onChange={e => setFilters({ ...filters, query: e.target.value })} /></label><button className="btn neutral" onClick={() => setFilters({ framework: '', from: '', to: '', type: '', query: '' })}>{t('清除篩選', 'Clear filters')}</button></div>
+    {detailBusy && <div role="status" className="notice">{t('載入完整檢查快照…','Loading complete inspection snapshot…')}</div>}
     <EditorNotice error={record ? '' : editor.error} lost={editor.lost} />
-    {!visible.length ? <Empty>{t('尚無符合篩選的檢查。', 'No matching inspections.')}</Empty> : <div className="table-wrap"><table className="data-table"><thead><tr><th>{t('檢查／組織', 'Inspection / organization')}</th><th>{t('框架／日期', 'Framework / date')}</th><th>{t('類型／狀態', 'Type / status')}</th><th>{t('快照成績', 'Snapshot score')}</th><th>{t('操作', 'Actions')}</th></tr></thead><tbody>{visible.map(inspection => <tr key={inspection.id}><td><button className="text-button" onClick={() => show(inspection)}>{inspection.title}</button><br />{inspection.organization}{inspection.imported && <small> · {t('來源匯入', 'Imported source')}</small>}{inspection.supersedesId && <small> · {t('修訂副本', 'Revision copy')}</small>}</td><td>{inspection.frameworkId}<br />{inspection.date}</td><td>{inspection.type === 'formal' ? t('正式', 'Formal') : t('非正式', 'Informal')}<br /><span className={`status-pill ${inspection.status}`}>{inspection.status === 'final' ? t('已發布／唯讀', 'Published / read-only') : t('草稿', 'Draft')}</span></td><td>{scoreText(inspection)}</td><td><div className="page-actions"><button className="btn neutral" onClick={() => show(inspection)}>{t('查看', 'View')}</button>{canManage && <button className="btn primary" disabled={!!record || editor.busy} onClick={() => void edit(inspection.status === 'final' ? reviseInspection(inspection) : inspection)}>{inspection.status === 'final' ? t('建立修訂副本', 'Create revision') : t('編輯草稿', 'Edit draft')}</button>}{canExport && <button className="btn neutral" disabled={exporting} onClick={() => void exportPdf(inspection)}>{t('匯出PDF', 'Export PDF')}</button>}</div></td></tr>)}</tbody></table></div>}
+    {!visible.length ? <Empty>{t('尚無符合篩選的檢查。', 'No matching inspections.')}</Empty> : <div className="table-wrap"><table className="data-table"><thead><tr><th>{t('檢查／組織', 'Inspection / organization')}</th><th>{t('框架／日期', 'Framework / date')}</th><th>{t('類型／狀態', 'Type / status')}</th><th>{t('快照成績', 'Snapshot score')}</th><th>{t('操作', 'Actions')}</th></tr></thead><tbody>{visible.map(inspection => <tr key={inspection.id}><td><button className="text-button" onClick={() => show(inspection)}>{inspection.title}</button><br />{inspection.organization}{inspection.imported && <small> · {t('來源匯入', 'Imported source')}</small>}{inspection.supersedesId && <small> · {t('修訂副本', 'Revision copy')}</small>}</td><td>{inspection.frameworkId}<br />{inspection.date}</td><td>{inspection.type === 'formal' ? t('正式', 'Formal') : t('非正式', 'Informal')}<br /><span className={`status-pill ${inspection.status}`}>{inspection.status === 'final' ? t('已發布／唯讀', 'Published / read-only') : t('草稿', 'Draft')}</span></td><td>{scoreText(inspection)}</td><td><div className="page-actions"><button className="btn neutral" onClick={() => show(inspection)}>{t('查看', 'View')}</button>{canManage && <button className="btn primary" disabled={!!record || editor.busy} onClick={() => void edit(inspection, inspection.status === 'final')}>{inspection.status === 'final' ? t('建立修訂副本', 'Create revision') : t('編輯草稿', 'Edit draft')}</button>}{canExport && <button className="btn neutral" disabled={exporting} onClick={() => void exportPdf(inspection)}>{t('匯出PDF', 'Export PDF')}</button>}</div></td></tr>)}</tbody></table></div>}
     {record && <Modal title={readonly ? t('檢查快照（唯讀）', 'Inspection snapshot (read-only)') : t('編輯檢查草稿', 'Edit inspection draft')} wide onClose={closeEditor}>
       <EditorNotice error={editor.error || validation} lost={editor.lost} />
       <div className="notice">{record.frameworkId} · {record.snapshot.scoringVersion} · {record.snapshot.chapters.length} {t('章節', 'chapters')} · {record.snapshot.items.length} Items · {scoreText(record)}{record.supersedesId && <p>{t('取代的原快照（仍保留）', 'Original snapshot (retained)')}: {record.supersedesId}</p>}{record.scoreNote && <BilingualText value={record.scoreNote} />}</div>
@@ -130,7 +147,7 @@ export default function Inspections(ctx: PageProps) {
           </div>{!readonly && !record.imported && <button className="btn neutral" onClick={() => addFinding(item.id)}>{t('加入檢查發現（預設一般觀察，非自動No）', 'Add finding (defaults to general observation, not automatically No)')}</button>}</article>; })}</>}
       <h3>{t('完整原始發現／來源與警示', 'Complete findings / sources and warnings')}</h3>
       {!record.findings.length && <Empty>{t('沒有來源發現；逐項評定仍保存在此快照。', 'No source findings; item grading remains in this snapshot.')}</Empty>}
-      {record.findings.map(finding => { const existing = state.improvements.find(row => row.sourceKey === `${record.id}:${finding.id}` || row.inspectionId === record.id && row.findingId === finding.id); return <article key={finding.id} className="inspection-finding"><h4>{findingLabel(finding.classification)}</h4>{!readonly && !record.imported ? <div className="form-grid"><label className="field">{t('明確分類（不會自動改Y/N）', 'Explicit classification (never changes Y/N automatically)')}<select value={finding.classification} onChange={e => updateFinding(finding.id, { classification: e.target.value as Finding['classification'] })}>{(['finding', 'positive', 'guidance', 'no_finding', 'general'] as const).map(value => <option value={value} key={value}>{findingLabel(value)}</option>)}</select></label><MultiSelect label={t('發現相關Item', 'Finding-related items')} options={record.snapshot.items.map(item => ({ id: item.id, label: `${item.code} · ${bi(item.kpi, ctx.lang)}` }))} selected={finding.itemIds} onChange={itemIds => updateFinding(finding.id, { itemIds })} />{(['observation', 'recommendation'] as const).flatMap(key => (['en', 'zh'] as const).map(lang => <label className="field" key={`${key}-${lang}`}>{key === 'observation' ? t('完整觀察', 'Full observation') : t('完整建議', 'Full recommendation')} · {lang === 'en' ? t('英文', 'English') : t('繁中', 'Traditional Chinese')}<textarea rows={4} value={finding[key][lang]} onChange={e => updateFinding(finding.id, { [key]: { ...finding[key], [lang]: e.target.value } })} /></label>))}</div> : <><BilingualText value={finding.observation} /><BilingualText value={finding.recommendation} /></>}<p>{finding.itemIds.map(id => record.snapshot.items.find(item => item.id === id)?.code || id).join(' / ')}</p>{showSources(finding)}{existing ? <button className="btn neutral" onClick={() => ctx.navigate('improvements', existing.id)}>{t('查看既有改善', 'View existing action')}</button> : canCreateAction && finding.classification === 'finding' && <button className="btn primary" disabled={!!actionEditor.draft || actionEditor.busy || editor.isDirty || !finding.itemIds.length || !state.inspections.find(row => row.id === record.id)?.findings.some(row => row.id === finding.id)} onClick={() => void createAction(record, finding)}>{t('建立改善（先確認再保存）', 'Create action (confirm before saving)')}</button>}</article>; })}
+      {record.findings.map(finding => { const existing = state.improvements.find(row => row.sourceKey === `${record.id}:${finding.id}` || row.inspectionId === record.id && row.findingId === finding.id); return <article key={finding.id} className="inspection-finding"><h4>{findingLabel(finding.classification)}</h4>{!readonly && !record.imported ? <div className="form-grid"><label className="field">{t('明確分類（不會自動改Y/N）', 'Explicit classification (never changes Y/N automatically)')}<select value={finding.classification} onChange={e => updateFinding(finding.id, { classification: e.target.value as Finding['classification'] })}>{(['finding', 'positive', 'guidance', 'no_finding', 'general'] as const).map(value => <option value={value} key={value}>{findingLabel(value)}</option>)}</select></label><MultiSelect label={t('發現相關Item', 'Finding-related items')} options={record.snapshot.items.map(item => ({ id: item.id, label: `${item.code} · ${bi(item.kpi, ctx.lang)}` }))} selected={finding.itemIds} onChange={itemIds => updateFinding(finding.id, { itemIds })} />{(['observation', 'recommendation'] as const).flatMap(key => (['en', 'zh'] as const).map(lang => <label className="field" key={`${key}-${lang}`}>{key === 'observation' ? t('完整觀察', 'Full observation') : t('完整建議', 'Full recommendation')} · {lang === 'en' ? t('英文', 'English') : t('繁中', 'Traditional Chinese')}<textarea rows={4} value={finding[key][lang]} onChange={e => updateFinding(finding.id, { [key]: { ...finding[key], [lang]: e.target.value } })} /></label>))}</div> : <><BilingualText value={finding.observation} /><BilingualText value={finding.recommendation} /></>}<p>{finding.itemIds.map(id => record.snapshot.items.find(item => item.id === id)?.code || id).join(' / ')}</p>{showSources(finding)}{existing ? <button className="btn neutral" onClick={() => ctx.navigate('improvements', existing.id)}>{t('查看既有改善', 'View existing action')}</button> : canCreateAction && finding.classification === 'finding' && <button className="btn primary" disabled={!!actionEditor.draft || actionEditor.busy || editor.isDirty || !finding.itemIds.length || !record.findings.some(row => row.id === finding.id)} onClick={() => void createAction(record, finding)}>{t('建立改善（先確認再保存）', 'Create action (confirm before saving)')}</button>}</article>; })}
       <div className="page-actions"><button className="btn neutral" disabled={editor.busy || !!actionEditor.draft} onClick={closeEditor}>{readonly ? t('關閉', 'Close') : t('取消／放棄草稿', 'Cancel / discard draft')}</button>{!readonly && <><button className="btn primary" disabled={!editor.canSave} onClick={() => void save(false)}>{t('保存草稿', 'Save draft')}</button><button className="btn success" disabled={!editor.canSave} onClick={() => void save(true)}>{t('發布唯讀快照', 'Publish read-only snapshot')}</button></>}{readonly && canExport && <button className="btn neutral" disabled={exporting} onClick={() => void exportPdf(record)}>{t('匯出PDF', 'Export PDF')}</button>}</div>
     </Modal>}
     {actionEditor.draft && <Modal title={t('確認由檢查發現建立改善', 'Confirm action from inspection finding')} onClose={() => { if (!actionEditor.busy && (!actionEditor.isDirty || window.confirm(t('放棄改善草稿？', 'Discard this action draft?')))) void actionEditor.cancel(); }}>

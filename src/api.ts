@@ -1,4 +1,5 @@
-import type {ApiClient, AuditQuery, AuditLog, BaseEntity, ExportRequest, Lease, Person, RosterPerson, PlatformState, RecordKind, RpcResult, SaveIntent, SeedBundle, SupabaseConfig, SystemSettings} from './types';
+import type {ApiClient, AuditQuery, AuditLog, BaseEntity, ExportRequest, Lease, Person, RosterPerson, PlatformState, BrowseState, Inspection, ReadonlyInspectionSummary, RecordKind, RpcResult, SaveIntent, SeedBundle, SupabaseConfig, SystemSettings} from './types';
+import {collectionFor,mergeAcknowledgement,mergeSync,inspectionSummary,type SyncEnvelope} from './syncState.ts';
 
 const SESSION_KEY='fpmc-compliance-session';
 const CLIENT_KEY='fpmc-compliance-client-id';
@@ -20,6 +21,10 @@ export class RpcError extends Error {
 class SupabaseApi implements ApiClient {
   readonly clientId:string; readonly config:SupabaseConfig;
   user:Person|null=null;sessionToken='';private epoch=0;private settings:SystemSettings|null=null;private leaseContexts=new Map<string,{kind:RecordKind;id:string;intent:SaveIntent}>();
+  private cache:BrowseState|null=null;private cacheContext='';private metadataToken='';private ackSerial=0;private syncFlight:{context:string;promise:Promise<BrowseState>}|null=null;
+  private detailFlights=new Map<string,Promise<Inspection>>();
+  private context(){return `${this.epoch}:${this.sessionToken}:${this.user?.id??''}:${this.config.url}:${this.config.anonKey}`;}
+  cachedState(){return this.cacheContext===this.context()&&this.cache?structuredClone(this.cache):null;}
   constructor(config:SupabaseConfig){
     this.config={url:config.url.replace(/\/$/,''),anonKey:config.anonKey};
     const s=storage();this.clientId=s?.getItem(CLIENT_KEY)||id();s?.setItem(CLIENT_KEY,this.clientId);
@@ -28,16 +33,16 @@ class SupabaseApi implements ApiClient {
     }catch{s?.removeItem(SESSION_KEY);}
   }
   private publishSession(){const s=storage();if(this.user&&this.sessionToken)s?.setItem(SESSION_KEY,JSON.stringify({user:this.user,sessionToken:this.sessionToken}));else s?.removeItem(SESSION_KEY);}
-  private invalidate(){this.epoch++;this.user=null;this.sessionToken='';this.publishSession();}
-  async rpc<T=unknown>(action:string,payload:unknown={}):Promise<T>{
+  private invalidate(){this.epoch++;this.user=null;this.sessionToken='';this.cache=null;this.cacheContext='';this.publishSession();}
+  async rpc<T=unknown>(action:string,payload:unknown={},performanceRoute=false):Promise<T>{
     if(!this.config.url || !this.config.anonKey)throw new RpcError('CONFIG_REQUIRED','尚未配置此平台自己的 Supabase。');
-    const body=JSON.stringify({p_action:action,p_session:this.sessionToken,p_client_id:this.clientId,p_payload:payload,...(action==='import_seed'?{p_import_mode:true}:action==='read'?{p_import_mode:false,p_read_mode:true}:{})});
+    const body=JSON.stringify({p_action:action,p_session:this.sessionToken,p_client_id:this.clientId,p_payload:payload,...(performanceRoute?{p_sync_mode:'performance-v1'}:action==='import_seed'?{p_import_mode:true}:action==='read'?{p_import_mode:false,p_read_mode:true}:{})});
     const initiatedSession=this.sessionToken,initiatedEpoch=this.epoch;
     const replaySafe=['save','role_permissions'].includes(action)&&typeof payload==='object'&&payload!==null&&typeof (payload as {operationId?:unknown}).operationId==='string';
     // Initial source upload can exceed the ordinary request window before SQL starts.
     // The full snapshot also needs a bounded transfer/parse window after SQL.
     // Neither exception changes ordinary writer deadlines or replay policy.
-    const requestDeadlineMs=action==='import_seed'?180000:action==='read'?60000:20000;
+    const requestDeadlineMs=action==='import_seed'?180000:action==='read'||action==='sync'?60000:20000;
     for(let attempt=0;attempt<(replaySafe?2:1);attempt++){
       const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),requestDeadlineMs);
       let result:RpcResult<T>;
@@ -87,6 +92,45 @@ class SupabaseApi implements ApiClient {
     if(this.sessionToken!==session||this.epoch!==epoch)throw new RpcError('STALE_SESSION','登入已切換，舊資料回覆未套用。');
     this.user=user;this.settings=structuredClone(state.settings);this.publishSession();return state;
   }
+  sync():Promise<BrowseState>{
+    const context=this.context();
+    if(this.syncFlight?.context===context)return this.syncFlight.promise;
+    const promise=(async()=>{
+      for(let attempt=0;attempt<4;attempt++){
+        const serial=this.ackSerial,base=this.cacheContext===context?this.cache:null,versions:Record<string,number>={};
+        if(base)for(const [kind,key] of Object.entries(collectionFor)){const rows=key==='settings'?[base.settings]:base[key as Exclude<keyof PlatformState,'cycles'|'provenance'>] as BaseEntity[];for(const row of rows)versions[`${kind}:${row.id}`]=row.version;}
+        const envelope=await this.rpc<SyncEnvelope>('sync',{versions,metadataToken:base?this.metadataToken:''},true);
+        if(context!==this.context())throw new RpcError('STALE_SESSION');
+        // A read admitted before a local committed ACK cannot certify that ACK's token.
+        if(serial!==this.ackSerial)continue;
+        if(base&&!('historyMode' in base)&&envelope.metadataToken&&envelope.metadataToken!==this.metadataToken&&(!Array.isArray(envelope.cycles)||!Array.isArray(envelope.provenance)))throw new RpcError('SYNC_METADATA_INCOMPLETE');
+        const next=mergeSync(base,envelope);this.cache=next;this.cacheContext=context;this.metadataToken=envelope.metadataToken??'';this.user=envelope.user;this.settings=structuredClone(next.settings);this.publishSession();return structuredClone(next);
+      }
+      throw new RpcError('SYNC_BUSY','保存已確認；同步尚未取得穩定版本。');
+    })();
+    const flight={context,promise};this.syncFlight=flight;
+    void promise.finally(()=>{if(this.syncFlight===flight)this.syncFlight=null;}).catch(()=>{});
+    return promise;
+  }
+  hydrateInspection(summary:ReadonlyInspectionSummary|Inspection):Promise<Inspection>{
+    const context=this.context(),metadata=this.metadataToken,key=`${context}:${metadata}:${summary.id}:${summary.version}`;
+    const existing=this.detailFlights.get(key);if(existing)return existing;
+    const promise=(async()=>{
+      const result=await this.rpc<{inspection:Inspection;metadataToken:string}>('inspection_detail',{id:summary.id,version:summary.version},true);
+      if(context!==this.context()||metadata!==this.metadataToken)throw new RpcError('STALE_DETAIL');
+      const current=this.cachedState()?.inspections.find(i=>i.id===summary.id);
+      if(current&&current.version!==summary.version)throw new RpcError('STALE_DETAIL');
+      const i=result.inspection;
+      if(result.metadataToken!==metadata&&metadata||!i||i.id!==summary.id||i.version!==summary.version||!i.snapshot?.framework||!Array.isArray(i.snapshot.items)||!Array.isArray(i.snapshot.chapters)||!Array.isArray(i.results)||!Array.isArray(i.findings))throw new RpcError('DETAIL_COVERAGE_INVALID');
+      if('detail' in summary){
+        const projected=inspectionSummary(i);
+        const canonical=(v:unknown):string=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))):x);
+        if(canonical(projected)!==canonical(summary))throw new RpcError('DETAIL_SUMMARY_MISMATCH');
+      }
+      return structuredClone(i);
+    })();
+    this.detailFlights.set(key,promise);void promise.finally(()=>{if(this.detailFlights.get(key)===promise)this.detailFlights.delete(key);}).catch(()=>{});return promise;
+  }
   async claim(kind:RecordKind,id:string,intent:SaveIntent='update'){const lease=await this.rpc<Lease>('claim',{kind,id,intent});this.leaseContexts.set(lease.token,{kind,id,intent});return lease;}
   private leasePayload(lease:Lease){const context=this.leaseContexts.get(lease.token);if(context)return {...context,leaseToken:lease.token};const at=lease.resourceKey.indexOf(':');if(at<1)throw new RpcError('INVALID_RESOURCE');return {kind:lease.resourceKey.slice(0,at),id:lease.resourceKey.slice(at+1),leaseToken:lease.token};}
   renew(lease:Lease){return this.rpc<Lease>('renew',this.leasePayload(lease));}
@@ -101,12 +145,16 @@ class SupabaseApi implements ApiClient {
       const submitted=record as unknown as SystemSettings;
       if(JSON.stringify(submitted.rolePermissions)!==JSON.stringify(this.settings.rolePermissions))action='role_permissions';
     }
-    const canonical=await this.rpc<T>(action,{kind,record,expectedVersion,leaseToken:lease.token,intent,operationId});
+    const acknowledged=await this.rpc<{record:T;related:{kind:RecordKind;body:BaseEntity}[]}|T>(action,{kind,record,expectedVersion,leaseToken:lease.token,intent,operationId},true);
+    const canonical=('record' in acknowledged?acknowledged.record:acknowledged) as T;
+    const related='record' in acknowledged?acknowledged.related:[];
+    this.ackSerial++;
+    if(this.cache&&this.cacheContext===this.context()){this.cache=mergeAcknowledgement(this.cache,kind,canonical);for(const row of related)this.cache=mergeAcknowledgement(this.cache,row.kind,row.body);}
     if(kind==='settings')this.settings=structuredClone(canonical as unknown as SystemSettings);
     return canonical;
   }
   queryAudit(query:AuditQuery){return this.rpc<{rows:AuditLog[];total:number}>('audit_query',query);}
-  authorizeExport(request:ExportRequest){return this.rpc<PlatformState>('export_authorize',request);}
+  authorizeExport(request:ExportRequest){return this.rpc<PlatformState>('export_authorize',request,request.snapshotToken.startsWith('performance-v1:'));}
   importSeed(seed:SeedBundle){return this.rpc<{imported:number}>('import_seed',{seed,operationId:id()});}
 }
 export type SeedImportOutcome = {status:'confirmed';imported:number}|{status:'committed_readback_pending';imported:number;error:unknown};

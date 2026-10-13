@@ -25,6 +25,15 @@ export interface SystemSettings extends BaseEntity { departments:Department[]; r
 export interface DryScore extends BaseEntity { chapterId:string; levels:[number|null,number|null,number|null,number|null]; note:string }
 export interface AuditLog { id:string; at:string; actorId:string; actorName:string; action:string; kind:string; entityId:string; itemCodes:string[]; summary:string; before?:unknown; after?:unknown; operationId:string }
 export interface PlatformState { frameworks:Framework[]; chapters:Chapter[]; items:StandardItem[]; assessments:Assessment[]; improvements:Improvement[]; inspections:Inspection[]; people:Person[]; settings:SystemSettings; dryScores:DryScore[]; auditLogs:AuditLog[]; cycles:unknown[]; provenance:unknown[]; serverTime:string; snapshotToken:string }
+/** Exact frozen fields consumed by the shared scoring core; never a full snapshot. */
+export type ScoreItem = Pick<StandardItem,'id'|'chapterId'|'code'|'level'|'active'|'sourceGap'|'sourceGapResolved'>;
+export type ScoreChapter = Pick<Chapter,'id'|'frameworkId'|'active'|'order'>;
+export interface FrozenInspectionScoring {frameworkId:FrameworkId;snapshot:{chapters:ScoreChapter[];items:ScoreItem[]};results:Pick<InspectionResult,'itemId'|'response'|'conformity'|'reviewed'>[];dryLevels?:Inspection['dryLevels']}
+export interface ReadonlyInspectionSummary extends Pick<Inspection,'id'|'version'|'createdAt'|'updatedAt'|'updatedBy'|'frameworkId'|'title'|'organization'|'date'|'type'|'status'|'supersedesId'|'imported'> {readonly detail:'summary';readonly scoring:FrozenInspectionScoring;readonly counts:{chapters:number;items:number;results:number;findings:number}}
+/** Live data has explicit summary coverage, not empty pretend-complete metadata. */
+export interface LiveView extends Omit<PlatformState,'inspections'|'cycles'|'provenance'> {inspections:(ReadonlyInspectionSummary|Inspection)[];controlSummary:{cycles:number;provenance:number};historyMode:'readonly-summary-v1'}
+export type FullHydratedInspection = Inspection;
+export type BrowseState = PlatformState|LiveView;
 export interface SeedBundle { schemaVersion:1; frameworks:Framework[];chapters:Chapter[];items:StandardItem[];assessments:Assessment[];improvements:Improvement[];inspections:Inspection[];dryScores:DryScore[];cycles:unknown[];provenance:unknown[];sourceManifest:unknown[];importNote:BiText }
 export type RecordKind = 'framework'|'chapter'|'item'|'assessment'|'improvement'|'inspection'|'person'|'dryScore'|'settings';
 export type SaveIntent = 'create'|'update'|'close'|'reopen'|'finalize'|'archive'|'activate';
@@ -41,10 +50,13 @@ export interface ApiClient {
  roster(gateToken:string):Promise<RosterPerson[]>;
  login(gateToken:string,personId:string,passwordHash:string):Promise<{user:Person;sessionToken:string}>;
  logout():Promise<void>; read():Promise<PlatformState>;
+ /** Opt-in complete authoritative cache; legacy read retains its original route. */
+ sync?():Promise<BrowseState>; cachedState?():BrowseState|null;
+ hydrateInspection?(summary:ReadonlyInspectionSummary|Inspection):Promise<FullHydratedInspection>;
  claim(kind:RecordKind,id:string,intent?:SaveIntent):Promise<Lease>; renew(lease:Lease):Promise<Lease>; release(lease:Lease):Promise<void>;
  save<T extends BaseEntity>(kind:RecordKind,record:T,expectedVersion:number,lease:Lease,intent?:SaveIntent,operationId?:string):Promise<T>;
  queryAudit(query:AuditQuery):Promise<{rows:AuditLog[];total:number}>;
  authorizeExport(request:ExportRequest):Promise<PlatformState>;
  importSeed(seed:SeedBundle):Promise<{imported:number}>;
 }
-export interface PageProps { state:PlatformState; user:Person; api:ApiClient; lang:Language; t:(zh:string,en:string)=>string; refresh:()=>Promise<void>; notify:(message:string,kind?:'success'|'error'|'info')=>void; navigate:(page:Page,itemId?:string)=>void }
+export interface PageProps { state:BrowseState; user:Person; api:ApiClient; lang:Language; t:(zh:string,en:string)=>string; refresh:()=>Promise<void>; acknowledge?:(kind:RecordKind,record:BaseEntity)=>void; notify:(message:string,kind?:'success'|'error'|'info')=>void; navigate:(page:Page,itemId?:string)=>void }

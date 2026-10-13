@@ -1,0 +1,7 @@
+# PDF supplementary fonts
+
+Official Google Fonts repository commit `66928797f271fed5ee428544e7229685e2d90127`; fixed raw source URLs and source/output SHA-256 hashes are recorded in `report-fallback-provenance.json`. Both source fonts are SIL Open Font License 1.1; complete licenses accompany each transformed font.
+
+`ReportSupplement-Regular.ttf` provides genuine U+2022 BULLET, U+2082 SUBSCRIPT TWO, U+2011 NON-BREAKING HYPHEN and U+00AD SOFT HYPHEN (source codepoints, not substitutions). `ReportSymbols-Regular.ttf` supplies U+25C4, U+25BA, U+2794, U+27A2 and U+279C. Names are changed to avoid confusion with unmodified upstream families. Original main TC font and its CJK coverage are unchanged. Only PDF rendering substitutes the three approved source controls U+0095/U+0099/U+009C with U+2022.
+
+Reproduction: download the pinned originals and OFL files into family directories, create the input provenance receipt using their exact SHA-256 values, then run `uv run --with fonttools==4.60.1 python scripts/build-report-fallback-fonts.py --upstream <directory>`. The script fixes the variable font at regular weight/normal width, keeps the exact listed Unicode cmap entries with real glyph outlines, renames the family, and pads glyf to 4 bytes for fontkit subset loca compatibility. The production browser loads these small assets only on PDF export; Node callers inject `fallbackFontBytes` explicitly (no relative fetch).

@@ -1,0 +1,75 @@
+[
+  {
+    "family": "notosans",
+    "file": "NotoSans[wdth,wght].ttf",
+    "url": "https://raw.githubusercontent.com/google/fonts/66928797f271fed5ee428544e7229685e2d90127/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf",
+    "commit": "66928797f271fed5ee428544e7229685e2d90127",
+    "sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d",
+    "licenseSha256": "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a",
+    "coverage": {
+      "0x2022": "bullet",
+      "0xb7": "periodcentered",
+      "0x2082": "uni2082",
+      "0x25c4": null,
+      "0x25ba": null,
+      "0x2794": null,
+      "0x27a2": null,
+      "0x279c": null
+    },
+    "output": "ReportSupplement-Regular.ttf",
+    "outputSha256": "feb54ebf82a179a2b8c87ec3fb6a884c48ca559302b944f420e5f05c0c9c9864",
+    "outputBytes": 1532,
+    "codepoints": [
+      "U+2022",
+      "U+2082",
+      "U+2011",
+      "U+00AD"
+    ],
+    "transforms": [
+      "instantiate wght=400 wdth=100 where variable",
+      "subset exact supplement codepoints with real outlines",
+      "rename family to ReportSupplement/ReportSymbols",
+      "glyf padding=4; assert loca four-byte alignment"
+    ],
+    "fontTools": "4.60.1",
+    "outputLicenseSha256": "e2e177a32561584d4fc13aaa3cd8e53758a12910f013fe9ca125419111722029",
+    "licenseTransform": "trailing line whitespace only; legal text unchanged"
+  },
+  {
+    "family": "notosanssymbols2",
+    "file": "NotoSansSymbols2-Regular.ttf",
+    "url": "https://raw.githubusercontent.com/google/fonts/66928797f271fed5ee428544e7229685e2d90127/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf",
+    "commit": "66928797f271fed5ee428544e7229685e2d90127",
+    "sha256": "7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21",
+    "licenseSha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0",
+    "coverage": {
+      "0x2022": "bullet",
+      "0xb7": "periodcentered",
+      "0x2082": null,
+      "0x25c4": "triaglf",
+      "0x25ba": "triagrt",
+      "0x2794": "uni2794",
+      "0x27a2": "uni27A2",
+      "0x279c": "uni279C"
+    },
+    "output": "ReportSymbols-Regular.ttf",
+    "outputSha256": "a372a291410cce4b7e4922426e9315cd78ddafba02536b3b74deec3bfb242912",
+    "outputBytes": 5424,
+    "codepoints": [
+      "U+25C4",
+      "U+25BA",
+      "U+2794",
+      "U+27A2",
+      "U+279C"
+    ],
+    "transforms": [
+      "instantiate wght=400 wdth=100 where variable",
+      "subset exact supplement codepoints with real outlines",
+      "rename family to ReportSupplement/ReportSymbols",
+      "glyf padding=4; assert loca four-byte alignment"
+    ],
+    "fontTools": "4.60.1",
+    "outputLicenseSha256": "e87c2ed7ff174c637d55fa381939ebb96f43f0415ad94605a37589228f4cbf4f",
+    "licenseTransform": "trailing line whitespace only; legal text unchanged"
+  }
+]

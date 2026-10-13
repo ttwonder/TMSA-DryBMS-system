@@ -1,11 +1,14 @@
-import ExcelJS from 'exceljs';
-import JSZip from 'jszip';
-import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
-import fontkit from '@pdf-lib/fontkit';
-import type { Assessment, BiText, Chapter, ExportRequest, FrameworkId, Improvement, Inspection, Language, PageProps, PlatformState, SourceLocator, StandardItem } from './types.ts';
+import type ExcelJS from 'exceljs';
+import type { PDFDocument, PDFFont, PDFPage } from 'pdf-lib';
+// Heavy libraries execute only when an export is requested.
+const loadExcel = async () => (await import('exceljs')).default;
+const loadZip = async () => (await import('jszip')).default;
+let rgb:typeof import('pdf-lib')['rgb'];
+import type { Assessment, BiText, Chapter, ExportRequest, FrameworkId, Improvement, Inspection, Language, PageProps, PlatformState, BrowseState, SourceLocator, StandardItem } from './types.ts';
 import { assessmentFor, departmentsLabel, filteredImprovements, frameworkScore, hasPermission, inspectionScore, openIssuesFor, peopleLabel, type Filters } from './domain.ts';
 
-export interface ReportBuildOptions { templateBytes?:Uint8Array; fontBytes?:Uint8Array; }
+export interface ReportFieldLine {fieldId:string;page:number;x:number;baseline:number;width:number;size:number}
+export interface ReportBuildOptions { templateBytes?:Uint8Array; fontBytes?:Uint8Array; fallbackFontBytes?:Uint8Array[]; onFieldLine?:(line:ReportFieldLine)=>void; }
 const assetUrl = (path:string) => `${(import.meta as ImportMeta & {env?:{BASE_URL?:string}}).env?.BASE_URL ?? '/'}${path}`;
 async function assetBytes(path:string):Promise<Uint8Array> {
   const response=await fetch(assetUrl(path));
@@ -19,14 +22,14 @@ export function sourceLabel(source:SourceLocator):string {
 }
 const sourcesText=(sources:SourceLocator[])=>sources.map(sourceLabel).join('\n');
 const unique=(ids:string[])=>[...new Set(ids)];
-function selectedChapters(state:PlatformState,frameworkId:FrameworkId,ids?:string[]):Chapter[] {
+function selectedChapters(state:BrowseState,frameworkId:FrameworkId,ids?:string[]):Chapter[] {
   if(ids && (!ids.length || unique(ids).length!==ids.length)) throw new Error('Choose a nonempty, unique chapter selection / 請明選有效分章');
   const chapters=state.chapters.filter(c=>c.active&&c.frameworkId===frameworkId&&(!ids||ids.includes(c.id))).sort((a,b)=>a.order-b.order||a.code.localeCompare(b.code));
   if(!chapters.length||ids?.some(id=>!chapters.some(c=>c.id===id))) throw new Error('Selected chapter is unavailable / 選取分章已停用或不存在');
   if(!state.frameworks.some(f=>f.id===frameworkId&&f.active)) throw new Error('Framework unavailable / 框架不可用');
   return chapters;
 }
-export function selectedImprovementRows(state:PlatformState,ids:string[],filters?:Filters):Improvement[] {
+export function selectedImprovementRows(state:BrowseState,ids:string[],filters?:Filters):Improvement[] {
   if(!ids.length||unique(ids).length!==ids.length) throw new Error('Explicit nonempty improvement selection required / 請明選改善項目');
   const eligible=filters?filteredImprovements(state,filters):state.improvements;
   const rows=ids.map(id=>eligible.find(row=>row.id===id));
@@ -99,6 +102,7 @@ function tableBorder(cell:ExcelJS.Cell) {
   cell.border={...previous,top:previous.top?.style?previous.top:fallbackSide,bottom:previous.bottom?.style?previous.bottom:fallbackSide,left:previous.left?.style?previous.left:fallbackSide,right:previous.right?.style?previous.right:fallbackSide};
 }
 export async function ensureNativeExcelCompatibility(bytes:Uint8Array):Promise<Uint8Array> {
+  const JSZip=await loadZip();
   const zip=await JSZip.loadAsync(bytes);
   for(const [path,file] of Object.entries(zip.files)) {
     if(!/^xl\/worksheets\/sheet\d+\.xml$/.test(path))continue;
@@ -131,6 +135,7 @@ function responseText(a:Pick<Assessment,'response'>|undefined){return a?.respons
 /** Real OOXML; TMSA always starts from the sanitized 20-sheet source-style asset. */
 export async function buildFrameworkExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
   const chapters=selectedChapters(state,frameworkId,chapterIds);
+  const [ExcelJS,JSZip]=await Promise.all([loadExcel(),loadZip()]);
   const template=new ExcelJS.Workbook();
   const templateBytes=options.templateBytes??await assetBytes('templates/tmsa-template.xlsx');
   const templateArchive=await JSZip.loadAsync(templateBytes);
@@ -232,38 +237,89 @@ const PAGE_WIDTH=1190.55,PAGE_HEIGHT=841.89,MARGIN=34,BOTTOM=64;
 class TextPdf {
   readonly document:PDFDocument;readonly font:PDFFont;readonly title:string;readonly lang:Language;readonly stamp:string;
   private page!:PDFPage;private y=0;private readonly glyphs:Set<number>;
-  private constructor(document:PDFDocument,font:PDFFont,title:string,lang:Language,stamp:string){this.document=document;this.font=font;this.title=title;this.lang=lang;this.stamp=stamp;this.glyphs=new Set(font.getCharacterSet());this.newPage();}
+  private readonly fallbacks:{font:PDFFont;glyphs:Set<number>}[];
+  private readonly fontForCodepoint=new Map<number,PDFFont>();
+  // Exact shaping results, bounded per document; no additive glyph approximation.
+  private readonly measurements=new Map<string,number>();
+  private readonly glyphWidths=new Map<string,number>();
+  private blockIndex=0;
+  private readonly onFieldLine:ReportBuildOptions['onFieldLine'];
+  private constructor(document:PDFDocument,font:PDFFont,fallbacks:PDFFont[],title:string,lang:Language,stamp:string,onFieldLine:ReportBuildOptions['onFieldLine']){this.document=document;this.font=font;this.title=title;this.lang=lang;this.stamp=stamp;this.glyphs=new Set(font.getCharacterSet());this.fallbacks=fallbacks.map(font=>({font,glyphs:new Set(font.getCharacterSet())}));this.onFieldLine=onFieldLine;this.newPage();}
   static async create(title:string,lang:Language,state:PlatformState,options:ReportBuildOptions) {
-    const document=await PDFDocument.create();document.registerFontkit(fontkit);
+    const [library,{default:fontkit}]=await Promise.all([import('pdf-lib'),import('@pdf-lib/fontkit')]);
+    rgb=library.rgb;
+    const document=await library.PDFDocument.create();
+    document.registerFontkit({create(bytes){
+      const font=fontkit.create(bytes),layout=font.layout.bind(font);
+      font.layout=(text,features)=>{
+        const result=layout(text,features);
+        // fontkit hides soft hyphen as a space/.notdef. This isolated source glyph
+        // needs its own Unicode identity and the same real advance in measure/draw.
+        if(text==='\u00ad'){
+          const glyph=font.glyphForCodePoint(0x00ad);
+          result.glyphs=[glyph];result.positions=[{xAdvance:glyph.advanceWidth,yAdvance:0,xOffset:0,yOffset:0}];
+        }
+        return result;
+      };
+      return font;
+    }});
     const font=await document.embedFont(options.fontBytes??await assetBytes('fonts/NotoSansTC-Regular.ttf'),{subset:true});
-    document.setTitle(title);document.setAuthor('TMSA / DRYBMS Platform');document.setSubject('Authorized immutable snapshot; selectable text');
-    return new TextPdf(document,font,title,lang,state.serverTime);
+    // Browser-only lazy assets; fontBytes-only Node callers never fetch relative URLs.
+    const fallbackBytes=options.fallbackFontBytes??(typeof window!=='undefined'?await Promise.all(['ReportSupplement-Regular.ttf','ReportSymbols-Regular.ttf'].map(name=>assetBytes('fonts/'+name))):[]);
+    const fallbacks=await Promise.all(fallbackBytes.map(bytes=>document.embedFont(bytes,{subset:true})));
+    document.setTitle(title);document.setAuthor('TMSA / DRYBMS Platform');document.setSubject(`Authorized immutable snapshot; selectable text; snapshotToken=${state.snapshotToken}`);
+    return new TextPdf(document,font,fallbacks,title,lang,state.serverTime,options.onFieldLine);
   }
   private safe(text:string):string {
-    const value=text.replace(/\r\n?/g,'\n').replace(/\t/g,'    ');
-    for(const char of value)if(char!=='\n'&&!this.glyphs.has(char.codePointAt(0)!))throw new Error(`Report font has no glyph for U+${char.codePointAt(0)!.toString(16).toUpperCase()} / 字型不支援此字元，已停止以免遺失內容`);
+    const value=text.replace(/\r\n?/g,'\n').replace(/\t/g,'    ').replace(/[\u0095\u0099\u009C]/g,'•');
+    for(const char of value)if(char!=='\n')this.actualFont(char.codePointAt(0)!);
     return value;
+  }
+  private actualFont(codepoint:number):PDFFont {
+    const cached=this.fontForCodepoint.get(codepoint);if(cached)return cached;
+    // TC aliases bullet and source hyphens to other codepoints; preserve their own cmap/glyph identities.
+    const font=![0x2022,0x2011,0x00ad].includes(codepoint)&&this.glyphs.has(codepoint)?this.font:this.fallbacks.find(f=>f.glyphs.has(codepoint))?.font;
+    if(!font)throw new Error(`Report font has no glyph for U+${codepoint.toString(16).toUpperCase()} / 字型不支援此字元，請注入 PDF fallbackFontBytes，已停止以免遺失內容`);
+    this.fontForCodepoint.set(codepoint,font);return font;
+  }
+  private runs(text:string):{font:PDFFont;text:string}[] {
+    const runs:{font:PDFFont;text:string}[]=[];
+    for(const char of text){const font=this.actualFont(char.codePointAt(0)!),last=runs.at(-1);if(last?.font===font&&char!=='\u00ad'&&last.text!=='\u00ad')last.text+=char;else runs.push({font,text:char});}
+    return runs;
+  }
+  private textWidth(text:string,size:number):number {
+    const key=`${size}:${text}`,cached=this.measurements.get(key);
+    if(cached!==undefined){this.measurements.delete(key);this.measurements.set(key,cached);return cached;}
+    const width=this.runs(text).reduce((sum,run)=>sum+run.font.widthOfTextAtSize(run.text,size),0);
+    if(this.measurements.size>=8192)this.measurements.delete(this.measurements.keys().next().value!);
+    this.measurements.set(key,width);return width;
   }
   private wrap(text:string,width:number,size=PDF_BODY):string[] {
     const result:string[]=[];
     for(const paragraph of this.safe(text).split('\n')) {
-      let line='';
-      for(const char of Array.from(paragraph)) {
-        if(line&&this.font.widthOfTextAtSize(line+char,size)>width) {
-          const space=line.lastIndexOf(' ');
-          // Prefer word boundaries for English; CJK and long tokens break by glyph.
-          if(space>line.length/3){result.push(line.slice(0,space+1));line=line.slice(space+1);}else{result.push(line);line='';}
-          while(line&&this.font.widthOfTextAtSize(line+char,size)>width){result.push(line);line='';}
-        }
-        if(this.font.widthOfTextAtSize(char,size)>width)throw new Error('PDF column cannot fit one glyph');
-        line+=char;
+      const chars=Array.from(paragraph);
+      for(const char of new Set(chars)){const key=`${size}:${char}`;let advance=this.glyphWidths.get(key);if(advance===undefined){advance=this.textWidth(char,size);this.glyphWidths.set(key,advance);}if(advance>width)throw new Error('PDF column cannot fit one glyph');}
+      if(!chars.length){result.push('');continue;}
+      let offset=0;
+      while(offset<chars.length){
+        const remaining=chars.length-offset,measure=(count:number)=>this.textWidth(chars.slice(offset,offset+count).join(''),size);
+        let fit=1,upper=Math.min(2,remaining);
+        // Exponential bracketing + exact shaped-prefix search, not summed advances.
+        while(upper<remaining&&measure(upper)<=width){fit=upper;upper=Math.min(upper*2,remaining);}
+        if(measure(upper)<=width)fit=upper;
+        else{let lo=fit,hi=upper;while(hi-lo>1){const mid=Math.floor((lo+hi)/2);if(measure(mid)<=width)lo=mid;else hi=mid;}fit=lo;}
+        let line=chars.slice(offset,offset+fit).join(''),take=fit;
+        if(fit<remaining){const space=line.lastIndexOf(' ');if(space>line.length/3){line=line.slice(0,space+1);take=Array.from(line).length;}}
+        result.push(line);offset+=take;
       }
-      result.push(line);
     }
     return result;
   }
   private draw(text:string,x:number,y:number,size=PDF_BODY,color=rgb(.12,.17,.22)) {
-    if(text)this.page.drawText(this.safe(text),{x,y,font:this.font,size,color});
+    for(const run of this.runs(this.safe(text))){this.page.drawText(run.text,{x,y,font:run.font,size,color});x+=this.textWidth(run.text,size);}
+  }
+  private fieldLine(fieldId:string,text:string,x:number,y:number,width:number,size=PDF_BODY){
+    this.draw(text,x,y,size);this.onFieldLine?.({fieldId,page:this.document.getPageCount()-1,x,baseline:PAGE_HEIGHT-y,width,size});
   }
   private newPage() {
     this.page=this.document.addPage([PAGE_WIDTH,PAGE_HEIGHT]);this.y=PAGE_HEIGHT-81;
@@ -271,51 +327,70 @@ class TextPdf {
     this.page.drawLine({start:{x:MARGIN,y:PAGE_HEIGHT-49},end:{x:PAGE_WIDTH-MARGIN,y:PAGE_HEIGHT-49},thickness:1,color:rgb(.65,.71,.77)});
   }
   paragraph(text:string,size=PDF_BODY) {
+    const fieldId=`p:${this.blockIndex++}`;
     for(const line of this.wrap(text,PAGE_WIDTH-MARGIN*2,size)) {
       if(this.y-PDF_LEADING<BOTTOM)this.newPage();
-      this.draw(line,MARGIN,this.y-size,size);this.y-=PDF_LEADING;
+      this.fieldLine(fieldId,line,MARGIN,this.y-size,PAGE_WIDTH-MARGIN*2,size);this.y-=PDF_LEADING;
     }
     this.y-=8;
   }
   heading(text:string){if(this.y-70<BOTTOM)this.newPage();this.paragraph(text,17);}
-  table(headers:string[],ratios:number[],rows:PdfRow[]) {
-    const sum=ratios.reduce((a,b)=>a+b,0),widths=ratios.map(value=>value/sum*(PAGE_WIDTH-MARGIN*2));
-    const headerLines=headers.map((header,i)=>this.wrap(header,widths[i]-PDF_PAD*2,PDF_AUX));
-    const headerHeight=Math.max(...headerLines.map(lines=>lines.length))*PDF_LEADING+PDF_PAD*2;
-    const drawHeader=()=>{
-      if(this.y-headerHeight-2*PDF_LEADING<BOTTOM)this.newPage();
-      let x=MARGIN;
-      for(let column=0;column<headers.length;column++) {
-        this.page.drawRectangle({x,y:this.y-headerHeight,width:widths[column],height:headerHeight,color:rgb(.88,.92,.95),borderWidth:.7,borderColor:rgb(.48,.56,.63)});
-        headerLines[column].forEach((line,index)=>this.draw(line,x+PDF_PAD,this.y-PDF_PAD-PDF_AUX-index*PDF_LEADING,PDF_AUX));x+=widths[column];
-      }
-      this.y-=headerHeight;
-    };
-    drawHeader();
+  table(headers:string[],_ratios:number[],rows:PdfRow[],layout:'auto'|'overview'='auto') {
+    const block=this.blockIndex++;
+    // Content-sized bands retain field order without tall empty auxiliary columns.
+    const width=PAGE_WIDTH-MARGIN*2;
     for(const [rowNumber,row] of rows.entries()) {
-      const columns=row.cells.map((text,i)=>this.wrap(text,widths[i]-PDF_PAD*2));
-      const total=Math.max(1,...columns.map(lines=>lines.length));let offset=0,part=1;
-      while(offset<total) {
-        let available=Math.floor((this.y-BOTTOM-PDF_PAD*2)/PDF_LEADING);
-        if(available<2){this.newPage();drawHeader();available=Math.floor((this.y-BOTTOM-PDF_PAD*2)/PDF_LEADING);}
-        if(offset>0) {
-          const label=`${row.key} · ${tr(this.lang,'續頁','continued')} ${part}`;
-          const lines=this.wrap(label,PAGE_WIDTH-MARGIN*2,PDF_AUX);
-          for(const line of lines){this.draw(line,MARGIN+PDF_PAD,this.y-PDF_AUX-4,PDF_AUX);this.y-=PDF_LEADING;}
-          available=Math.floor((this.y-BOTTOM-PDF_PAD*2)/PDF_LEADING);
-        }
-        if(available<1)throw new Error('No PDF body space after repeated header');
-        const take=Math.min(total-offset,available),height=take*PDF_LEADING+PDF_PAD*2;
-        let x=MARGIN;
-        for(let column=0;column<headers.length;column++) {
-          this.page.drawRectangle({x,y:this.y-height,width:widths[column],height,color:row.warning?rgb(1,.96,.85):rowNumber%2?rgb(.97,.98,.99):rgb(1,1,1),borderWidth:.55,borderColor:rgb(.68,.73,.77)});
-          columns[column].slice(offset,offset+take).forEach((line,index)=>this.draw(line,x+PDF_PAD,this.y-PDF_PAD-PDF_BODY-index*PDF_LEADING));x+=widths[column];
-        }
-        this.y-=height;offset+=take;part++;
-        if(offset<total){this.newPage();drawHeader();}
+      let part=1;
+      const label=(continued=false)=>{
+        const text=`${row.key}${continued?' · '+tr(this.lang,'續頁','continued')+' '+part:''}`;
+        this.page.drawRectangle({x:MARGIN,y:this.y-28,width,height:28,color:row.warning?rgb(1,.94,.78):rgb(.88,.92,.95),borderWidth:.7,borderColor:rgb(.48,.56,.63)});
+        this.draw(text,MARGIN+PDF_PAD,this.y-PDF_AUX-5,PDF_AUX);this.y-=28;
+      };
+      if(this.y-100<BOTTOM)this.newPage();
+      label();
+      const nextPage=()=>{this.newPage();part++;label(true);};
+      // Short auxiliary values share a compact metadata strip. Long prose stays wide.
+      const compactColumns=layout==='overview'?[0,1,2,3]:headers.map((header,index)=>({header,index})).filter(({header,index})=>/^(Item|Y\/N|符合程度|Conformity|負責部門|PIC \/ Departments)/.test(header)&&this.wrap(row.cells[index],350,PDF_AUX).length<=3).map(x=>x.index);
+      if(compactColumns.length){
+        const ratios=layout==='overview'?[3,4.5,1.5,2]:compactColumns.map(()=>1),total=ratios.reduce((a,b)=>a+b,0);
+        const columns=compactColumns.map((index,n)=>{const cellWidth=width*ratios[n]/total;const text=layout==='overview'&&index===1?row.cells[index].replace(/\n/g,' '):row.cells[index];return {index,width:cellWidth,lines:this.wrap(text,cellWidth-PDF_PAD*2,PDF_AUX)};});
+        const height=26+Math.max(...columns.map(c=>c.lines.length))*PDF_LEADING+PDF_PAD*2;
+        // Unusually long metadata is not squeezed into columns or truncated.
+        if(height<=280){
+          if(this.y-height<BOTTOM)nextPage();let x=MARGIN;
+          for(const col of columns){this.page.drawRectangle({x,y:this.y-height,width:col.width,height,color:row.warning?rgb(1,.97,.89):rgb(.97,.98,.99),borderWidth:.55,borderColor:rgb(.68,.73,.77)});this.draw(headers[col.index].replace(/\n/g,' / '),x+PDF_PAD,this.y-PDF_AUX-4,PDF_AUX);col.lines.forEach((line,n)=>this.fieldLine(`t:${block}:${rowNumber}:${col.index}`,line,x+PDF_PAD,this.y-26-PDF_PAD-PDF_AUX-n*PDF_LEADING,col.width-PDF_PAD*2,PDF_AUX));x+=col.width;}
+          this.y-=height;
+        }else compactColumns.length=0;
       }
+      for(let column=0;column<headers.length;column++) {
+        if(compactColumns.includes(column))continue;
+        const lines=this.wrap(row.cells[column],width-PDF_PAD*2);
+        const short=(headers[column]==='Item'||/^(Y\/N|符合程度|Conformity)/.test(headers[column]))&&!row.cells[column].includes('\n')&&this.wrap(`${headers[column].replace(/\n/g,' / ')}: ${row.cells[column]}`,width-PDF_PAD*2,PDF_AUX).length===1&&row.cells[column].length<=80;
+        if(short) {
+          if(this.y-28<BOTTOM)nextPage();
+          this.page.drawRectangle({x:MARGIN,y:this.y-28,width,height:28,color:row.warning?rgb(1,.97,.89):rgb(.97,.98,.99),borderWidth:.55,borderColor:rgb(.68,.73,.77)});
+          this.draw(`${headers[column].replace(/\n/g,' / ')}: `,MARGIN+PDF_PAD,this.y-PDF_AUX-5,PDF_AUX);
+          const labelWidth=this.textWidth(`${headers[column].replace(/\n/g,' / ')}: `,PDF_AUX);
+          this.fieldLine(`t:${block}:${rowNumber}:${column}`,row.cells[column]||'—',MARGIN+PDF_PAD+labelWidth,this.y-PDF_AUX-5,width-PDF_PAD*2-labelWidth,PDF_AUX);this.y-=28;
+          continue;
+        }
+        let offset=0;
+        while(offset<lines.length) {
+          if(this.y-(26+PDF_LEADING+PDF_PAD*2)<BOTTOM)nextPage();
+          const heading=`${headers[column].replace(/\n/g,' / ')}${offset?' · '+tr(this.lang,'續文','continued'):''}`;
+          this.draw(heading,MARGIN+PDF_PAD,this.y-PDF_AUX-4,PDF_AUX);this.y-=26;
+          const available=Math.floor((this.y-BOTTOM-PDF_PAD*2)/PDF_LEADING);
+          if(available<1)throw new Error('No PDF body space after field header');
+          const take=Math.min(lines.length-offset,available),height=take*PDF_LEADING+PDF_PAD*2;
+          this.page.drawRectangle({x:MARGIN,y:this.y-height,width,height,color:row.warning?rgb(1,.97,.89):rowNumber%2?rgb(.98,.99,1):rgb(1,1,1),borderWidth:.55,borderColor:rgb(.68,.73,.77)});
+          lines.slice(offset,offset+take).forEach((line,index)=>this.fieldLine(`t:${block}:${rowNumber}:${column}`,line,MARGIN+PDF_PAD,this.y-PDF_PAD-PDF_BODY-index*PDF_LEADING,width-PDF_PAD*2));
+          this.y-=height;offset+=take;
+          if(offset<lines.length)nextPage();
+        }
+      }
+      this.y-=8;
     }
-    this.y-=16;
+    this.y-=8;
   }
   async finish():Promise<Uint8Array> {
     const pages=this.document.getPages();
@@ -328,7 +403,7 @@ class TextPdf {
   }
 }
 function snapshotIntro(pdf:TextPdf,state:PlatformState,lang:Language,title:string) {
-  pdf.heading(title);pdf.paragraph(`${tr(lang,'伺服器快照時間','Server snapshot time')}: ${state.serverTime}\n${tr(lang,'快照識別','Snapshot token')}: ${state.snapshotToken}`,PDF_AUX);
+  pdf.heading(title);pdf.paragraph(`${tr(lang,'伺服器快照時間','Server snapshot time')}: ${state.serverTime}\n${tr(lang,'快照識別（完整值見PDF文件內容）','Snapshot token (full value in PDF properties)')}: ${state.snapshotToken.length>32?state.snapshotToken.slice(0,16)+'…'+state.snapshotToken.slice(-12):state.snapshotToken}`,PDF_AUX);
 }
 function itemPdfRows(state:PlatformState,items:StandardItem[],lang:Language):PdfRow[] {
   return items.map(item=>{
@@ -428,7 +503,7 @@ export async function buildOverviewPdf(state:PlatformState,frameworkId:Framework
     const row=score.rows.find(r=>r.chapterId===chapter.id)!,group=scoped.filter(i=>i.chapterId===chapter.id),open=issues.filter(issue=>issue.itemIds.some(id=>group.some(i=>i.id===id)));
     const levels=row.levels?`\nBasic / Intermediate / Advanced / Excellence: ${row.levels.map(v=>v===null?tr(lang,'未填','unset'):v+'%').join(' / ')}\n${tr(lang,'減權後','Adjusted')}: ${row.adjusted?.map(v=>v+'%').join(' / ')}`:'';
     return {key:chapter.code,warning:row.provisional,cells:[`${chapter.code} ${bilingual(chapter.name)}${chapter.priority?'\n'+tr(lang,'重點章節','Priority chapter'):''}`,`${row.score===null?tr(lang,'未評','Not assessed'):row.score.toFixed(2)+' / 4'}${row.provisional?'\n'+tr(lang,'暫估','Provisional'):''}\n${framework.scoring}${levels}`,`${row.updated} / ${row.total}`,`${open.length}\n${open.map(i=>i.id).join('\n')}`,`${row.blockingItemCodes.join(', ')}\n${group.filter(i=>i.sourceGap&&!i.sourceGapResolved).map(i=>`${i.code}: ${i.sourceGap}`).join('\n')}`]};
-  }));
+  }),'overview');
   pdf.heading(tr(lang,'上次凍結檢查（獨立於目前自評）','Last frozen inspection (independent of current assessments)'));
   const last=state.inspections.filter(i=>i.frameworkId===frameworkId&&i.status==='final').sort((a,b)=>b.date.localeCompare(a.date)||b.createdAt.localeCompare(a.createdAt))[0];
   if(last){const coverage=inspectionCoverage(last),previous=inspectionScore(last);pdf.paragraph(`${last.title}\n${last.id} | ${last.date} | ${last.organization}\n${tr(lang,'凍結方法','Frozen method')}: ${last.snapshot.scoringVersion}\n${tr(lang,'評定覆蓋','Assessed coverage')}: ${coverage.assessed}/${coverage.total}\n${tr(lang,'凍結完整範圍得分','Score for the full frozen scope')}: ${!coverage.complete||previous.score===null?tr(lang,'未完整記分（非 0 分）','Not completely scored (not zero)'):previous.score.toFixed(2)+' / 4'}`);}else pdf.paragraph(tr(lang,'尚無已發布的檢查記錄；不得製造上次得分。','No published inspection; no invented previous score.'));
