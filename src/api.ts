@@ -1,4 +1,4 @@
-import type {ApiClient, Assessment, FrameworkId, AuditQuery, AuditLog, BaseEntity, ExportRequest, Lease, Person, RosterPerson, PlatformState, BrowseState, Inspection, ReadonlyInspectionSummary, RecordKind, RpcResult, SaveIntent, SeedBundle, SupabaseConfig, SystemSettings} from './types';
+import type {ApiClient, Assessment, Framework, FrameworkId, AuditQuery, AuditLog, BaseEntity, ExportRequest, Lease, Person, RosterPerson, PlatformState, BrowseState, Inspection, ReadonlyInspectionSummary, RecordKind, RpcResult, SaveIntent, SeedBundle, SupabaseConfig, SystemSettings} from './types';
 import {collectionFor,mergeAcknowledgement,mergeSync,inspectionSummary,type SyncEnvelope} from './syncState.ts';
 
 const SESSION_KEY='fpmc-compliance-session';
@@ -36,7 +36,7 @@ class SupabaseApi implements ApiClient {
   private invalidate(){this.epoch++;this.user=null;this.sessionToken='';this.cache=null;this.cacheContext='';this.publishSession();}
   async rpc<T=unknown>(action:string,payload:unknown={},performanceRoute=false):Promise<T>{
     if(!this.config.url || !this.config.anonKey)throw new RpcError('CONFIG_REQUIRED','尚未配置此平台自己的 Supabase。');
-    const body=JSON.stringify({p_action:action,p_session:this.sessionToken,p_client_id:this.clientId,p_payload:payload,...(performanceRoute||action==='restart_updates'?{p_sync_mode:'performance-v1'}:action==='import_seed'?{p_import_mode:true}:action==='read'?{p_import_mode:false,p_read_mode:true}:{})});
+    const body=JSON.stringify({p_action:action,p_session:this.sessionToken,p_client_id:this.clientId,p_payload:payload,...(performanceRoute||action==='restart_updates'||action==='target_claim'||action==='target_save'?{p_sync_mode:'performance-v1'}:action==='import_seed'?{p_import_mode:true}:action==='read'?{p_import_mode:false,p_read_mode:true}:{})});
     const initiatedSession=this.sessionToken,initiatedEpoch=this.epoch;
     const replaySafe=['save','role_permissions'].includes(action)&&typeof payload==='object'&&payload!==null&&typeof (payload as {operationId?:unknown}).operationId==='string';
     // Initial source upload can exceed the ordinary request window before SQL starts.
@@ -78,6 +78,11 @@ class SupabaseApi implements ApiClient {
           this.ackSerial++;
           for(const record of ack.records)this.cache=mergeAcknowledgement(this.cache,'assessment',record);
         }
+      }
+      if(action==='target_save'){
+        const ack=validateTargetAck(result.data,payload as SharedTargetRequest);
+        this.ackSerial++;
+        if(this.cache&&this.cacheContext===this.context())this.cache=mergeAcknowledgement(this.cache,'framework',ack.record);
       }
       return result.data as T;
     }
@@ -165,6 +170,13 @@ class SupabaseApi implements ApiClient {
   queryAudit(query:AuditQuery){return this.rpc<{rows:AuditLog[];total:number}>('audit_query',query);}
   authorizeExport(request:ExportRequest){return this.rpc<PlatformState>('export_authorize',request,request.snapshotToken.startsWith('performance-v1:'));}
   importSeed(seed:SeedBundle){return this.rpc<{imported:number}>('import_seed',{seed,operationId:id()});}
+}
+export interface SharedTargetRequest {frameworkId:FrameworkId;targets:Record<string,number|null>;expectedVersion:number;leaseToken:string;operationId:string}
+export interface SharedTargetAck {frameworkId:FrameworkId;operationId:string;record:Framework}
+export function validateTargetAck(value:unknown,request:SharedTargetRequest):SharedTargetAck{
+ const ack=value as SharedTargetAck|null,goals=ack?.record?.scoreTargets;
+ if(!ack||ack.frameworkId!==request.frameworkId||ack.operationId!==request.operationId||ack.record?.id!==request.frameworkId||ack.record.version!==request.expectedVersion+1||!goals||typeof goals!=='object'||Array.isArray(goals)||Object.keys(goals).length!==Object.keys(request.targets).length||Object.entries(request.targets).some(([key,score])=>!Object.hasOwn(goals,key)||goals[key]!==score))throw new RpcError('INVALID_RESPONSE','公司目標保存結果尚未核對；請保留草稿與原操作。');
+ return ack;
 }
 export interface FrameworkRestartAck {frameworkId:FrameworkId;operationId:string;changedCount:number;records:Assessment[]}
 export function validateRestartAck(value:unknown,request:{frameworkId:FrameworkId;operationId:string}):FrameworkRestartAck{

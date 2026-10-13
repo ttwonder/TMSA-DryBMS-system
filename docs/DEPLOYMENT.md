@@ -4,7 +4,11 @@
 
 ## 既有已安裝平台的性能／Excel／PDF追加
 
-本次依 `docs/PERFORMANCE_REPORT_DELIVERY.md`：只追加005性能SQL＋獨立13項唯讀readback，通過後由使用者Push新前端。舊001–004／Owner／名冊／業務seed已完成，不重Run、不清草稿。新SQL及正式多人／匯出驗收尚未執行；本機PASS不等於正式故障已復原。完整commit-bound唯讀Preview由本機交付提供，助手不代貼／Run／Push。
+005性能SQL與獨立13項正式readback已收到使用者結果並核對通過；前端faaceaf的CI/Pages及正式首屏已核對。這一安裝／發布範圍結案，不重Run005、不清草稿。正式角色多人／原匯出故障恢復及原生Excel結果仍單獨待收，本機PASS不代正式接受。
+
+## 既有平台追加：重新開始與公司目標
+
+本批依 `docs/RESTART_AND_TARGET_COMPARISON.md`，使用者已答「是，公司共用」。完整commit-bound唯讀Preview提供三步：未安裝才Run006 → Run007 → 另query唯讀`shared-targets-readback.sql`。預期PASS_SHARED_TARGETS_INSTALL_ONLY及22 checks全true、initialized/imported true、activeOwnerCount=1；通過再由使用者Push。006/007安裝本身不重置勾選、不保存目標；不重跑001–005、Owner、名冊或seed。若已Run或未知結果先唯讀核對，不重試安裝。助手不代貼／Run／Push；正式新按鈕及跨人保存驗收在部署後另核。
 
 ## 既有已安裝平台的office追加
 本次人員／UI交接使用 `docs/OFFICE_DIRECTORY.md`，只追加004及獨立private名冊交易／readback。以下001／Owner／業務seed段落屬原首次建置歷史，不是本次重跑指令。正式已安裝狀態、Dashboard身份與新前端仍由使用者／父端核對。

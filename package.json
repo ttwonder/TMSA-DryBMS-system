@@ -21,6 +21,9 @@
     "qa:export-person-references": "node --experimental-strip-types scripts/verify-export-person-references.mjs --ui",
     "qa:restart-updates": "node --experimental-strip-types scripts/verify-restart-updates.mjs",
     "qa:restart-updates-ui": "node --experimental-strip-types scripts/verify-restart-updates-ui.mjs",
+    "qa:shared-targets": "node --experimental-strip-types scripts/verify-shared-targets.mjs",
+    "qa:shared-targets-ui": "node --experimental-strip-types scripts/verify-shared-targets-ui.mjs",
+    "qa:shared-targets-regression": "node scripts/verify-native.mjs --shared-targets",
     "import:sources": "python3 scripts/import_sources.py"
   },
   "dependencies": {

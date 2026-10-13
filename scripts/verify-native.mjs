@@ -33,6 +33,7 @@ try {
     assert.equal((await raw('owner','import_seed',{seed:bad})).code,'INVALID_REFERENCE');assert.equal((await db.setup.query('select count(*) as n from compliance_private.records')).rows[0].n,before);
     assert.equal((await call('owner','import_seed',{seed:syntheticSeed()})).imported,13);assert.equal((await state()).items.length,4);assert.equal((await raw('owner','import_seed',{seed:syntheticSeed()})).code,'WORKSPACE_NOT_FRESH');
   });
+  if(process.argv.includes('--shared-targets'))for(const file of ['005_performance.sql','006_restart_updates.sql','007_shared_targets.sql'])await db.setup.query(readFileSync(join(root,'supabase/migrations',file),'utf8'));
   await test('anon-private-table-helper-and-RLS-denied',async()=>{
     const c=await db.connect();try{await c.query('begin');await c.query('set local role anon');await assert.rejects(c.query('select * from compliance_private.records'),e=>e.code==='42501');await c.query('rollback');await c.query('begin');await c.query('set local role anon');await assert.rejects(c.query('select compliance_private.token()'),e=>e.code==='42501');await c.query('rollback');}finally{await c.end();}
     assert.equal((await db.setup.query("select bool_and(relrowsecurity) as enabled from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='compliance_private' and c.relkind='r'")).rows[0].enabled,true);
@@ -144,5 +145,5 @@ try {
 finally {
   if(db)await db.stop();
   mkdirSync(join(root,'qa-evidence'),{recursive:true});
-  writeFileSync(join(root,'qa-evidence','native-tests.json'),JSON.stringify({layer:'native PostgreSQL / real anon RPC / synthetic data',cases,total:cases.length,passed:!process.exitCode,sqlSha256:sha256(readFileSync(join(root,'supabase/migrations/001_platform.sql'))),apiSha256:sha256(readFileSync(join(root,'src/api.ts'))),cleanup:db?'owned cluster stopped; files retained':'startup failed; owned cleanup attempted'},null,2));
+  writeFileSync(join(root,'qa-evidence',process.argv.includes('--shared-targets')?'shared-targets-legacy-native-tests.json':'native-tests.json'),JSON.stringify({layer:'native PostgreSQL / real anon RPC / synthetic data',cases,total:cases.length,passed:!process.exitCode,sqlSha256:sha256(readFileSync(join(root,'supabase/migrations/001_platform.sql'))),apiSha256:sha256(readFileSync(join(root,'src/api.ts'))),cleanup:db?'owned cluster stopped; files retained':'startup failed; owned cleanup attempted'},null,2));
 }

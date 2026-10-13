@@ -2,12 +2,13 @@
 
 ## 本批邊界
 
-本批只完成使用者新增要求中的：
+本批完成使用者新增要求中的：
 
 1. 管理 → 系統／資料的「一鍵重新開始」。
 2. 總覽 → 目標分數試算的逐章及平均「實際自評」「分數差距」。
+3. 「保存現目標」公司共用雲端：使用者明確答「是，公司共用」。Owner/admin保存、全登入人員查看、TMSA/DRYBMS分開。舊選擇表單未回答只屬歷史，不再當作阻擋或重新詢問。
 
-「保存現目標」尚未接上儲存：共用雲端（Owner/admin保存）、個人雲端或本機保存會有不同的多人與權限後果，已提出選擇但未收到使用者答案，不能把建議當成批准。這個未完成範圍獨立保留，不把本批稱為兩項需求全部完成。
+新增資料只為每個既有framework的`scoreTargets`章節ID→0–4/null映射；不另建人員目標、不使用localStorage冒充雲端、不重設計既有介面。
 
 ## RESTART-UPDATES-1
 
@@ -29,6 +30,16 @@
 - 未評分用 —，暫估明示；沒有實際分數就不製造零分或數字差距。輸入／還原目標沒有雲端業務寫入，不改評定／稽核／改善。
 - 維持原導航、表格密度、字體、品牌及双語。新增平均辅助行採14px；不改既有主分數字級，手機不撐寬 document。
 
+## SHARED-TARGET-SAVE-1
+
+- 「保存現目標」緊鄰「還原目前分數」；中文/英文、桌面/390px同原版面。修改、還原與篩選只動試算草稿，不自動保存。
+- 保存目前框架的章節目標；篩選外的既有目標保留，不改另一框架。0–4、TMSA整數、DRYBMS小數；未評分保留null，不造零分。顯示與差距仍使用原targetMean/實際計分selector。
+- 以框架穩定ID及`scoreTargets`保存公司共用資料。`target_claim`/`target_save`在伺服器驗證有效Owner/admin；此能力不附帶框架定義編輯權，管理員的manageFrameworks=false仍可存目標但仍不能改定義。全登入使用者透過既有read/sync讀同一份目標；操作員可試算但沒有保存控制，直接RPC也拒絕。
+- 沿用精確`record:framework:<TMSA|DRYBMS>`交易guard與既有75秒lease、session/client/token fencing；CAS使用首次修改時的框架版本。保存只更新scoreTargets及正常版本/異動metadata；來源定義、實際自評/四級百分比、改善/歷史完全保留。
+- 一交易含更新、before/after audit及原操作receipt。回覆遺失不自動重試；sessionStorage只保存完整pending意圖，不是業務真相。刷新同會話可核對/重播原保存；receipt優先於過期lease，無重複效果/audit；確認後釋放原lease，不等75秒才讓下一位保存。
+- 伺服器ACK立刻單調合併，清理本機journal失敗或後續讀回失敗不把確認成功降成未知；真正未知時凍結原意圖，不可另建保存。版本衝突保留試算草稿，「載入公司目標」須明確确认放棄，不能自動覆蓋。
+- 框架管理舊保存仍可用：新validator wrapper保留經hash核對的原validator，非framework全數交回原實作；framework metadata保存保留原公司目標，包括舊客戶端省略欄位。不可透過一般metadata保存改scoreTargets，必須專用命令。
+
 ## 驗證方式與界線
 
 ```bash
@@ -37,6 +48,9 @@ npm run typecheck
 npm run build
 npm run qa:restart-updates
 npm run qa:restart-updates-ui
+npm run qa:shared-targets
+npm run qa:shared-targets-ui
+npm run qa:shared-targets-regression
 node scripts/verify-public-artifacts.mjs
 ```
 
@@ -48,11 +62,16 @@ node scripts/verify-public-artifacts.mjs
 
 ## 已執行的本機驗證
 
-- `npm test`：132/132 PASS、0 fail、0 skip。
+- `npm test`：134/134 PASS、0 fail、0 skip。PDF/Excel原測試保留；build既有INEFFECTIVE_DYNAMIC_IMPORT提示不另擴範圍修理。
 - `npm run typecheck`／`npm run build`／公開產物掃描：exit 0；22公開檔、沒有公司私有正文洩漏。
 - native：11項 PASS（10項原SQL、1項仅在自有DB插入QA屏障的並行回歸）；初始合成314 Items，重置208 TMSA／106 DRYBMS；新唯讀安裝核對11 checks全部true。這不是正式存量或正式重置驗收。
 - 原UI／版面：15項 PASS，含兩個真瀏覽器身份、1440／390、中文／英文、未知結果＋刷新＋原操作與ACK清理故障。所有自有UI/API/PG端口已核關閉。
-- 受影響程式及SQL輸入SHA與receipt對照；不把未回覆的保存範圍問題當成通過。未要求新独立代理review；使用有限自我檢查及可重現回歸，不代表全平台無缺陷。
+- 公司目標Native：14項PASS，含Owner/admin／原管理能力拒絕保持、其他角色拒絕、兩框架獨立、CAS、普通metadata保留目標、audit回滾、原操作重播、重置保留目標、安裝零業務寫入；唯讀13/11/22檢查全部true。
+- 公司目標原UI/版面：14項PASS，Owner/admin/operator三個真瀏覽器上下文，刷新／跨人、held/lost ACK＋原操作、衝突保稿、篩選外保留、儲存拒絕、中文/英文1440/390；手機長按鈕自然換行，不縮字、不橫溢。
+- 既有業務Native回歸：25項PASS；主要業務cluster在005→006→007後測試，另保留原HTTP及pgcrypto基線控制。不是25項全都在正式雲端。
+- 受影響程式及SQL輸入SHA與receipt對照；公司共用範圍已由使用者直接確認，正式驗收仍分开。未要求新独立代理review；使用有限自我檢查及可重現回歸，不代表全平台無缺陷。
+
+目標保存原UI真RED（原畫面沒有按鈕）→GREEN；真PostgreSQL專用保存原UNKNOWN_ACTION→GREEN。框架metadata保存INVALID_PAYLOAD回歸→最小wrapper→GREEN；未知保存刷新後lease未釋放真RED→補原token釋放→GREEN。詳細受控QA紀錄在ignored `qa-evidence/shared-targets/`，不公開身份/session或私有原文。最終數量以本批final-gates receipt核對，不把測試代替正式驗收。
 
 ## 尚未執行的正式發布
 
@@ -62,4 +81,8 @@ node scripts/verify-public-artifacts.mjs
 
 獨立唯讀檔：`supabase/restart-updates-readback.sql`，預期 `PASS_RESTART_UPDATES_INSTALL_ONLY`，所有 checks 為嚴格true、initialized/imported true、唯一有效Owner。此結果僅證安裝，不等於實際正式重置／多人保存驗收。
 
-若已Run006或結果未知，先唯讀核對，不重跑安裝。完整SQL須於完成本機commit後從 immutable commit blob 生成唯讀textarea，依既有Preview手動Ctrl+C／SQL Editor流程另行交接；助手不代貼／Run，不用剪貼簿API。為讓「保存現目標」一併交付，目前不催促單獨發布這個部分批次，先收取目標保存範圍的使用者決定。
+新增`007_shared_targets.sql`在006之後安裝，僅DDL，不初始化、不保存目標、不重置任何評定；未知前置fingerprint拒絕，已安裝停止重Run。新版006 readback同時識別精確006/007路由，無未知降級。
+
+本批正式交接順序：006安裝（只在尚未安裝時）→007安裝→另開query執行`supabase/shared-targets-readback.sql`（22 checks全部true、PASS_SHARED_TARGETS_INSTALL_ONLY、initialized/imported true、唯一有效Owner）→使用者Push→核新版CI/Pages→實際公司目標保存/刷新/另一使用者顯示。不重Run已完成001–005、Owner/名冊/業務seed。若006/007已Run或結果未知，先用獨立唯讀核對，不重跑安裝。
+
+完整SQL在本機commit後從immutable commit blob生成唯讀textarea，依既有Preview手動Ctrl+C／SQL Editor流程交接；助手不代貼／Run，不用剪貼簿API。保存範圍已得到使用者答案，不再把等待選擇作為未完成理由。正式角色多人及原Excel/PDF待收證據仍獨立保留。

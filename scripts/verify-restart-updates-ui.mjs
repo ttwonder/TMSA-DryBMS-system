@@ -1,6 +1,6 @@
 // Original mounted App + owned PostgreSQL. Synthetic users/data; not hosted acceptance.
 import assert from 'node:assert/strict';
-import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
 import net from 'node:net';
 import {createHash} from 'node:crypto';
@@ -15,7 +15,7 @@ let barrier=Promise.resolve();const requests=[];
 const closed=p=>new Promise(resolve=>{const s=net.connect({host:'127.0.0.1',port:p});s.once('connect',()=>{s.destroy();resolve(false)});s.once('error',()=>resolve(true));});
 try{
  const seed=syntheticSeed();seed.assessments=seed.assessments.map(a=>({...a,reviewed:true}));
- qa=await startQaServer({seed,evidenceDir:out,afterCommit:async({action,result})=>{if(action==='restart_updates'&&result.ok){if(hold){hold=false;hit=true;await barrier;}return drop;}return false;}});await qa.db.setup.query(readFileSync(join(root,'supabase/migrations/006_restart_updates.sql'),'utf8'));
+ qa=await startQaServer({seed,evidenceDir:out,afterCommit:async({action,result})=>{if(action==='restart_updates'&&result.ok){if(hold){hold=false;hit=true;await barrier;}return drop;}return false;}});await qa.db.setup.query(readFileSync(join(root,'supabase/migrations/006_restart_updates.sql'),'utf8'));if(existsSync(join(root,'supabase/migrations/007_shared_targets.sql')))await qa.db.setup.query(readFileSync(join(root,'supabase/migrations/007_shared_targets.sql'),'utf8'));
  vite=await createServer({root,base:'/',server:{host:'127.0.0.1',port:0,strictPort:true,watch:{ignored:['**/qa-evidence/**','**/private-seed/**']}},logLevel:'error'});await vite.listen();const ui=`http://127.0.0.1:${vite.httpServer.address().port}`;
  browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});
  const context=await browser.newContext({viewport:{width:1440,height:1000}});
@@ -25,7 +25,7 @@ try{
  current='management-original-entry';await page.locator('.main-nav').getByRole('button',{name:'管理',exact:true}).click();await page.getByRole('button',{name:'系統／資料',exact:true}).click();await expect(page.getByRole('button',{name:'一鍵重新開始',exact:true})).toBeVisible();
  receipt.cases.push({id:current,status:'PASS'});
  const run=async(id,fn)=>{current=id;await fn();receipt.cases.push({id,status:'PASS'});};
- const nav=(name)=>page.locator('.main-nav').getByRole('button',{name,exact:true}).click();
+ const nav=async(name)=>{const accept=d=>d.accept();page.once('dialog',accept);try{await page.locator('.main-nav').getByRole('button',{name,exact:true}).click();}finally{page.off('dialog',accept);}};
  const system=async()=>{await nav('管理');await page.getByRole('button',{name:'系統／資料',exact:true}).click();};
  const state=()=>checkedRpc(qa.db,'read',{},qa.users.owner.sessionToken,qa.users.owner.clientId);
  const ledger=async()=>({records:(await qa.db.setup.query('select kind,id,version,body from compliance_private.records order by kind,id')).rows,audit:(await qa.db.setup.query('select count(*)::int n from compliance_private.audit')).rows[0].n,operations:(await qa.db.setup.query('select count(*)::int n from compliance_private.operations')).rows[0].n});
@@ -43,4 +43,4 @@ try{
  if(!red)await run('confirmed-ACK-not-downgraded-by-local-journal-cleanup-failure',async()=>{await page.evaluate(()=>{const original=Storage.prototype.removeItem;Storage.prototype.removeItem=function(key){if(key.startsWith('fpmc-compliance-restart:'))throw new DOMException('Controlled QA cleanup refusal','SecurityError');return original.call(this,key);};});await page.getByRole('button',{name:'Start over',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'TMSA',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByText(/TMSA · Update-completion flags reset and read back/)).toBeVisible();});
  assert.equal(receipt.blockedExternal,0);assert.deepEqual(receipt.errors,[]);receipt.status='PASS';
 }catch(e){receipt.status='FAIL';receipt.failure={case:current,name:e?.name??'Error',code:e?.code??null};writeFileSync(join(out,'private-failure.txt'),e?.stack??String(e));process.exitCode=1;}
-finally{release?.();await browser?.close();const ports={ui:vite?.httpServer?.address()?.port,api:qa?.server?.address()?.port,pg:qa?.db?.port};await vite?.close();await qa?.stop();receipt.cleanup={};for(const [k,p] of Object.entries(ports))receipt.cleanup[k]=p?await closed(p):true;receipt.testedInputs={};for(const file of ['src/App.tsx','src/Overview.tsx','src/Management.tsx','src/useFrameworkRestart.ts','src/api.ts','src/syncState.ts','src/styles.css','src/types.ts','src/domain.ts','scripts/verify-restart-updates-ui.mjs','scripts/qa-server.mjs','scripts/native-postgres.mjs','supabase/migrations/006_restart_updates.sql'])receipt.testedInputs[file]=createHash('sha256').update(readFileSync(join(root,file))).digest('hex');writeFileSync(join(out,'receipt.json'),JSON.stringify(receipt,null,2));console.log(JSON.stringify({status:receipt.status,cases:receipt.cases.length,failure:receipt.failure,cleanup:receipt.cleanup,receipt:join(out,'receipt.json')}));}
+finally{release?.();await browser?.close();const ports={ui:vite?.httpServer?.address()?.port,api:qa?.server?.address()?.port,pg:qa?.db?.port};await vite?.close();await qa?.stop();receipt.cleanup={};for(const [k,p] of Object.entries(ports))receipt.cleanup[k]=p?await closed(p):true;receipt.testedInputs={};for(const file of ['src/App.tsx','src/Overview.tsx','src/Management.tsx','src/useFrameworkRestart.ts','src/api.ts','src/syncState.ts','src/styles.css','src/types.ts','src/domain.ts','scripts/verify-restart-updates-ui.mjs','scripts/qa-server.mjs','scripts/native-postgres.mjs','supabase/migrations/006_restart_updates.sql','supabase/migrations/007_shared_targets.sql'])receipt.testedInputs[file]=createHash('sha256').update(readFileSync(join(root,file))).digest('hex');writeFileSync(join(out,'receipt.json'),JSON.stringify(receipt,null,2));console.log(JSON.stringify({status:receipt.status,cases:receipt.cases.length,failure:receipt.failure,cleanup:receipt.cleanup,receipt:join(out,'receipt.json')}));}

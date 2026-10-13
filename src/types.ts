@@ -5,7 +5,7 @@ export type Page = 'overview' | 'TMSA' | 'DRYBMS' | 'improvements' | 'inspection
 export interface BiText { en:string; zh:string }
 export interface BaseEntity { id:string; version:number; createdAt:string; updatedAt:string; updatedBy:string }
 export interface SourceLocator { source:string; file?:string; sheet?:string; cell?:string; pages?:number[]; rawItem?:string; note?:string }
-export interface Framework extends BaseEntity { name:BiText; description:BiText; scoring:'tmsa-stage'|'drybms-guidance'; active:boolean; sourceVersion:string; scopeLabel:BiText }
+export interface Framework extends BaseEntity { name:BiText; description:BiText; scoring:'tmsa-stage'|'drybms-guidance'; active:boolean; sourceVersion:string; scopeLabel:BiText; scoreTargets?:Record<string,number|null> }
 export interface Chapter extends BaseEntity { frameworkId:FrameworkId; code:string; name:BiText; aim?:BiText; order:number; active:boolean; priority?:boolean }
 export interface StandardItem extends BaseEntity { frameworkId:FrameworkId; chapterId:string; code:string; level:number; order:number; active:boolean; kpi:BiText; guidance:BiText; departmentIds:string[]; sources:SourceLocator[]; sourceGap?:string; sourceGapResolved?:boolean; analysisIndex?:boolean; sourceOriginals?:{id:string;kind:string;en:string;page:number}[]; crosswalk?:{tmsaItemCodes:string[];match:string;difference:string;attention:string}; aliases?:string[] }
 export interface DepartmentResponse { departmentId:string; response:'yes'|'no'|null; assessment:BiText; evidence:BiText; source:SourceLocator }
