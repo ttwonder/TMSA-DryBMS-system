@@ -9,6 +9,15 @@ export const isoNow=()=>new Date().toISOString();
 export const newBase=(id:string=crypto.randomUUID())=>({id,version:0,createdAt:isoNow(),updatedAt:isoNow(),updatedBy:''});
 export function assessmentFor<T extends Pick<Assessment,'itemId'|'reviewed'|'response'|'conformity'>>(state:{assessments:T[]},itemId:string):T|undefined{return state.assessments.find(a=>a.itemId===itemId);}
 export function statusOf(a:Assessment|undefined,item?:StandardItem):'green'|'yellow'|'red'|'purple' {if(!a?.reviewed||a.response===null)return 'purple';if(a.response==='yes'&&a.conformity==='all'&&!(item?.sourceGap&&!item.sourceGapResolved))return 'green';return a.conformity==='partial'?'yellow':'red';}
+export function chapterStatusOf(state:Pick<BrowseState,'items'|'assessments'>,chapterId:string):ReturnType<typeof statusOf> {
+ const items=state.items.filter(i=>i.active&&i.chapterId===chapterId);
+ if(!items.length)return 'purple';
+ const assessments=new Map(state.assessments.map(a=>[a.itemId,a]));
+ const statuses=items.map(i=>statusOf(assessments.get(i.id),i));
+ if(statuses.includes('purple'))return 'purple';
+ if(statuses.includes('red'))return 'red';
+ return statuses.includes('yellow')?'yellow':'green';
+}
 export function itemPass(a:Pick<Assessment,'reviewed'|'response'|'conformity'>|undefined,item:ScoreItem){return !!a?.reviewed&&a.response==='yes'&&a.conformity==='all'&&(!item.sourceGap||item.sourceGapResolved===true);}
 export interface ChapterScore {chapterId:string;score:number|null;provisional:boolean;yes:number;total:number;updated:number;blockingItemCodes:string[];levels?:[number|null,number|null,number|null,number|null];adjusted?:number[];rawScore?:number|null;}
 export function tmsaChapterScore(chapter:ScoreChapter,items:ScoreItem[],assessments:Pick<Assessment,'itemId'|'reviewed'|'response'|'conformity'>[]):ChapterScore {const group=items.filter(i=>i.active&&i.chapterId===chapter.id);let score=0;const map=new Map(assessments.map(a=>[a.itemId,a]));for(let level=1;level<=4;level++){const rows=group.filter(i=>i.level===level);if(!rows.length||rows.some(i=>!itemPass(map.get(i.id),i)))break;score=level;}return {chapterId:chapter.id,score:group.length?score:null,provisional:group.some(i=>!map.get(i.id)?.reviewed||map.get(i.id)?.response===null||!!i.sourceGap&&!i.sourceGapResolved),yes:group.filter(i=>itemPass(map.get(i.id),i)).length,total:group.length,updated:group.filter(i=>map.get(i.id)?.reviewed).length,blockingItemCodes:group.filter(i=>i.level===score+1&&!itemPass(map.get(i.id),i)).map(i=>i.code)};}

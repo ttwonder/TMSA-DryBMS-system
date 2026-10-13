@@ -23,6 +23,7 @@
     "qa:restart-updates-ui": "node --experimental-strip-types scripts/verify-restart-updates-ui.mjs",
     "qa:shared-targets": "node --experimental-strip-types scripts/verify-shared-targets.mjs",
     "qa:shared-targets-ui": "node --experimental-strip-types scripts/verify-shared-targets-ui.mjs",
+    "qa:chapter-navigation": "node --experimental-strip-types scripts/verify-chapter-navigation-ui.mjs",
     "qa:shared-targets-regression": "node scripts/verify-native.mjs --shared-targets",
     "import:sources": "python3 scripts/import_sources.py"
   },
