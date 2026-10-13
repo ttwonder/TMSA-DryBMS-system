@@ -25,6 +25,7 @@
     "qa:shared-targets-ui": "node --experimental-strip-types scripts/verify-shared-targets-ui.mjs",
     "qa:conformity-link": "node --experimental-strip-types scripts/verify-conformity-link-ui.mjs",
     "qa:chapter-navigation": "node --experimental-strip-types scripts/verify-chapter-navigation-ui.mjs",
+    "qa:inspection-layout-gap": "node --experimental-strip-types scripts/verify-inspection-layout-and-score-gap.mjs",
     "qa:shared-targets-regression": "node scripts/verify-native.mjs --shared-targets",
     "import:sources": "python3 scripts/import_sources.py"
   },

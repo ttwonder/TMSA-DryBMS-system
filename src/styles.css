@@ -11,6 +11,10 @@
 .chapter-button .chapter-status.purple{color:#8b62ae}
 .simulation .target-score>small{display:block;font-size:14px;line-height:1.3}
 .simulation .target-score{max-width:100%}
+/* Highlight only displayed nonzero target/actual differences; zero and unknown stay unchanged. */
+.score-gap.has-gap,.score-gap.has-gap b{color:var(--red)}
+/* Inspection dialogs scroll their chapter choices normally; the main sidebar remains sticky. */
+.modal-body>.chapter-navigation{position:static;top:auto;max-height:none;overflow:visible}
 /* Dense default filters; expanded controls retain their exact selections. */
 .secondary-filters{flex:1 1 180px;min-width:140px;max-width:100%}
 .secondary-filters>summary{min-height:34px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;background:#f4f7fa;cursor:pointer;font-size:14px;color:var(--blue)}
