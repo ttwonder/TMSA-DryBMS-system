@@ -50,6 +50,7 @@
 - 完成更新 reviewed、執行狀態及改善結案仍獨立；不由評定選項推導。使用者明確選符合程度時，僅當次評定草稿聯動：all→Y/N Yes，partial／none→No；原Y/N選取反向行為保留，既有已保存資料不自動批改。No可分部分符合(黃)或不符合(紅)；Yes為全符合(綠)；未完成更新紫。⭐由同一筆未結案改善的itemIds即時計算。
 - 改善只有一個id及一份進度事件流；列表與Item展開內容共用，不複製。來源external須有inspectionId/findingId；其他non_external。涉及Item、部門、人員多選。急迫程度urgent/high/medium/low；進度逐次append；結案/重開獨立動作，不能改Y/N。編輯/取消/失鎖不自動保存。
 - 改善完整編輯的文字輸入不應逐鍵重寫未變動的Item／部門／人員勾選控制；僅在選項資料、語言或所選ID變動時更新對應選項。保留原欄位、停用但已關聯項、同節點焦點／游標、IME組字、切換記錄、手動保存及原lease／CAS／ACK流程；不以debounce、延遲上雲或修改共用editor協議處理輸入效能。
+- 歷史檢查「缺陷／改善建議」的四個中英文文字欄位同樣不得逐鍵重寫全部未變動的Item勾選控制；凍結snapshot選項及語言真正變動時才更新選項，所選ID變動時更新對應勾選。原本每次編輯即保留分頁草稿、同一finding ID／來源、手動保存與busy／pendingUnknown防線保持不變，不以延遲草稿或改保存協議換取順暢。
 - 每個編輯目標取得伺服器lease（75秒、20秒續期；含session/client/token），同一Item的標準定義與現行自評共用businessItem鎖；獨立項目可同時編輯。實質修改KPI/BPG/級別/分章時，原自評文字與Y/N保留、完成更新旗標失效，須重新核對。同Item拒絕第二個編輯者並傳回姓名。保存驗證lease+expectedVersion+操作id，在一次交易保存內容、不可覆寫歷史/audit及receipt。失鎖/版本衝突保留草稿並禁止假成功；斷線不以本機快取覆蓋雲端；lost-ACK同操作id讀回/重播。
 - 稽核建立時固定完整啟用框架及要求版本；逐項評定、觀察、建議、分數方法留在快照。依最新明確要求，歷史檢查（含已發布／已導入）直接修改同一 stable id，不再建立修訂副本；已發布保持final，原snapshot標準、finding id／來源raw與既有linked improvement sourceKey／ID不得更換，之前版本由原append-only audit before／after留存。外部觀察產生改善仍有去重鍵，不把正面觀察/指引當缺失。
 - 條目刪減採停用/再啟用，歷史及關聯保存；不硬刪。人員停用保存歷史，已停用人員/改角色之舊session不可繼續寫。新增條目/章節、改標準文字/代碼/排序只限Owner/admin。
