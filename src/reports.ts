@@ -146,7 +146,6 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
   const reference=template.worksheets[0];
   const selectedSheets=new Set<number>();
   const year=/^\d{4}/.exec(state.serverTime)?.[0]??'Current';
-  const scores=frameworkScore(state,frameworkId,chapters.map(c=>c.id));
   for(const chapter of chapters) {
     const items=state.items.filter(i=>i.active&&i.frameworkId===frameworkId&&i.chapterId===chapter.id).sort((a,b)=>a.order-b.order||a.code.localeCompare(b.code));
     let sheet=frameworkId==='TMSA'?book.getWorksheet(`E${chapter.code}`):undefined;
@@ -180,9 +179,9 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
     sheet.getCell('A1').value=`${chapter.code} ${bilingual(chapter.name)}`;
     sheet.getCell('A1').alignment={...sheet.getCell('A1').alignment,wrapText:true,vertical:'middle'};
     sheet.getRow(1).height=Math.max(sheet.getRow(1).height??24,48);
-    const score=scores.rows.find(s=>s.chapterId===chapter.id);
-    sheet.getCell('E2').value=`${bilingual(state.frameworks.find(f=>f.id===frameworkId)?.scopeLabel)}\n${tr(lang,'本章得分','Chapter score')}: ${score?.score??tr(lang,'未評','Not assessed')}/4${score?.provisional?tr(lang,'（暫估）',' (provisional)'):''}\n${tr(lang,'快照','Snapshot')}: ${state.serverTime}`;
-    sheet.getCell('E2').alignment={wrapText:true,vertical:'top'};sheet.getRow(2).height=Math.max(sheet.getRow(2).height??24,100);
+    // Omit the requested scoring-introduction block; retain the template's normal row height and coordinates.
+    sheet.getCell('E2').value=null;
+    sheet.getCell('E2').alignment={wrapText:true,vertical:'top'};
     sheet.getRow(header).height=Math.max(sheet.getRow(header).height??24,52);
     for(const {item,row} of placements) {
       const a=assessmentFor(state,item.id),issues=openIssuesFor(state,item.id);

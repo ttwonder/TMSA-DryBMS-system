@@ -36,6 +36,30 @@ export async function reportFixture() {
   return {state,bytes,book};
 }
 
+for(const frameworkId of ['TMSA','DRYBMS'] as const)for(const lang of ['zh','en'] as const)test(`framework XLSX removes scoring-intro block ${frameworkId} ${lang}`,async()=>{
+  const {state,bytes,book}=await reportFixture();
+  if(frameworkId==='DRYBMS'){
+    state.frameworks=[{...state.frameworks[0],id:'DRYBMS',scoring:'drybms-guidance',scopeLabel:{en:'REMOVED_DRY_SCOPE',zh:'移除之DRY範圍說明'}}];
+    state.chapters=state.chapters.map(c=>({...c,frameworkId:'DRYBMS'}));
+    state.items=state.items.map(i=>({...i,frameworkId:'DRYBMS',sources:[]}));
+  }
+  const before=JSON.stringify(state),output=await reports.buildFrameworkExcel(state,frameworkId,lang,undefined,{templateBytes:bytes});
+  const saved=new ExcelJS.Workbook();await saved.xlsx.load(output as unknown as ExcelJS.Buffer);
+  assert.equal(saved.worksheets.length,state.chapters.length);
+  for(const sheet of saved.worksheets){
+    assert.equal(sheet.getCell('E2').text,'',`${sheet.name}: removed intro must not be exported`);
+    const original=frameworkId==='TMSA'?book.getWorksheet(sheet.name):book.worksheets[0];
+    assert.equal(sheet.getRow(2).height,original?.getRow(2).height??24,`${sheet.name}: no enlarged empty intro row`);
+    assert.equal(sheet.getCell('A6').text,'Item','Keep existing header coordinates');
+    const view=sheet.views[0];assert.ok(view.state==='frozen','Keep frozen view');
+    assert.equal(view.ySplit,6,'Keep freeze-pane coordinates');
+    assert.ok(sheet.getCell('A1').value,'Keep chapter title');
+    const seen:string[]=[];sheet.eachRow(row=>{if(row.number>=7&&row.getCell(1).value)seen.push(row.getCell(1).text);});
+    assert.ok(seen.length||!state.items.some(i=>i.chapterId===state.chapters.find(c=>sheet.getCell('A1').text.startsWith(c.code+' '))?.id),'Keep body records');
+  }
+  assert.equal(JSON.stringify(state),before,'Export presentation must not change source/scoring data');
+});
+
 test('framework XLSX fills original Item coordinates and retains twenty styled sheets', async()=>{
   assert.equal(typeof reports.buildFrameworkExcel,'function','real XLSX builder is not implemented');
   const {state,bytes,book}=await reportFixture();
