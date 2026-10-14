@@ -20,10 +20,10 @@ export function useFrameworkRestart(ctx:PageProps){
   return()=>{live=false;generation.current++;};
  },[ctx.api,ctx.user.id,ctx.api.sessionToken]);
  useEffect(()=>{const k='management:framework-restart';window.dispatchEvent(new CustomEvent('compliance-editor-status',{detail:{key:k,dirty:false,busy}}));return()=>{window.dispatchEvent(new CustomEvent('compliance-editor-status',{detail:{key:k,dirty:false,busy:false}}));};},[busy]);
- const open=()=>{if(!ready||inFlight.current)return;if(!pendingRef.current)setError('');setDialogOpen(true);};
+ const open=()=>{if(!ready||inFlight.current||!ctx.user.active||!['owner','admin'].includes(ctx.user.role))return;if(!pendingRef.current)setError('');setDialogOpen(true);};
  const close=()=>{if(!inFlight.current)setDialogOpen(false);};
  const submit=async(frameworkId?:FrameworkId)=>{
-  if(!ready||inFlight.current||!key.current||!ctx.user.active||ctx.user.role!=='owner')return;
+  if(!ready||inFlight.current||!key.current||!ctx.user.active||!['owner','admin'].includes(ctx.user.role))return;
   const submitted=ctx,session=ctx.api.sessionToken,g=generation.current,slot=key.current;
   const matches=()=>g===generation.current&&current.current.api===submitted.api&&submitted.api.sessionToken===session&&current.current.user.id===submitted.user.id;
   const request=pendingRef.current??(frameworkId?{frameworkId,operationId:crypto.randomUUID()}:null);if(!request)return;

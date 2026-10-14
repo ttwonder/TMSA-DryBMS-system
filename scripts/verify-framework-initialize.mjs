@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync,readdirSync} from 'node:fs';
 import {join} from 'node:path';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import net from 'node:net';
 import {createServer} from 'vite';
@@ -24,7 +24,7 @@ const closed=port=>new Promise(resolve=>{const s=net.connect({host:'127.0.0.1',p
 const run=async(id,fn)=>{current=id;await fn();receipt.cases.push({id,status:'PASS'});writeFileSync(join(out,'receipt.json'),JSON.stringify(receipt,null,2));};
 try{
  qa=await startQaServer({seed,evidenceDir:out,afterCommit:async({action,result})=>{if(action==='restart_updates'&&result.ok){if(hold){hold=false;hit=true;await barrier;}return drop;}return false;}});
- for(const file of readdirSync(join(root,'supabase/migrations')).filter(f=>/^00[6-9]_.*\.sql$/.test(f)).sort())await qa.db.setup.query(readFileSync(join(root,'supabase/migrations',file),'utf8'));
+ for(const file of readdirSync(join(root,'supabase/migrations')).filter(f=>/^(00[6-9]|010)_.*\.sql$/.test(f)).sort())await qa.db.setup.query(readFileSync(join(root,'supabase/migrations',file),'utf8'));
  vite=await createServer({root,base:'/',server:{host:'127.0.0.1',port:0,strictPort:true,watch:{ignored:['**/qa-evidence/**','**/private-seed/**']}},logLevel:'error'});await vite.listen();const ui=`http://127.0.0.1:${vite.httpServer.address().port}`;
  browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});
  const context=await browser.newContext({viewport:{width:1440,height:1000}});
@@ -33,7 +33,7 @@ try{
  page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>receipt.errors.push(e.message));page.on('request',request=>{if(request.method()==='POST'&&request.url().startsWith(qa.url)){const b=request.postDataJSON();if(b.p_action==='restart_updates')requests.push({operationId:b.p_payload.operationId,frameworkId:b.p_payload.frameworkId});}});
  const nav=async(name)=>{await page.locator('.main-nav').getByRole('button',{name,exact:true}).click();};
  const ledger=async()=>({records:(await qa.db.setup.query('select kind,id,version,body from compliance_private.records order by kind,id')).rows,audit:(await qa.db.setup.query('select count(*)::int n from compliance_private.audit')).rows[0].n,operations:(await qa.db.setup.query('select count(*)::int n from compliance_private.operations')).rows[0].n});
- const geometry=async(name)=>{const metrics=await page.evaluate(()=>({width:innerWidth,documentWidth:document.documentElement.scrollWidth,modal:document.querySelector('[role="dialog"]')?.getBoundingClientRect().toJSON(),actions:[...document.querySelectorAll('.page-heading>.page-actions>button')].map(b=>({text:b.textContent,box:b.getBoundingClientRect().toJSON()}))}));const path=join(out,name+'.png');await page.screenshot({path});receipt.screenshots.push({path,metrics});assert(metrics.documentWidth<=metrics.width+1,`${name}: document overflow`);if(metrics.modal){assert(metrics.modal.x>=-1);assert(metrics.modal.right<=metrics.width+1);}return metrics;};
+ const geometry=async(name,target=page)=>{const metrics=await target.evaluate(()=>({width:innerWidth,documentWidth:document.documentElement.scrollWidth,modal:document.querySelector('[role="dialog"]')?.getBoundingClientRect().toJSON(),actions:[...document.querySelectorAll('.page-heading>.page-actions>button')].map(b=>({text:b.textContent,box:b.getBoundingClientRect().toJSON()}))}));const path=join(out,name+'.png');await target.screenshot({path});receipt.screenshots.push({path,metrics});assert(metrics.documentWidth<=metrics.width+1,`${name}: document overflow`);if(metrics.modal){assert(metrics.modal.x>=-1);assert(metrics.modal.right<=metrics.width+1);}return metrics;};
  await page.goto(ui);await page.locator('.main-nav').waitFor();await nav('TMSA');
  if(phase==='red')await geometry('original-before-shortcut');
  await run('original-framework-page-exposes-initialization-before-exports',async()=>{await expect(page.getByRole('button',{name:'初始化自評',exact:true})).toBeEnabled();const actions=await page.locator('.page-heading>.page-actions>button').allTextContents();assert.deepEqual(actions,['初始化自評','Excel','PDF']);});
@@ -47,7 +47,39 @@ try{
   await run('DRYBMS-percentage-draft-is-not-discarded-by-shortcut',async()=>{await nav('DRYBMS');const before=await ledger();await page.getByRole('button',{name:'調整百分比',exact:true}).click();await page.getByLabel('Basic percentage',{exact:true}).selectOption('75');await expect(initialize()).toBeDisabled();await expect(page.getByLabel('Basic percentage',{exact:true})).toHaveValue('75');await page.locator('.dry-score-panel').getByRole('button',{name:'取消',exact:true}).click();assert.deepEqual(await ledger(),before);await expect(initialize()).toBeEnabled();});
   await run('DRYBMS-lost-ACK-preserves-original-operation-across-management-and-other-framework',async()=>{const before=await ledger(),n=requests.length;drop=true;await initialize().click();await dialog().getByRole('button',{name:'確認初始化',exact:true}).click();await expect(dialog().getByRole('button',{name:'核對／重播原操作',exact:true})).toBeEnabled();await expect(dialog()).toContainText('NETWORK_UNKNOWN');const request=requests[n];assert.equal(request.frameworkId,'DRYBMS');assert(requests.slice(n).every(x=>x.operationId===request.operationId));const committed=await ledger();assertOnlyFlags(before,committed,'DRYBMS');await dialog().getByRole('button',{name:'關閉（保留原操作）',exact:true}).click();await nav('管理');await page.getByRole('button',{name:'系統／資料',exact:true}).click();await page.getByRole('button',{name:'核對原操作',exact:true}).click();await expect(dialog()).toContainText(request.operationId);await expect(dialog()).toContainText('DRYBMS');await dialog().getByRole('button',{name:'關閉（保留原操作）',exact:true}).click();drop=false;await page.reload();await page.locator('.main-nav').waitFor();await nav('TMSA');await page.getByRole('button',{name:'核對初始化自評',exact:true}).click();await expect(dialog().locator('strong')).toHaveText('DRYBMS');await expect(dialog()).toContainText(request.operationId);await expect(dialog().getByRole('button',{name:'確認初始化',exact:true})).toHaveCount(0);await dialog().getByRole('button',{name:'核對／重播原操作',exact:true}).click();await expect(dialog()).toHaveCount(0);assert.equal(requests.at(-1).operationId,request.operationId);assert.equal(requests.at(-1).frameworkId,'DRYBMS');assert.deepEqual(await ledger(),committed);await expect(initialize()).toBeEnabled();});
   await run('English-mobile-confirmation-for-each-framework-cancel-zero-write',async()=>{await page.getByRole('button',{name:'Switch language',exact:true}).click();await page.setViewportSize({width:390,height:844});const before=await ledger(),n=requests.length;for(const fw of ['TMSA','DRYBMS']){await nav(fw);await page.getByRole('button',{name:'Initialize self-assessment',exact:true}).click();await expect(dialog().locator('strong')).toHaveText(fw);await expect(dialog()).toContainText('including inactive items');await expect(dialog().getByRole('button',{name:'Confirm initialization',exact:true})).toBeVisible();await geometry(`${fw}-dialog-mobile-en`);await dialog().getByRole('button',{name:'Cancel',exact:true}).click();}assert.deepEqual(await ledger(),before);assert.equal(requests.length,n);});
-  await run('fresh-peer-and-admin-read-both-frameworks-without-owner-shortcut',async()=>{for(const role of ['peer','admin']){const context2=await browser.newContext({viewport:{width:1440,height:1000}});await context2.route('**/*',r=>{if(![ui,qa.url].includes(new URL(r.request().url()).origin)){receipt.blockedExternal++;return r.abort();}return r.continue();});await context2.addInitScript(({config,user})=>{localStorage.setItem('fpmc-compliance-config',JSON.stringify(config));sessionStorage.setItem('fpmc-compliance-client-id',user.clientId);sessionStorage.setItem('fpmc-compliance-session',JSON.stringify({user:user.user,sessionToken:user.sessionToken}));},{config:qa.config,user:qa.users[role]});const other=await context2.newPage();other.on('pageerror',e=>receipt.errors.push(e.message));await other.goto(ui);await other.locator('.main-nav').waitFor();for(const fw of ['TMSA','DRYBMS']){await other.locator('.main-nav').getByRole('button',{name:fw,exact:true}).click();await expect(other.getByRole('button',{name:'初始化自評',exact:true})).toHaveCount(0);await expect(other.locator('.assessment-summary-grid>div').filter({has:other.getByText('已完成本次更新',{exact:true})}).locator('b')).toHaveText('否');}await context2.close();}});
+  await run('fresh-operator-cannot-see-initialize-admin-can-use-both-frameworks',async()=>{
+   for(const role of ['peer','admin']){
+    const context2=await browser.newContext({viewport:{width:1440,height:1000}});
+    await context2.route('**/*',r=>{if(![ui,qa.url].includes(new URL(r.request().url()).origin)){receipt.blockedExternal++;return r.abort();}return r.continue();});
+    await context2.addInitScript(({config,user})=>{localStorage.setItem('fpmc-compliance-config',JSON.stringify(config));sessionStorage.setItem('fpmc-compliance-client-id',user.clientId);sessionStorage.setItem('fpmc-compliance-session',JSON.stringify({user:user.user,sessionToken:user.sessionToken}));},{config:qa.config,user:qa.users[role]});
+    const other=await context2.newPage();other.on('pageerror',e=>receipt.errors.push(e.message));await other.goto(ui);await other.locator('.main-nav').waitFor();
+    for(const fw of ['TMSA','DRYBMS']){
+     await other.locator('.main-nav').getByRole('button',{name:fw,exact:true}).click();
+     const action=other.getByRole('button',{name:'初始化自評',exact:true});
+     await expect(other.locator('.assessment-summary-grid>div').filter({has:other.getByText('已完成本次更新',{exact:true})}).locator('b')).toHaveText('否');
+     if(role==='peer'){await expect(action).toHaveCount(0);await geometry(`operator-${fw}-no-initialize`,other);continue;}
+     await expect(action).toBeEnabled();assert.deepEqual(await other.locator('.page-heading>.page-actions>button').allTextContents(),['初始化自評','Excel','PDF']);
+     await geometry(`admin-${fw}-desktop`,other);await other.setViewportSize({width:390,height:844});await geometry(`admin-${fw}-mobile`,other);
+     const beforeCancel=await ledger();await action.click();await expect(other.getByRole('dialog').locator('strong')).toHaveText(fw);await geometry(`admin-${fw}-dialog-mobile`,other);await other.getByRole('dialog').getByRole('button',{name:'取消',exact:true}).click();assert.deepEqual(await ledger(),beforeCancel);
+     // Re-prime synthetic flags only. Inactive assessments correctly reject ordinary editing:
+     // use QA fixture SQL for that inactive row, never weaken the product's INACTIVE_ITEM guard.
+     for(const row of beforeCancel.records.filter(r=>r.kind==='assessment'&&seed.assessments.some(a=>a.id===r.id&&a.reviewed)&&seed.items.some(i=>i.id===r.body.itemId&&i.frameworkId===fw))){
+      if(!seed.items.find(i=>i.id===row.body.itemId).active){await qa.db.setup.query("update compliance_private.records set version=version+1,body=body||jsonb_build_object('version',version+1,'reviewed',true) where kind='assessment' and id=$1",[row.id]);continue;}
+      const u=qa.users.owner,l=await checkedRpc(qa.db,'claim',{kind:'assessment',id:row.id},u.sessionToken,u.clientId);
+      await checkedRpc(qa.db,'save',{kind:'assessment',record:{...row.body,reviewed:true},expectedVersion:row.version,leaseToken:l.token,intent:'update',operationId:randomUUID()},u.sessionToken,u.clientId);
+      await checkedRpc(qa.db,'release',{kind:'assessment',id:row.id,leaseToken:l.token},u.sessionToken,u.clientId);
+     }
+     await other.reload();await other.locator('.main-nav').waitFor();await other.locator('.main-nav').getByRole('button',{name:fw,exact:true}).click();
+     const before=await ledger();await action.click();await other.getByRole('dialog').getByRole('button',{name:'確認初始化',exact:true}).click();await expect(other.getByRole('dialog')).toHaveCount(0);
+     const after=await ledger(),changed=assertOnlyFlags(before,after,fw);
+     await expect(other.getByText(`${fw} · 已清除完成更新勾選並讀回確認，條目數: ${changed}`,{exact:true})).toBeVisible();
+     const changedRows=after.records.filter(r=>r.kind==='assessment'&&before.records.find(p=>p.kind===r.kind&&p.id===r.id)?.version!==r.version);assert(changedRows.every(r=>r.body.updatedBy===qa.users.admin.user.id));
+     await other.reload();await other.locator('.main-nav').waitFor();await other.locator('.main-nav').getByRole('button',{name:fw,exact:true}).click();await expect(other.locator('.assessment-summary-grid>div').filter({has:other.getByText('已完成本次更新',{exact:true})}).locator('b')).toHaveText('否');
+     await other.setViewportSize({width:1440,height:1000});
+    }
+    await context2.close();
+   }
+  });
   await run('original-management-entry-still-works-and-cancels-without-writing',async()=>{const before=await ledger(),n=requests.length;await nav('Management');await page.getByRole('button',{name:'System / data',exact:true}).click();await page.getByRole('button',{name:'Start over',exact:true}).click();for(const fw of ['TMSA','DRYBMS'])await expect(dialog().getByRole('button',{name:fw,exact:true})).toBeEnabled();await dialog().getByRole('button',{name:'No',exact:true}).click();assert.deepEqual(await ledger(),before);assert.equal(requests.length,n);});
  }
  assert.equal(receipt.blockedExternal,0);assert.deepEqual(receipt.errors,[]);receipt.status='PASS';

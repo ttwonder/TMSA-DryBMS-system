@@ -28,20 +28,20 @@ function context(state:PlatformState):PageProps{
  const api=new Proxy({config:{url:'http://127.0.0.1',anonKey:'qa-public'},clientId:'qa',sessionToken:''},{get(target,key){return key in target?target[key as keyof typeof target]:forbidden;}}) as unknown as ApiClient;
  return {state,user:state.people[0],api,lang:'zh',t:(zh)=>zh,refresh:async()=>forbidden(),notify:forbidden,navigate:forbidden};
 }
-for(const frameworkId of ['TMSA','DRYBMS'] as const)for(const lang of ['zh','en'] as const)test(`${frameworkId} ${lang} initialization shortcut precedes Excel and PDF for Owner`,()=>{
+for(const frameworkId of ['TMSA','DRYBMS'] as const)for(const lang of ['zh','en'] as const)for(const role of ['owner','admin'] as const)test(`${frameworkId} ${lang} initialization shortcut precedes Excel and PDF for ${role}`,()=>{
  const state=layoutFixture() as PlatformState,ctx=context(state),before=JSON.stringify(state);
- const html=renderToStaticMarkup(createElement(FrameworkPage,{...ctx,user:{...ctx.user,role:'owner',active:true},lang,t:(zh,en)=>lang==='zh'?zh:en,frameworkId}));
+ const html=renderToStaticMarkup(createElement(FrameworkPage,{...ctx,user:{...ctx.user,role,active:true},lang,t:(zh,en)=>lang==='zh'?zh:en,frameworkId}));
  const label=lang==='zh'?'初始化自評':'Initialize self-assessment';
  const actions=[...html.matchAll(/<button\b[^>]*>([^<]*)<\/button>/g)].map(match=>match[1]);
  assert(actions.includes(label),'The original framework page must expose the requested initialization action');
  assert(actions.indexOf(label)<actions.indexOf('Excel'));assert(actions.indexOf('Excel')<actions.indexOf('PDF'));
  assert.equal(JSON.stringify(state),before,'Rendering must not reset any assessment');
 });
-test('framework initialization shortcut retains the existing Owner-only authority',()=>{
+test('framework initialization shortcut is absent for operators and inactive privileged accounts',()=>{
  const state=layoutFixture() as PlatformState,ctx=context(state);
- for(const frameworkId of ['TMSA','DRYBMS'] as const)for(const role of ['admin','operator','vessel'] as const){
-  const html=renderToStaticMarkup(createElement(FrameworkPage,{...ctx,user:{...ctx.user,role},frameworkId}));
-  assert(!html.includes('初始化自評'),'A new entry must not broaden the server role policy');
+ for(const frameworkId of ['TMSA','DRYBMS'] as const)for(const [role,active] of [['operator',true],['vessel',true],['owner',false],['admin',false]] as const){
+  const html=renderToStaticMarkup(createElement(FrameworkPage,{...ctx,user:{...ctx.user,role,active},frameworkId}));
+  assert(!html.includes('初始化自評'),'Only active Owner/admin accounts can see initialization');
  }
 });
 test('TMSA has separate accessible guidance, assessment and evidence regions, without data writes',()=>{
