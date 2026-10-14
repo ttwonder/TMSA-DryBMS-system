@@ -58,6 +58,27 @@ const source = (name: string): string => {
   return existsSync(path) ? readFileSync(path, 'utf8') : '';
 };
 
+test('Observation and OFI both create linked actions without changing their source or grading', () => {
+  for (const classification of ['finding', 'ofi'] as const) {
+    const state=fixture(),inspection=Inspections.createInspectionDraft(state,'TMSA'),f=finding(state,classification);
+    inspection.findings=[f];state.inspections=[inspection];const before=JSON.stringify(inspection);
+    const action=Inspections.improvementFromFinding(inspection,f);
+    assert.equal(action.inspectionId,inspection.id);assert.equal(action.findingId,f.id);assert.equal(action.sourceKey,`${inspection.id}:${f.id}`);
+    assert.deepEqual(action.itemIds,f.itemIds);assert.deepEqual(action.sources,f.sources);assert.deepEqual(action.content,f.observation);
+    assert.equal(Improvements.improvementValidation(action,context(state)),'');assert.equal(JSON.stringify(inspection),before);
+  }
+});
+
+test('linked source categories remain separately visible in the original item table and action list', async () => {
+  const state=fixture(),inspection=Inspections.createInspectionDraft(state,'TMSA');state.inspections=[inspection];
+  inspection.findings=['finding','ofi'].map((c,n)=>({...finding(state,c as Finding['classification']),id:`class-${n}`}));
+  state.improvements=inspection.findings.map(f=>Inspections.improvementFromFinding(inspection,f));
+  const {default:FrameworkPage}=await import('../src/FrameworkPage.tsx');
+  for(const element of [createElement(FrameworkPage,{...context(state),frameworkId:'TMSA'}),createElement(Improvements.default,context(state))]){
+    const html=renderToStaticMarkup(element);assert.match(html,/缺失/);assert.match(html,/建議改善/);
+  }
+});
+
 test('improvement export sends explicit intersected IDs and canonical authorized state', () => {
   const code = source('Improvements');
   assert.match(code, /effectiveSelection/);

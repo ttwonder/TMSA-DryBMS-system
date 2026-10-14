@@ -1,3 +1,4 @@
+import {findingClassificationLabel,improvementFindingClassification} from './findingClassification.ts';
 import type ExcelJS from 'exceljs';
 import type { PDFDocument, PDFFont, PDFPage } from 'pdf-lib';
 // Heavy libraries execute only when an export is requested.
@@ -436,7 +437,7 @@ export async function buildFrameworkPdf(state:PlatformState,frameworkId:Framewor
 }
 function improvementSource(state:PlatformState,row:Improvement,lang:Language) {
   const inspection=state.inspections.find(i=>i.id===row.inspectionId);
-  return [`${tr(lang,'來源類型','Source type')}: ${row.source==='external'?tr(lang,'外部檢查','External inspection'):tr(lang,'非外部 / 公司改善','Non-external / company improvement')}`,row.inspectionId?`${tr(lang,'檢查','Inspection')}: ${row.inspectionId} ${inspection?.title??''}`:'',row.findingId?`${tr(lang,'發現編號','Finding ID')}: ${row.findingId}`:'',row.sourceKey?`${tr(lang,'來源去重鍵','Source key')}: ${row.sourceKey}`:'',sourcesText(row.sources)].filter(Boolean).join('\n');
+  return [`${tr(lang,'來源類型','Source type')}: ${row.source==='external'?tr(lang,'外部檢查','External inspection'):tr(lang,'非外部 / 公司改善','Non-external / company improvement')}`,row.source==='external'?`${tr(lang,'分類','Classification')}: ${findingClassificationLabel(improvementFindingClassification(state,row),lang)}`:'',row.inspectionId?`${tr(lang,'檢查','Inspection')}: ${row.inspectionId} ${inspection?.title??''}`:'',row.findingId?`${tr(lang,'發現編號','Finding ID')}: ${row.findingId}`:'',row.sourceKey?`${tr(lang,'來源去重鍵','Source key')}: ${row.sourceKey}`:'',sourcesText(row.sources)].filter(Boolean).join('\n');
 }
 export async function buildImprovementsPdf(state:PlatformState,ids:string[],lang:Language,title?:string,options:ReportBuildOptions={}):Promise<Uint8Array> {
   const rows=selectedImprovementRows(state,ids),reportTitle=title??tr(lang,'明選改善項目報告','Explicitly selected improvements');
@@ -487,8 +488,8 @@ export async function buildInspectionPdf(state:PlatformState,inspectionId:string
   if(coverage.orphanResults.length){pdf.heading(tr(lang,'無對應凍結條目之結果','Results without a frozen item'));for(const r of coverage.orphanResults)pdf.paragraph(`${r.itemId}\nY/N: ${responseText(r)} | ${tr(lang,'更新','Reviewed')}: ${r.reviewed?'Y':'N'} | ${tr(lang,'符合程度','Conformity')}: ${r.conformity}\n${bilingual(r.observation)}\n${bilingual(r.recommendation)}`);}
   pdf.heading(tr(lang,'完整檢查發現與建議','Complete findings and recommendations'));
   const findingHeaders=lang==='zh'?['發現編號 / 分類','關聯 Item','完整觀察','完整建議','來源 / 警示']:['Finding ID / Class','Related items','Full observation','Full recommendation','Sources / Warnings'];
-  const classLabels={finding:'發現',positive:'正面觀察',guidance:'指引',no_finding:'無缺失',general:'一般事項'};
-  pdf.table(findingHeaders,[13,12,30,30,19],inspection.findings.map(f=>({key:f.id.slice(0,12),warning:!!f.warning,cells:[`${f.id}\n${tr(lang,classLabels[f.classification],f.classification)}`,f.itemIds.map(id=>inspection.snapshot.items.find(i=>i.id===id)?.code??id).join('\n')||tr(lang,'一般事項 / 無條目連結','General / no item link'),bilingual(f.observation),bilingual(f.recommendation),[sourcesText(f.sources),f.warning].filter(Boolean).join('\n')]})));
+  const classLabels={positive:'正面觀察',guidance:'指引',no_finding:'無缺失',general:'一般事項'};
+  pdf.table(findingHeaders,[13,12,30,30,19],inspection.findings.map(f=>({key:f.id.slice(0,12),warning:!!f.warning,cells:[`${f.id}\n${f.classification==='finding'||f.classification==='ofi'?findingClassificationLabel(f.classification,lang):tr(lang,classLabels[f.classification],f.classification)}`,f.itemIds.map(id=>inspection.snapshot.items.find(i=>i.id===id)?.code??id).join('\n')||tr(lang,'一般事項 / 無條目連結','General / no item link'),bilingual(f.observation),bilingual(f.recommendation),[sourcesText(f.sources),f.warning].filter(Boolean).join('\n')]})));
   return pdf.finish();
 }
 export async function buildOverviewPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions & {filters?:Filters}={}):Promise<Uint8Array> {

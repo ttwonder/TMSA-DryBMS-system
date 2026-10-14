@@ -15,6 +15,8 @@
     "qa:inspection-sections-bulk": "node --experimental-strip-types scripts/verify-inspection-sections-bulk.mjs",
     "qa:improvement-input": "node --experimental-strip-types scripts/verify-improvement-input.mjs",
     "qa:inspection-input": "node --experimental-strip-types scripts/verify-inspection-input.mjs",
+    "qa:finding-classification": "node --experimental-strip-types scripts/verify-finding-classification.mjs",
+    "qa:finding-classification-reports": "node --experimental-strip-types scripts/verify-finding-classification-reports.mjs",
     "qa:tmsa14": "node --experimental-strip-types scripts/verify-tmsa14.mjs",
     "qa:tmsa14-reports": "node --experimental-strip-types scripts/verify-tmsa14-reports.mjs",
     "qa:inspection-chapter-scores": "node --experimental-strip-types scripts/verify-inspection-chapter-scores.mjs",

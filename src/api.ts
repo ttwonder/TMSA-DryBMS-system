@@ -137,7 +137,10 @@ class SupabaseApi implements ApiClient {
       const i=result.inspection;
       if(result.metadataToken!==metadata&&metadata||!i||i.id!==summary.id||i.version!==summary.version||!i.snapshot?.framework||!Array.isArray(i.snapshot.items)||!Array.isArray(i.snapshot.chapters)||!Array.isArray(i.results)||!Array.isArray(i.findings))throw new RpcError('DETAIL_COVERAGE_INVALID');
       if('detail' in summary){
-        const projected=inspectionSummary(i);
+        const fullProjection=inspectionSummary(i);
+        // 011 adds optional classification metadata; compare every legacy field unchanged.
+        const {findingClassifications:_classes,...legacyProjection}=fullProjection;
+        const projected='findingClassifications' in summary?fullProjection:legacyProjection;
         const canonical=(v:unknown):string=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))):x);
         if(canonical(projected)!==canonical(summary))throw new RpcError('DETAIL_SUMMARY_MISMATCH');
       }
