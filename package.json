@@ -26,6 +26,7 @@
     "qa:excel-header-removal": "node --experimental-strip-types scripts/verify-excel-header-removal.mjs",
     "qa:report-fallback": "node --experimental-strip-types scripts/verify-report-fallback-browser.mjs",
     "qa:export-person-references": "node --experimental-strip-types scripts/verify-export-person-references.mjs --ui",
+    "qa:framework-initialize": "node --experimental-strip-types scripts/verify-framework-initialize.mjs",
     "qa:restart-updates": "node --experimental-strip-types scripts/verify-restart-updates.mjs",
     "qa:restart-updates-ui": "node --experimental-strip-types scripts/verify-restart-updates-ui.mjs",
     "qa:shared-targets": "node --experimental-strip-types scripts/verify-shared-targets.mjs",
