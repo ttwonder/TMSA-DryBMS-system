@@ -67,7 +67,8 @@ try{
  const percentage=level=>modal().locator('label').filter({hasText:new RegExp(`^${level} %`)}).locator('select');
  const expectScores=async(frameworkId,p=page)=>{
   const buttons=nav(p).getByRole('button'),scores=nav(p).locator('.inspection-chapter-score');
-  assert.equal(await buttons.count(),expected[frameworkId].length,'Every frozen chapter retains a navigation button');
+  assert.equal(await buttons.count(),expected[frameworkId].length+1,'Every frozen chapter retains a navigation button, followed by findings');
+  await expect(buttons.last()).toHaveText(/^(缺陷／改善建議|Findings \/ recommendations)$/);assert.equal(await buttons.last().locator('.inspection-chapter-score').count(),0);
   await expect(scores).toHaveCount(expected[frameworkId].length);
   for(const [index,value] of expected[frameworkId].entries()){
    if(value===null){await expect(scores.nth(index)).toContainText(/未完整記分|Not fully graded/);await expect(scores.nth(index)).not.toContainText(/\d\.\d{2} \/ 4/);}

@@ -34,7 +34,7 @@ try {
   seed.inspections.push({...base,id:`history-${fw}`,frameworkId:fw,title:`History QA ${fw}`,organization:'Synthetic QA',date:'2026-01-01',type:'formal',status:'final',imported:true,snapshot:structuredClone({framework:seed.frameworks.find(f=>f.id===fw),chapters,items,scoringVersion:fw==='TMSA'?'company-20-equal-stage-v1':'drybms-guidance-v1.1-p7'}),results:items.map(i=>({itemId:i.id,response:null,conformity:'none',reviewed:false,observation:{en:'',zh:''},recommendation:{en:'',zh:''}})),findings:[],scoreNote:{en:'Synthetic original snapshot; item results are deliberately unknown. '.repeat(3),zh:'合成原始快照，逐項結果維持未知，不從目前自評自動帶入。'.repeat(3)},...(fw==='DRYBMS'?{dryLevels:Object.fromEntries(chapters.map(c=>[c.id,[null,null,null,null]]))}:{})});
  }
  qa=await startQaServer({seed,evidenceDir:out});
- for(const path of ['006_restart_updates.sql','007_shared_targets.sql'])await qa.db.setup.query(readFileSync(join(root,'supabase/migrations',path),'utf8'));
+ for(const path of ['006_restart_updates.sql','007_shared_targets.sql','008_inspection_history.sql'])await qa.db.setup.query(readFileSync(join(root,'supabase/migrations',path),'utf8'));
  vite=await createServer({root,base:'/',server:{host:'127.0.0.1',port:0,strictPort:true,watch:{ignored:['**/qa-evidence/**','**/private-seed/**']}},logLevel:'error'});await vite.listen();const ui=`http://127.0.0.1:${vite.httpServer.address().port}`;
  browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});
  const context=await browser.newContext({viewport:{width:1440,height:1000}});
@@ -47,10 +47,10 @@ try {
  const initial=await ledger();const run=async(id,fn)=>{current=id;await fn();receipt.cases.push({id,status:'PASS'});};
  const scrollCase=async(fw,language,width,mode)=>{
   await changeLanguage(language);await page.setViewportSize({width,height:width===390?844:1000});await nav(text('歷史檢查記錄','Inspection history')).click();
-  const row=page.locator('.data-table tbody tr').filter({hasText:`History QA ${fw}`});await row.getByRole('button',{name:mode==='revision'?text('建立修訂副本','Create revision'):text('查看','View'),exact:true}).click();
+  const row=page.locator('.data-table tbody tr').filter({hasText:`History QA ${fw}`});await row.getByRole('button',{name:mode==='revision'?text('直接修改','Edit directly'):text('查看','View'),exact:true}).click();
   const modal=page.getByRole('dialog'),body=modal.locator('.modal-body'),chapters=body.locator('.chapter-navigation'),firstItem=body.locator('.inspection-item').first();await firstItem.waitFor();
-  if(mode==='revision') {await expect(modal.getByRole('button',{name:text('保存草稿','Save draft'),exact:true})).toBeEnabled();await expect(body.getByText(`history-${fw}`,{exact:false})).toBeVisible();}
-  await expect(chapters.getByRole('button')).toHaveCount(fw==='TMSA'?20:30);
+  if(mode==='revision') {await expect(modal.getByRole('button',{name:text('保存檢查','Save inspection'),exact:true})).toBeEnabled();await expect(body.getByLabel(text('標題','Title'),{exact:true})).toHaveValue(`History QA ${fw}`);}
+  await expect(chapters.getByRole('button')).toHaveCount((fw==='TMSA'?20:30)+1);await expect(chapters.getByRole('button').last()).toHaveText(text('缺陷／改善建議','Findings / recommendations'));
   const before=await chapters.evaluate(el=>({nav:el.getBoundingClientRect().toJSON(),body:el.parentElement.getBoundingClientRect().toJSON(),position:getComputedStyle(el).position,fontSize:getComputedStyle(el.firstElementChild).fontSize,scrollHeight:el.scrollHeight}));
   if(redNavigation){const path=join(out,'before-scroll.png');await page.screenshot({path});receipt.screenshots.push(path);}
   await body.evaluate(el=>{const nav=el.querySelector('.chapter-navigation');el.scrollTop+=nav.getBoundingClientRect().bottom-el.getBoundingClientRect().top+32;});
@@ -61,7 +61,7 @@ try {
   assert(geometry.documentWidth<=geometry.viewport+1,'No page-wide horizontal overflow');assert(geometry.modalWidth<=geometry.modalClientWidth+1,'No modal horizontal overflow');
   assert.equal(geometry.nav.height,before.nav.height,'Navigation height must not change just because of scrolling');assert(geometry.nav.height>=geometry.scrollHeight-1,'All chapter buttons must remain unclipped');
   await body.evaluate(el=>el.scrollTop=0);await chapters.getByRole('button').nth(1).click();await expect(firstItem.locator('h4')).toContainText(`QA-${fw}-2.1`);
-  await expect(firstItem.getByRole('checkbox')).toHaveJSProperty('checked',false);await expect(firstItem.locator('select').first()).toHaveValue('');
+  await expect(firstItem.getByRole('checkbox')).toHaveCount(0);await expect(firstItem.locator('select').first()).toHaveValue('');
   await expect(firstItem.locator('select').first())[mode==='revision'?'toBeEnabled':'toBeDisabled']();
   await modal.locator(':scope > header').getByRole('button',{name:'Close',exact:true}).click();await expect(modal).toHaveCount(0);assert.deepEqual(await ledger(),initial);
  };

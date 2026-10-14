@@ -7,9 +7,19 @@ export function changeInspectionResult(current:InspectionResult,changes:Partial<
  if(next.response==='yes'&&item.sourceGap&&!item.sourceGapResolved)throw Error('SOURCE_GAP_UNRESOLVED');
  return next;
 }
-export function allInspectionCompliant(record:Inspection):{record:Inspection;skipped:StandardItem[]} {
- const skipped=record.snapshot.items.filter(item=>!!item.sourceGap&&!item.sourceGapResolved);
- return {record:{...record,results:record.snapshot.items.map(item=>{const old=record.results.find(r=>r.itemId===item.id)??emptyInspectionResult(item.id);return skipped.some(s=>s.id===item.id)?old:changeInspectionResult(old,{conformity:'all'},item);})},skipped};
+export type InspectionGradingScope = {chapterId:string;level?:StandardItem['level']};
+export function bulkInspectionGrading(record:Inspection,conformity:'all'|'none',scope?:InspectionGradingScope):{record:Inspection;skipped:StandardItem[]} {
+ const items=record.snapshot.items.filter(item=>!scope||item.chapterId===scope.chapterId&&(scope.level===undefined||item.level===scope.level));
+ const skipped=conformity==='all'?items.filter(item=>!!item.sourceGap&&!item.sourceGapResolved):[];
+ const skippedIds=new Set(skipped.map(item=>item.id));
+ const targets=new Map(items.filter(item=>!skippedIds.has(item.id)).map(item=>[item.id,item]));
+ if(!targets.size)return {record,skipped};
+ const results=record.results.map(old=>{const item=targets.get(old.itemId);if(!item)return old;targets.delete(old.itemId);return changeInspectionResult(old,{conformity},item);});
+ for(const item of targets.values())results.push(changeInspectionResult(emptyInspectionResult(item.id),{conformity},item));
+ return {record:{...record,results},skipped};
+}
+export function allInspectionCompliant(record:Inspection,scope?:InspectionGradingScope):{record:Inspection;skipped:StandardItem[]} {
+ return bulkInspectionGrading(record,'all',scope);
 }
 export function inspectionChapterStatus(record:Inspection,chapterId:string):{color:'green'|'yellow'|'red';incomplete:boolean} {
  const items=record.snapshot.items.filter(i=>i.active&&i.chapterId===chapterId),results=items.map(i=>record.results.find(r=>r.itemId===i.id));

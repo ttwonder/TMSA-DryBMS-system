@@ -18,6 +18,8 @@
 .modal-body>.chapter-navigation{position:static;top:auto;max-height:none;overflow:visible}
 .modal-body>.chapter-navigation>.btn{display:block;white-space:normal;overflow-wrap:anywhere}
 .inspection-chapter-score{display:inline-block;font-variant-numeric:tabular-nums}
+.inspection-chapter-actions{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.inspection-chapter-actions>.btn{white-space:normal;overflow-wrap:anywhere;max-width:100%}
 /* Dense default filters; expanded controls retain their exact selections. */
 .secondary-filters{flex:1 1 180px;min-width:140px;max-width:100%}
 .secondary-filters>summary{min-height:34px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;background:#f4f7fa;cursor:pointer;font-size:14px;color:var(--blue)}
