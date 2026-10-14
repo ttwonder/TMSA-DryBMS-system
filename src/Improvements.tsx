@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BiText, Improvement, PageProps, BrowseState, Inspection, ProgressEvent, SaveIntent } from './types';
 import { bi, departmentsLabel, filteredImprovements, hasPermission, isoNow, newBase, openIssuesFor, peopleLabel } from './domain';
 import type { Filters } from './domain';
@@ -47,6 +47,8 @@ export function resolveImprovementFocus(state: Pick<BrowseState,'items'|'improve
   if (state.items.some(row => row.id === focusId)) return { kind: 'item', id: focusId };
   return null;
 }
+// Keep unchanged option controls out of text-input commits, without changing other pages' pickers.
+const ImprovementMultiSelect = memo(MultiSelect);
 export type InlineImprovementTarget = { itemId: string; action: 'create' | 'progress' | 'full' | 'view'; improvementId?: string };
 export default function Improvements(ctx: PageProps & { focusId?: string; inlineTarget?: InlineImprovementTarget; onInlineClose?: () => void }) {
   const { t } = ctx;
@@ -78,7 +80,15 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   const statusLabel = (value: Improvement['status']) => value === 'closed' ? t('已結案', 'Closed') : value === 'in_progress' ? t('進行中', 'In progress') : t('待處理', 'Open');
   const urgencyLabel = (value: Improvement['urgency']) => ({ urgent: t('盡快', 'As soon as possible'), high: t('高', 'High'), medium: t('中', 'Medium'), low: t('低', 'Low') }[value]);
   const setFilter = (key: keyof Filters, value: string) => setFilters(old => ({ ...old, [key]: value }));
-  const patch = (value: Partial<Improvement>) => editor.setDraft(old => old ? { ...old, ...value } : old);
+  const draftWriter = useRef(editor.setDraft);
+  draftWriter.current = editor.setDraft;
+  const patch = useCallback((value: Partial<Improvement>) => draftWriter.current(old => old ? { ...old, ...value } : old), []);
+  const itemOptions = useMemo(() => state.items.filter(item => item.active || draft?.itemIds.includes(item.id)).map(item => ({ id: item.id, label: `${item.frameworkId} ${item.code} · ${bi(item.kpi, ctx.lang)}${item.active ? '' : t('（停用）', ' (inactive)')}` })), [state.items, draft?.itemIds, ctx.lang, t]);
+  const formDepartments = useMemo(() => departmentOptions(ctx), [ctx.state.settings.departments, ctx.lang]);
+  const formPeople = useMemo(() => peopleOptions(ctx), [ctx.state.people]);
+  const changeItems = useCallback((itemIds: string[]) => patch({ itemIds }), [patch]);
+  const changeDepartments = useCallback((departmentIds: string[]) => patch({ departmentIds }), [patch]);
+  const changeAssignees = useCallback((assigneeIds: string[]) => patch({ assigneeIds }), [patch]);
   const changeTitle = (lang: 'en' | 'zh', value: string) => { if (draft) { const parts = improvementTitle(draft.title); parts[lang] = value; patch({ title: `${parts.en}\n${parts.zh}` }); } };
   const discard = () => { if (editor.busy) return; if (!editor.isDirty || window.confirm(t('放棄此草稿？取消不會保存。', 'Discard this draft? Cancel does not save.'))) void editor.cancel().then(() => ctx.onInlineClose?.()); };
 
@@ -206,8 +216,8 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
       {mode === 'full' ? <div className="form-grid">
         <label className="field">{t('標題（英文）', 'Title (English)')}<input value={improvementTitle(draft.title).en} onChange={event => changeTitle('en', event.target.value)} /></label><label className="field">{t('標題（繁中）', 'Title (Traditional Chinese)')}<input value={improvementTitle(draft.title).zh} onChange={event => changeTitle('zh', event.target.value)} /></label>
         <label className="field">{t('內容（英文）', 'Content (English)')}<textarea rows={5} value={draft.content.en} onChange={event => patch({ content: { ...draft.content, en: event.target.value } })} /></label><label className="field">{t('內容（繁中）', 'Content (Traditional Chinese)')}<textarea rows={5} value={draft.content.zh} onChange={event => patch({ content: { ...draft.content, zh: event.target.value } })} /></label>
-        <MultiSelect label={t('相關Item（可跨框架）', 'Related items (cross-framework)')} options={state.items.filter(item => item.active || draft.itemIds.includes(item.id)).map(item => ({ id: item.id, label: `${item.frameworkId} ${item.code} · ${bi(item.kpi, ctx.lang)}${item.active ? '' : t('（停用）', ' (inactive)')}` }))} selected={draft.itemIds} onChange={itemIds => patch({ itemIds })} />
-        <MultiSelect label={t('負責部門', 'Responsible departments')} options={departmentOptions(ctx)} selected={draft.departmentIds} onChange={departmentIds => patch({ departmentIds })} /><MultiSelect label={t('執行人', 'Assignees')} options={peopleOptions(ctx)} selected={draft.assigneeIds} onChange={assigneeIds => patch({ assigneeIds })} />
+        <ImprovementMultiSelect label={t('相關Item（可跨框架）', 'Related items (cross-framework)')} options={itemOptions} selected={draft.itemIds} onChange={changeItems} />
+        <ImprovementMultiSelect label={t('負責部門', 'Responsible departments')} options={formDepartments} selected={draft.departmentIds} onChange={changeDepartments} /><ImprovementMultiSelect label={t('執行人', 'Assignees')} options={formPeople} selected={draft.assigneeIds} onChange={changeAssignees} />
         <label className="field">{t('急迫程度', 'Urgency')}<select value={draft.urgency} onChange={event => patch({ urgency: event.target.value as Improvement['urgency'] })}>{(['urgent', 'high', 'medium', 'low'] as const).map(value => <option key={value} value={value}>{urgencyLabel(value)}</option>)}</select></label>
         <label className="field">{t('目標日期', 'Target date')}<input type="date" value={draft.targetDate} onChange={event => patch({ targetDate: event.target.value })} /></label><label className="field">{t('改善計劃', 'Action plan')}<textarea rows={4} value={draft.plan} onChange={event => patch({ plan: event.target.value })} /></label>
         <label className="field">{t('來源', 'Source')}<select value={draft.source} disabled={draft.version > 0} onChange={event => patch({ source: event.target.value as Improvement['source'], inspectionId: undefined, findingId: undefined, sourceKey: undefined, sources: [] })}><option value="non_external">{t('非外部', 'Non-external')}</option><option value="external">{t('外部檢查', 'External inspection')}</option></select></label>
