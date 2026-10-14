@@ -24,6 +24,13 @@
 .secondary-filter-fields>label{flex:1 1 140px;max-width:100%;min-width:120px}
 .filter-active{font-weight:650;color:#286c49}
 .data-table{background:#fff}
+/* Audit summaries get the widest column; long Item lists cannot squeeze them out. */
+.audit-table{table-layout:fixed;min-width:900px}
+.audit-table th{white-space:normal;overflow-wrap:anywhere}
+.audit-table th:nth-child(1){width:16%}
+.audit-table th:nth-child(2){width:12%}
+.audit-table th:nth-child(3){width:22%}
+.audit-table th:nth-child(4){width:50%}
 @media(max-width:620px){
  .page-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}
  .page-heading>div:first-child{display:contents}

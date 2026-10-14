@@ -11,6 +11,7 @@
     "qa:native": "node scripts/verify-native.mjs",
     "qa:browser": "node scripts/verify-browser.mjs",
     "qa:layout": "node --experimental-strip-types scripts/verify-layout.mjs",
+    "qa:audit-layout": "node --experimental-strip-types scripts/verify-audit-layout.mjs",
     "qa:handoff": "node scripts/verify-deployment-handoff.mjs",
     "qa:read-timeout": "node --experimental-strip-types scripts/verify-read-timeout.mjs",
     "qa:performance": "node --experimental-strip-types scripts/verify-performance.mjs",
