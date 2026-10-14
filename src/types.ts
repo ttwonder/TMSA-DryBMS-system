@@ -5,7 +5,7 @@ export type Page = 'overview' | 'TMSA' | 'DRYBMS' | 'improvements' | 'inspection
 export interface BiText { en:string; zh:string }
 export interface BaseEntity { id:string; version:number; createdAt:string; updatedAt:string; updatedBy:string }
 export interface SourceLocator { source:string; file?:string; sheet?:string; cell?:string; pages?:number[]; rawItem?:string; note?:string }
-export interface Framework extends BaseEntity { name:BiText; description:BiText; scoring:'tmsa-stage'|'drybms-guidance'; active:boolean; sourceVersion:string; scopeLabel:BiText; scoreTargets?:Record<string,number|null> }
+export interface Framework extends BaseEntity { name:BiText; description:BiText; scoring:'tmsa-stage'|'drybms-guidance'; active:boolean; sourceVersion:string; scopeLabel:BiText; scoreTargets?:Record<string,number|null>; includeTmsaChapter14?:boolean }
 export interface Chapter extends BaseEntity { frameworkId:FrameworkId; code:string; name:BiText; aim?:BiText; order:number; active:boolean; priority?:boolean }
 export interface StandardItem extends BaseEntity { frameworkId:FrameworkId; chapterId:string; code:string; level:number; order:number; active:boolean; kpi:BiText; guidance:BiText; departmentIds:string[]; sources:SourceLocator[]; sourceGap?:string; sourceGapResolved?:boolean; analysisIndex?:boolean; sourceOriginals?:{id:string;kind:string;en:string;page:number}[]; crosswalk?:{tmsaItemCodes:string[];match:string;difference:string;attention:string}; aliases?:string[] }
 export interface DepartmentResponse { departmentId:string; response:'yes'|'no'|null; assessment:BiText; evidence:BiText; source:SourceLocator }
@@ -14,7 +14,7 @@ export interface ProgressEvent { id:string; at:string; by:string; content:string
 export interface Improvement extends BaseEntity { title:string; content:BiText; itemIds:string[]; departmentIds:string[]; assigneeIds:string[]; source:'external'|'non_external'; inspectionId?:string; findingId?:string; sourceKey?:string; urgency:'urgent'|'high'|'medium'|'low'; status:'open'|'in_progress'|'closed'; percent:number; targetDate:string; plan:string; events:ProgressEvent[]; closedAt:string|null; closedBy:string|null; sources:SourceLocator[] }
 export interface InspectionResult { itemId:string; response:'yes'|'no'|null; conformity:'all'|'partial'|'none'; reviewed:boolean; observation:BiText; recommendation:BiText }
 export interface Finding { id:string; itemIds:string[]; classification:'finding'|'positive'|'guidance'|'no_finding'|'general'; observation:BiText; recommendation:BiText; sources:SourceLocator[]; warning?:string }
-export interface Inspection extends BaseEntity { frameworkId:FrameworkId; title:string; organization:string; date:string; type:'formal'|'informal'; status:'draft'|'final'; snapshot:{framework:Framework;chapters:Chapter[];items:StandardItem[];scoringVersion:string}; results:InspectionResult[]; findings:Finding[]; dryLevels?:Record<string,[number|null,number|null,number|null,number|null]>; supersedesId?:string; imported:boolean; scoreNote?:BiText }
+export interface Inspection extends BaseEntity { frameworkId:FrameworkId; title:string; organization:string; date:string; type:'formal'|'informal'; status:'draft'|'final'; snapshot:{framework:Framework;chapters:Chapter[];items:StandardItem[];scoringVersion:string}; results:InspectionResult[]; findings:Finding[]; dryLevels?:Record<string,[number|null,number|null,number|null,number|null]>; supersedesId?:string; imported:boolean; scoreNote?:BiText; includeTmsaChapter14?:boolean }
 export interface Person extends BaseEntity { username:string; name:string; departmentId:string; role:Role; active:boolean; hasPassword:boolean }
 /** Gate-authorized display enrichment; never persisted as a person record. */
 export interface RosterPerson extends Person { departmentName?:BiText }
@@ -28,7 +28,7 @@ export interface PlatformState { frameworks:Framework[]; chapters:Chapter[]; ite
 /** Exact frozen fields consumed by the shared scoring core; never a full snapshot. */
 export type ScoreItem = Pick<StandardItem,'id'|'chapterId'|'code'|'level'|'active'|'sourceGap'|'sourceGapResolved'>;
 export type ScoreChapter = Pick<Chapter,'id'|'frameworkId'|'active'|'order'>;
-export interface FrozenInspectionScoring {frameworkId:FrameworkId;snapshot:{chapters:ScoreChapter[];items:ScoreItem[]};results:Pick<InspectionResult,'itemId'|'response'|'conformity'|'reviewed'>[];dryLevels?:Inspection['dryLevels']}
+export interface FrozenInspectionScoring {frameworkId:FrameworkId;snapshot:{chapters:ScoreChapter[];items:ScoreItem[]};results:Pick<InspectionResult,'itemId'|'response'|'conformity'|'reviewed'>[];dryLevels?:Inspection['dryLevels'];includeTmsaChapter14?:boolean}
 export interface ReadonlyInspectionSummary extends Pick<Inspection,'id'|'version'|'createdAt'|'updatedAt'|'updatedBy'|'frameworkId'|'title'|'organization'|'date'|'type'|'status'|'supersedesId'|'imported'> {readonly detail:'summary';readonly scoring:FrozenInspectionScoring;readonly counts:{chapters:number;items:number;results:number;findings:number}}
 /** Live data has explicit summary coverage, not empty pretend-complete metadata. */
 export interface LiveView extends Omit<PlatformState,'inspections'|'cycles'|'provenance'> {inspections:(ReadonlyInspectionSummary|Inspection)[];controlSummary:{cycles:number;provenance:number};historyMode:'readonly-summary-v1'}

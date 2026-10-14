@@ -171,6 +171,7 @@
 .progress-controls .progress-urgency>span{min-height:0}
 @media(max-width:700px){.progress-editor-grid{grid-template-columns:1fr}.progress-editor-grid .progress-text textarea{min-height:180px}.progress-controls>.field>span{min-height:25px}.multi-select-dropdown .multi-select>div{grid-template-columns:1fr}}
 
+.scoring-scope{margin:6px 0}.scoring-scope .page-actions{align-items:center;flex-wrap:wrap}.tmsa14-switch{display:inline-flex;align-items:center;gap:6px}.tmsa14-switch .scope-light{width:10px;height:10px;border-radius:50%;background:#7b8794;flex:none}.tmsa14-switch.included{background:#e7f6ed;color:#145a32;border-color:#27864b}.tmsa14-switch.included .scope-light{background:#168341;box-shadow:0 0 0 2px #c2e6cf}.tmsa14-switch.excluded{background:#edf0f3;color:#354254;border-color:#8b97a5}.scoring-scope small{white-space:normal}.score-card-footer .inspection-scope{display:block}
 /* U6 changes navigation presentation only; full scoring/export dimensions stay unchanged. */
 .navigation-department-filter{min-width:0;grid-column:1/-1;margin-top:7px}
 .navigation-department-filter .picker-selection{display:none}

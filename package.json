@@ -14,6 +14,8 @@
     "qa:audit-layout": "node --experimental-strip-types scripts/verify-audit-layout.mjs",
     "qa:inspection-sections-bulk": "node --experimental-strip-types scripts/verify-inspection-sections-bulk.mjs",
     "qa:improvement-input": "node --experimental-strip-types scripts/verify-improvement-input.mjs",
+    "qa:tmsa14": "node --experimental-strip-types scripts/verify-tmsa14.mjs",
+    "qa:tmsa14-reports": "node --experimental-strip-types scripts/verify-tmsa14-reports.mjs",
     "qa:inspection-chapter-scores": "node --experimental-strip-types scripts/verify-inspection-chapter-scores.mjs",
     "qa:handoff": "node scripts/verify-deployment-handoff.mjs",
     "qa:read-timeout": "node --experimental-strip-types scripts/verify-read-timeout.mjs",

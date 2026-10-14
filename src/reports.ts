@@ -5,7 +5,7 @@ const loadExcel = async () => (await import('exceljs')).default;
 const loadZip = async () => (await import('jszip')).default;
 let rgb:typeof import('pdf-lib')['rgb'];
 import type { Assessment, BiText, Chapter, ExportRequest, FrameworkId, Improvement, Inspection, Language, PageProps, PlatformState, BrowseState, SourceLocator, StandardItem } from './types.ts';
-import { assessmentFor, departmentsLabel, filteredImprovements, frameworkScore, hasPermission, inspectionScore, openIssuesFor, peopleLabel, type Filters } from './domain.ts';
+import { assessmentFor, currentIncludesTmsa14, inspectionIncludesTmsa14, departmentsLabel, filteredImprovements, frameworkScore, hasPermission, inspectionScore, openIssuesFor, peopleLabel, type Filters } from './domain.ts';
 
 export interface ReportFieldLine {fieldId:string;page:number;x:number;baseline:number;width:number;size:number}
 export interface ReportBuildOptions { templateBytes?:Uint8Array; fontBytes?:Uint8Array; fallbackFontBytes?:Uint8Array[]; onFieldLine?:(line:ReportFieldLine)=>void; }
@@ -413,6 +413,7 @@ function itemPdfRows(state:PlatformState,items:StandardItem[],lang:Language):Pdf
 }
 const frameworkHeaders=(lang:Language)=>lang==='zh'?['Item','KPI\n關鍵績效指標','BPG\n最佳實務指引','Y/N','目前自評 / 關聯改善','佐證','負責部門']:['Item','Key Performance Indicator','Best Practice Guidance','Y/N','Current assessment / Improvements','Evidence','PIC / Departments'];
 const frameworkRatios=[7,20,24,5,25,14,9];
+const tmsa14ReportScope=(included:boolean,count:number,lang:Language)=>tr(lang,`有效計分範圍：${count} 分章等權；第14章：${included?'納入':'不納入'}。原條文及逐項評定全部保留。`,`Scoring scope: ${count} equal-weight chapters; TMSA chapter 14: ${included?'included':'excluded'}. All definitions and item grades are retained.`);
 export async function buildFrameworkPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
   const chapters=selectedChapters(state,frameworkId,chapterIds),framework=state.frameworks.find(f=>f.id===frameworkId)!;
   const title=`${frameworkId} · ${tr(lang,'完整自評報告','Full self-assessment report')}`;
@@ -420,10 +421,12 @@ export async function buildFrameworkPdf(state:PlatformState,frameworkId:Framewor
   pdf.paragraph(bilingual(framework.scopeLabel));pdf.paragraph(bilingual(framework.description));
   pdf.paragraph(tr(lang,'英文上、繁中下。Y/N、完成更新、符合程度、執行狀態、改善結案各自獨立。停用條目不列入目前報告。','English above Traditional Chinese. Y/N, review, conformity, execution and improvement closure are independent. Inactive items are excluded from current reports.'),PDF_AUX);
   const score=frameworkScore(state,frameworkId,chapters.map(c=>c.id));
+  if(frameworkId==='TMSA')pdf.paragraph(tmsa14ReportScope(currentIncludesTmsa14(state),score.totalChapters,lang),PDF_AUX);
   pdf.paragraph(`${tr(lang,'所選分章等權平均','Equal-weight mean of selected complete chapters')}: ${score.score===null?tr(lang,'未完整評定','Not fully assessed'):score.score.toFixed(2)+' / 4'}${score.provisional?tr(lang,'（暫估 / 來源缺口）',' (provisional / source gap)'):''}`);
   for(const chapter of chapters) {
     const chapterScore=score.rows.find(row=>row.chapterId===chapter.id)!;
     pdf.heading(`${chapter.code} ${bilingual(chapter.name)}`);
+    if(chapterScore.includedInTotal===false)pdf.paragraph(tr(lang,'此章保留顯示，不納入總分。','Chapter retained; excluded from total.'),PDF_AUX);
     if(chapter.aim)pdf.paragraph(bilingual(chapter.aim));
     pdf.paragraph(`${tr(lang,'本章分數','Chapter score')}: ${chapterScore.score===null?tr(lang,'未評','Not assessed'):chapterScore.score.toFixed(2)+' / 4'}${chapterScore.provisional?tr(lang,'（暫估）',' (provisional)'):''} | ${tr(lang,'完成更新','Reviewed')}: ${chapterScore.updated}/${chapterScore.total}`,PDF_AUX);
     const items=state.items.filter(i=>i.active&&i.frameworkId===frameworkId&&i.chapterId===chapter.id).sort((a,b)=>a.order-b.order);
@@ -463,12 +466,14 @@ export async function buildInspectionPdf(state:PlatformState,inspectionId:string
   const pdf=await TextPdf.create(reportTitle,lang,state,options);snapshotIntro(pdf,state,lang,reportTitle);
   pdf.paragraph(`${inspection.id}\n${tr(lang,'機構 / 日期','Organization / date')}: ${inspection.organization} | ${inspection.date}\n${tr(lang,'類型 / 狀態','Type / status')}: ${tr(lang,inspection.type==='formal'?'正式':'非正式',inspection.type)} | ${tr(lang,inspection.status==='final'?'已發布':'草稿',inspection.status)}\n${tr(lang,'匯入 / 修訂自','Imported / supersedes')}: ${inspection.imported?'Y':'N'} / ${inspection.supersedesId??'—'}`);
   pdf.paragraph(bilingual(inspection.snapshot.framework.scopeLabel));
-  pdf.paragraph(`${tr(lang,'凍結計分方法版本','Frozen scoring version')}: ${inspection.snapshot.scoringVersion}\n${tr(lang,'計分方法','Scoring method')}: ${inspection.snapshot.framework.scoring}\n${tr(lang,'逐項評定覆蓋率','Item assessment coverage')}: ${coverage.assessed}/${coverage.total}\n${tr(lang,'檢查得分','Inspection score')}: ${!coverage.complete||score.score===null?tr(lang,'未完整記分；未評定不視為 0 分','Not completely scored; unassessed is not zero'):score.score.toFixed(2)+' / 4'}${score.provisional?tr(lang,'（暫估 / 來源缺口）',' (provisional / source gap)'):''}`);
+  pdf.paragraph(`${tr(lang,'凍結計分方法版本','Frozen scoring version')}: ${inspection.snapshot.scoringVersion}\n${tr(lang,'計分方法','Scoring method')}: ${inspection.snapshot.framework.scoring}\n${tr(lang,'逐項評定覆蓋率','Item assessment coverage')}: ${coverage.assessed}/${coverage.total}\n${tr(lang,'檢查得分','Inspection score')}: ${score.score===null?tr(lang,'未完整記分；未評定不視為 0 分','Not completely scored; unassessed is not zero'):score.score.toFixed(2)+' / 4'}${score.provisional?tr(lang,'（暫估 / 來源缺口）',' (provisional / source gap)'):''}`);
+  if(inspection.frameworkId==='TMSA')pdf.paragraph(tmsa14ReportScope(inspectionIncludesTmsa14(inspection),score.totalChapters,lang),PDF_AUX);
   if(inspection.scoreNote)pdf.paragraph(bilingual(inspection.scoreNote));
   pdf.paragraph(tr(lang,'以下採檢查建立當時的完整凍結框架與條文版本；不以目前自評或目前停用狀態改寫。未提到的條文不推定 Yes；正面觀察及改善建議不自動判 No。','Uses the complete framework and definitions frozen when the inspection was created, regardless of current activity or self-assessments. Unmentioned items are not presumed Yes; positive observations and recommendations do not automatically mean No.'),PDF_AUX);
   const resultMap=new Map(inspection.results.map(r=>[r.itemId,r]));
   for(const chapter of [...inspection.snapshot.chapters].sort((a,b)=>a.order-b.order)) {
     pdf.heading(`${chapter.code} ${bilingual(chapter.name)}`);
+    if(score.rows.find(r=>r.chapterId===chapter.id)?.includedInTotal===false)pdf.paragraph(tr(lang,'此章保留顯示，不納入總分。','Chapter retained; excluded from total.'),PDF_AUX);
     const items=inspection.snapshot.items.filter(i=>i.chapterId===chapter.id).sort((a,b)=>a.order-b.order);
     const headers=lang==='zh'?['Item / 版本','凍結 KPI','凍結 BPG / 來源','Y/N / 更新','檢查觀察','檢查建議','符合程度']:['Item / Version','Frozen KPI','Frozen BPG / Source','Y/N / Reviewed','Inspection observation','Inspection recommendation','Conformity'];
     pdf.table(headers,[8,20,26,9,20,20,9],items.map(item=>{
@@ -490,6 +495,7 @@ export async function buildOverviewPdf(state:PlatformState,frameworkId:Framework
   const chapters=selectedChapters(state,frameworkId,chapterIds),ids=chapters.map(c=>c.id),score=frameworkScore(state,frameworkId,ids);
   const reportTitle=`${frameworkId} · ${tr(lang,'現況總覽報告','Current overview')}`,pdf=await TextPdf.create(reportTitle,lang,state,options);snapshotIntro(pdf,state,lang,reportTitle);
   const framework=state.frameworks.find(f=>f.id===frameworkId)!;pdf.paragraph(bilingual(framework.scopeLabel));
+  if(frameworkId==='TMSA')pdf.paragraph(tmsa14ReportScope(currentIncludesTmsa14(state),score.totalChapters,lang),PDF_AUX);
   const scoped=state.items.filter(i=>i.active&&i.frameworkId===frameworkId&&ids.includes(i.chapterId));
   const assessments=state.assessments.filter(a=>scoped.some(i=>i.id===a.itemId)),issues=filteredImprovements(state,{...options.filters,frameworkId}).filter(row=>row.itemIds.some(id=>scoped.some(i=>i.id===id))&&row.status!=='closed');
   const latestUpdate=assessments.map(a=>a.updatedAt).sort().at(-1)??'—';
@@ -501,11 +507,11 @@ export async function buildOverviewPdf(state:PlatformState,frameworkId:Framework
   pdf.table(headers,[20,20,13,17,35],chapters.map(chapter=>{
     const row=score.rows.find(r=>r.chapterId===chapter.id)!,group=scoped.filter(i=>i.chapterId===chapter.id),open=issues.filter(issue=>issue.itemIds.some(id=>group.some(i=>i.id===id)));
     const levels=row.levels?`\nBasic / Intermediate / Advanced / Excellence: ${row.levels.map(v=>v===null?tr(lang,'未填','unset'):v+'%').join(' / ')}\n${tr(lang,'減權後','Adjusted')}: ${row.adjusted?.map(v=>v+'%').join(' / ')}`:'';
-    return {key:chapter.code,warning:row.provisional,cells:[`${chapter.code} ${bilingual(chapter.name)}${chapter.priority?'\n'+tr(lang,'重點章節','Priority chapter'):''}`,`${row.score===null?tr(lang,'未評','Not assessed'):row.score.toFixed(2)+' / 4'}${row.provisional?'\n'+tr(lang,'暫估','Provisional'):''}\n${framework.scoring}${levels}`,`${row.updated} / ${row.total}`,`${open.length}\n${open.map(i=>i.id).join('\n')}`,`${row.blockingItemCodes.join(', ')}\n${group.filter(i=>i.sourceGap&&!i.sourceGapResolved).map(i=>`${i.code}: ${i.sourceGap}`).join('\n')}`]};
+    return {key:chapter.code,warning:row.provisional,cells:[`${chapter.code} ${bilingual(chapter.name)}${chapter.priority?'\n'+tr(lang,'重點章節','Priority chapter'):''}`,`${row.score===null?tr(lang,'未評','Not assessed'):row.score.toFixed(2)+' / 4'}${row.provisional?'\n'+tr(lang,'暫估','Provisional'):''}\n${framework.scoring}${levels}${row.includedInTotal===false?'\n'+tr(lang,'不納入總分','Excluded from total'):''}`,`${row.updated} / ${row.total}`,`${open.length}\n${open.map(i=>i.id).join('\n')}`,`${row.blockingItemCodes.join(', ')}\n${group.filter(i=>i.sourceGap&&!i.sourceGapResolved).map(i=>`${i.code}: ${i.sourceGap}`).join('\n')}`]};
   }),'overview');
   pdf.heading(tr(lang,'上次凍結檢查（獨立於目前自評）','Last frozen inspection (independent of current assessments)'));
   const last=state.inspections.filter(i=>i.frameworkId===frameworkId&&i.status==='final').sort((a,b)=>b.date.localeCompare(a.date)||b.createdAt.localeCompare(a.createdAt))[0];
-  if(last){const coverage=inspectionCoverage(last),previous=inspectionScore(last);pdf.paragraph(`${last.title}\n${last.id} | ${last.date} | ${last.organization}\n${tr(lang,'凍結方法','Frozen method')}: ${last.snapshot.scoringVersion}\n${tr(lang,'評定覆蓋','Assessed coverage')}: ${coverage.assessed}/${coverage.total}\n${tr(lang,'凍結完整範圍得分','Score for the full frozen scope')}: ${!coverage.complete||previous.score===null?tr(lang,'未完整記分（非 0 分）','Not completely scored (not zero)'):previous.score.toFixed(2)+' / 4'}`);}else pdf.paragraph(tr(lang,'尚無已發布的檢查記錄；不得製造上次得分。','No published inspection; no invented previous score.'));
+  if(last){const coverage=inspectionCoverage(last),previous=inspectionScore(last);pdf.paragraph(`${last.title}\n${last.id} | ${last.date} | ${last.organization}\n${tr(lang,'凍結方法','Frozen method')}: ${last.snapshot.scoringVersion}\n${tr(lang,'評定覆蓋','Assessed coverage')}: ${coverage.assessed}/${coverage.total}\n${tr(lang,'此份納入範圍得分','Score for this inspection’s included scope')}: ${previous.score===null?tr(lang,'未完整記分（非 0 分）','Not completely scored (not zero)'):previous.score.toFixed(2)+' / 4'}`);if(last.frameworkId==='TMSA')pdf.paragraph(tmsa14ReportScope(inspectionIncludesTmsa14(last),previous.totalChapters,lang),PDF_AUX);}else pdf.paragraph(tr(lang,'尚無已發布的檢查記錄；不得製造上次得分。','No published inspection; no invented previous score.'));
   pdf.heading(tr(lang,'未結案事項與執行計劃','Open issues and execution plans'));
   pdf.table(lang==='zh'?['編號 / 急迫 / 期限','事項 / 關聯','部門 / 執行人','完整計劃 / 最新進度']:['ID / Urgency / Target','Issue / Related items','Departments / Assignees','Full plan / Latest progress'],[16,32,19,38],issues.map(row=>({key:row.id.slice(0,12),cells:[`${row.id}\n${row.urgency} | ${row.targetDate||'—'}`,`${row.title}\n${bilingual(row.content)}\n${row.itemIds.map(id=>state.items.find(i=>i.id===id)?.code??id).join(', ')}`,`${departmentsLabel(state,row.departmentIds,lang)}\n${peopleLabel(state,row.assigneeIds)}`,`${row.plan}\n\n${row.events.at(-1)?.content??tr(lang,'尚無進度','No progress yet')}`]})));
   return pdf.finish();
