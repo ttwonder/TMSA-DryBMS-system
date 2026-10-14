@@ -64,6 +64,7 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 - 「上一次檢查」指檢查日期最新的已發布（final）記錄；未發布草稿不計入並於總覽明示。最新一筆未完整評定必須顯示未完整及無分數，不能借用較舊有分數檢查。
 - 僅歷史檢查移除完成更新勾選；明確選符合程度all→Yes、partial／none→No，反向Yes→all、No→既有partial或none，未知仍為未評。歷史的reviewed相容欄只隨明確逐項評定操作標記；既有資料不自動批改，主框架reviewed／四色／計分規則完全不變。
 - 每次檢查可一鍵全符合，再個別修改並填觀察／建議；來源缺口未補齊的Item略過且列出數量、代碼及原因，原評定不改。DRYBMS四級百分比仍獨立明確填寫，不能由Yes製造百分比。
+- 歷史檢查視窗每個章節名稱後顯示本章目前分數（兩位小數／4），沿用同份 frozen snapshot 與 inspectionScore，不借用主框架自評或整份平均。查看時顯示該保存版本；編輯時以目前草稿逐項評定／DRYBMS四級百分比即時重算，恢復草稿及保存後讀回亦同。空章／未完整逐項評定／無可用分數顯示未完整記分，不當0分；有效0分照常顯示，來源缺口／未完整百分比沿用暫估提示。草稿分數不是雲端保存成功；原手動server ACK保存、燈號、ID及來源均不變。
 - 歷史章節專用三燈：全部符合綠、混合／部分符合黃、全部不符合紅；空章、缺項或未完整評定黃且明示。不改主框架四色。
 - 歷史手動「保存檢查」取得server ACK後保持編輯視窗；發布可保存並關閉。每次本機編輯同步保稿至此分頁sessionStorage（SHA-256 actor／config／client／session namespace），不是雲端保存；不序列化session／lease token或憑證。重整／離開後在相同分頁及登入邊界可恢復；明確放棄只清除此草稿，不上雲。
 - 續鎖20秒／lease75秒不延長；同token後續續鎖成功可恢復暫時續鎖錯誤，版本衝突不可被續鎖清掉。手動復鎖必須相同actor／config／session且baseVersion未變，否則留稿不覆寫。lost-ACK在記憶體以原operation／payload／lease重播；重整後以既有operation_status核對同session/client回執，沒有確認回執時保持待核對，不能換operation偷重送。關閉分頁／退出原session不保證可恢復，畫面如本機保稿失敗須保持開啟。
