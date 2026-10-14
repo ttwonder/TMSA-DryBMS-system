@@ -147,7 +147,8 @@ test('new progress appends immutable history and close/reopen are independent', 
   assert.equal(reopened.id, action.id);
   assert.throws(() => Improvements.appendImprovementEvent(reopened, { ...reopened.events[0], id: 'event1' }), /DUPLICATE_EVENT/);
   assert.throws(() => Improvements.appendImprovementEvent(action, { ...closed.events[0], percent: 101 }), /INVALID_PERCENT/);
-  assert.throws(() => Improvements.appendImprovementEvent(action, { ...closed.events[0], content: ' ' }), /PROGRESS_CONTENT_REQUIRED/);
+  assert.equal(Improvements.appendImprovementEvent(action, { ...closed.events[0], content: '', status: 'open', percent: 1 }).percent, 1);
+  assert.deepEqual(Improvements.appendImprovementEvent(action, { ...closed.events[0], content: ' ', status: action.status, percent: action.percent }), action);
 });
 
 test('inspection creation freezes all active definitions and never infers Yes', () => {
@@ -165,15 +166,15 @@ test('inspection creation freezes all active definitions and never infers Yes', 
   assert.throws(() => Inspections.createInspectionDraft(state, 'TMSA'), /ACTIVE_FRAMEWORK_REQUIRED/);
 });
 
-test('revision creates a new record and preserves the original final snapshot', () => {
+test('revision edits the same final record and preserves the original frozen definition', () => {
   const state = fixture();
   const original = Inspections.createInspectionDraft(state, 'TMSA'); original.status = 'final'; original.version = 3;
   const before = structuredClone(original);
   const copy = Inspections.reviseInspection(original);
-  assert.notEqual(copy.id, original.id);
-  assert.equal(copy.version, 0);
-  assert.equal(copy.status, 'draft');
-  assert.equal(copy.supersedesId, original.id);
+  assert.equal(copy.id, original.id);
+  assert.equal(copy.version, original.version);
+  assert.equal(copy.status, 'final');
+  assert.equal(copy.supersedesId, original.supersedesId);
   copy.snapshot.items[0].kpi.en = 'Local edit';
   assert.deepEqual(original, before);
   assert.throws(() => Inspections.reviseInspection({ ...original, status: 'draft' }), /FINAL_INSPECTION_REQUIRED/);

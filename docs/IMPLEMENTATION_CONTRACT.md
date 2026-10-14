@@ -34,7 +34,7 @@
 - 完成更新 reviewed、執行狀態及改善結案仍獨立；不由評定選項推導。使用者明確選符合程度時，僅當次評定草稿聯動：all→Y/N Yes，partial／none→No；原Y/N選取反向行為保留，既有已保存資料不自動批改。No可分部分符合(黃)或不符合(紅)；Yes為全符合(綠)；未完成更新紫。⭐由同一筆未結案改善的itemIds即時計算。
 - 改善只有一個id及一份進度事件流；列表與Item展開內容共用，不複製。來源external須有inspectionId/findingId；其他non_external。涉及Item、部門、人員多選。急迫程度urgent/high/medium/low；進度逐次append；結案/重開獨立動作，不能改Y/N。編輯/取消/失鎖不自動保存。
 - 每個編輯目標取得伺服器lease（75秒、20秒續期；含session/client/token），同一Item的標準定義與現行自評共用businessItem鎖；獨立項目可同時編輯。實質修改KPI/BPG/級別/分章時，原自評文字與Y/N保留、完成更新旗標失效，須重新核對。同Item拒絕第二個編輯者並傳回姓名。保存驗證lease+expectedVersion+操作id，在一次交易保存內容、不可覆寫歷史/audit及receipt。失鎖/版本衝突保留草稿並禁止假成功；斷線不以本機快取覆蓋雲端；lost-ACK同操作id讀回/重播。
-- 稽核建立時固定完整啟用框架及要求版本；逐項評定、觀察、建議、分數方法留在快照。發布後唯讀；修訂用新副本連回原檢查，不改掉旧快照。外部觀察產生改善有去重鍵，不把正面觀察/指引當缺失。
+- 稽核建立時固定完整啟用框架及要求版本；逐項評定、觀察、建議、分數方法留在快照。依最新明確要求，歷史檢查（含已發布／已導入）直接修改同一 stable id，不再建立修訂副本；已發布保持final，原snapshot標準、finding id／來源raw與既有linked improvement sourceKey／ID不得更換，之前版本由原append-only audit before／after留存。外部觀察產生改善仍有去重鍵，不把正面觀察/指引當缺失。
 - 條目刪減採停用/再啟用，歷史及關聯保存；不硬刪。人員停用保存歷史，已停用人員/改角色之舊session不可繼續寫。新增條目/章節、改標準文字/代碼/排序只限Owner/admin。
 
 ## 人員
@@ -59,3 +59,13 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 - 試算只修改目標模型，不修改自評或稽核。使用者已明確選擇公司共用雲端目標：Owner／管理員可保存，全登入使用者查看，TMSA／DRYBMS各自保存；操作員可試算但不可寫入公司目標。目標保存是獨立命令，只更新框架的scoreTargets及正常版本/異動metadata，沿用同框架leaf lease/CAS，不修改實際評定／歷史／來源定義。修改或還原試算不自動上雲；只有「保存現目標」取得伺服器ACK才稱已保存，刷新／另一端讀回同一權威目標。
 - 實際typecheck/build、計分與維度單元測試、原生PostgreSQL交易/lease/CAS/權限/重播測試、兩個真實瀏覽器客戶端，同Item互斥與異項並行、取消/失鎖留稿、跨頁改善同步、稽核快照、框架增減、格式匯出/原生Excel/PDF樣本、桌面及手機。資料來源counts/hash核對，dist/索引/樣板不洩露公司內容。標記「真實UI＋測試資料；本機PostgreSQL非正式Supabase」。
 - 工作完成界線：本機可使用、驗證有實際紀錄、單一git repo可由使用者Push、提供完整SQL與正式readback指南。正式網站及Supabase未經部署/readback不聲稱已上線。
+
+## 歷史檢查及進度追補（取代該模組舊唯讀／副本規則）
+- 「上一次檢查」指檢查日期最新的已發布（final）記錄；未發布草稿不計入並於總覽明示。最新一筆未完整評定必須顯示未完整及無分數，不能借用較舊有分數檢查。
+- 僅歷史檢查移除完成更新勾選；明確選符合程度all→Yes、partial／none→No，反向Yes→all、No→既有partial或none，未知仍為未評。歷史的reviewed相容欄只隨明確逐項評定操作標記；既有資料不自動批改，主框架reviewed／四色／計分規則完全不變。
+- 每次檢查可一鍵全符合，再個別修改並填觀察／建議；來源缺口未補齊的Item略過且列出數量、代碼及原因，原評定不改。DRYBMS四級百分比仍獨立明確填寫，不能由Yes製造百分比。
+- 歷史章節專用三燈：全部符合綠、混合／部分符合黃、全部不符合紅；空章、缺項或未完整評定黃且明示。不改主框架四色。
+- 歷史手動「保存檢查」取得server ACK後保持編輯視窗；發布可保存並關閉。每次本機編輯同步保稿至此分頁sessionStorage（SHA-256 actor／config／client／session namespace），不是雲端保存；不序列化session／lease token或憑證。重整／離開後在相同分頁及登入邊界可恢復；明確放棄只清除此草稿，不上雲。
+- 續鎖20秒／lease75秒不延長；同token後續續鎖成功可恢復暫時續鎖錯誤，版本衝突不可被續鎖清掉。手動復鎖必須相同actor／config／session且baseVersion未變，否則留稿不覆寫。lost-ACK在記憶體以原operation／payload／lease重播；重整後以既有operation_status核對同session/client回執，沒有確認回執時保持待核對，不能換operation偷重送。關閉分頁／退出原session不保證可恢復，畫面如本機保稿失敗須保持開啟。
+- 改善主清單及FrameworkPage inline使用相同進度流程：百分比／狀態真實變更可留空文字並append事件，SQL stamps actor／time；單改可編輯metadata照實保存且不加空事件。文字空白且完全未改則不提交、不製造進度事件或敘述；100%仍不自動結案，舊事件不可改。
+- 新增008 migration只修改歷史validator及空進度事件防線，不改業務資料、RPC／角色／lease／CAS／歷史表；本機已演練，正式SQL由使用者依readback手動執行。

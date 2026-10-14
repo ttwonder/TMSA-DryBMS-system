@@ -17,9 +17,9 @@ export function effectiveSelection(selected: string[], visible: Improvement[]): 
   return [...new Set(selected)].filter(id => valid.has(id));
 }
 export function appendImprovementEvent(record: Improvement, event: ProgressEvent): Improvement {
-  if (!event.content.trim()) throw new Error('PROGRESS_CONTENT_REQUIRED');
   if (!Number.isInteger(event.percent) || event.percent < 0 || event.percent > 100) throw new Error('INVALID_PERCENT');
   if (record.events.some(old => old.id === event.id)) throw new Error('DUPLICATE_EVENT');
+  if (!event.content.trim() && event.percent === record.percent && event.status === record.status) return record;
   return { ...record, status: event.status, percent: event.percent, events: [...record.events, event], closedAt: event.status === 'closed' ? event.at : null, closedBy: event.status === 'closed' ? event.by : null };
 }
 export function improvementValidation(record: Improvement, ctx: Pick<PageProps, 'state' | 't'>): string {
@@ -150,12 +150,15 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
     const issue = improvementValidation(draft, {...ctx,state});
     const event = draft.events.find(row => row.id === stagedId);
     if (issue) { setValidation(issue); return; }
+    let submitted=draft;
     if (event) {
-      try { appendImprovementEvent({ ...draft, events: draft.events.filter(row => row.id !== stagedId) }, event); }
-      catch { setValidation(t('請填寫本次進度，完成百分比須為0–100。', 'Enter progress text and a percentage between 0 and 100.')); return; }
+      const original=editor.getBase();if(!original)return;
+      try { submitted=appendImprovementEvent({ ...draft,status:original.status,percent:original.percent,closedAt:original.closedAt,closedBy:original.closedBy,events:draft.events.filter(row=>row.id!==stagedId) },event); }
+      catch { setValidation(t('完成百分比須為0–100的整數。', 'Completion must be an integer between 0 and 100.')); return; }
+      if(JSON.stringify(submitted)===JSON.stringify(original)){setValidation(t('沒有變更；未建立進度事件。','No changes; no progress event was created.'));return;}
     }
     const intent: SaveIntent = draft.version === 0 ? 'create' : mode === 'close' ? 'close' : mode === 'reopen' ? 'reopen' : 'update';
-    if (await editor.save(intent)) ctx.onInlineClose?.();
+    if (await editor.save(intent,{record:submitted})) ctx.onInlineClose?.();
   };
   const exportPdf = async () => {
     const ids = effectiveSelection(selected, filteredImprovements(state, filters).filter(row => !filters.itemId || row.itemIds.includes(filters.itemId)));
