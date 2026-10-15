@@ -7,10 +7,12 @@ import crypto from 'node:crypto';
 import {createServer} from 'vite';
 import {chromium} from '@playwright/test';
 import {layoutFixture} from './layout-fixture.mjs';
+import {collectionFor} from '../src/syncState.ts';
 const root=path.resolve(import.meta.dirname,'..');
 const phase=process.argv.includes('--baseline')?'baseline':'full-content';
+const improvementsOnly=process.argv.includes('--improvements-only');
 // Latest user requirement: full list text, not the earlier one-line preview.
-const output=path.join(root,'qa-evidence','layout',phase);fs.mkdirSync(output,{recursive:true});
+const output=path.join(root,'qa-evidence','layout',`${phase}${improvementsOnly?'-improvements':''}-${new Date().toISOString().replaceAll(':','-')}`);fs.mkdirSync(output,{recursive:true});
 const qaUrl='http://127.0.0.1:63639';
 const fixture=layoutFixture(),owner=fixture.people[0],cases=[],errors=[],requests=[];
 fixture.improvements[0].title=`${'Review the complete supporting record with all responsible departments. '.repeat(3)}\n${'與全部責任部門核對完整佐證及改善內容。'.repeat(6)}`;
@@ -86,8 +88,9 @@ async function capture(page,id){
    assert.equal(g.overflowingButtons,0,`${id}: action and Item labels fit their buttons`);
    assert.equal(g.overflowingHeaders,0,`${id}: every table header fits without overlapping adjacent columns`);
    const columns=g.improvementColumns;
-   assert.ok(columns[1]>=g.table.width*.45,`${id}: full content gets at least 45% of table width`);
-   for(const [index,max] of [[2,.13],[3,.11],[4,.12]])assert.ok(columns[index]<=g.table.width*max,`${id}: auxiliary column ${index+1} is narrower`);
+   assert.equal(columns.length,3,`${id}: select, full content and one stacked metadata column`);
+   assert.ok(columns[1]>=g.table.width*(g.viewport.width>=1200?.65:.50),`${id}: full content remains the widest column`);
+   assert.ok(columns[2]<=280.5,`${id}: the combined auxiliary column stays compact`);
   }
   if(id.endsWith('improvements')){
    const rows=page.locator('.improvement-table tbody tr');
@@ -98,7 +101,7 @@ async function capture(page,id){
    assert.equal(await content.nth(0).textContent(),record.content.en);
    assert.equal(await content.nth(1).textContent(),record.content.zh);
    assert.equal(await row.locator('.item-references button').count(),record.itemIds.length);
-   if(g.viewport.width<620)assert.ok(g.table.y<650,'Primary mobile list is reachable without a wall of filters');
+   if(g.viewport.width<620)assert.ok(g.table.y<g.viewport.height,'Primary mobile list starts within the first viewport, including new required source and paging controls');
   }
  }
 }
@@ -112,6 +115,11 @@ try{
    const body=request.postDataJSON(),action=body.p_action,payload=body.p_payload||{};requests.push(action);let data;
    if(action==='bootstrap_status')data={initialized:true,siteGateConfigured:true};
    else if(action==='read')data=fixture;
+   else if(action==='sync'){
+    // Geometry-only transport follows the mounted client's current read protocol.
+    const records=Object.entries(collectionFor).flatMap(([kind,key])=>(key==='settings'?[fixture.settings]:fixture[key]).map(body=>({kind,body})));
+    data={baseline:true,user:owner,versions:Object.fromEntries(records.map(r=>[`${r.kind}:${r.body.id}`,r.body.version])),records,cycles:fixture.cycles,provenance:fixture.provenance,auditLogs:fixture.auditLogs,serverTime:fixture.serverTime,snapshotToken:fixture.snapshotToken};
+   }
    else if(action==='current_user')data=owner;
    else if(action==='audit_query')data={rows:[],total:0};
    else if(action==='claim'||action==='renew'){const kind=payload.kind,id=payload.id;data={resourceKey:kind==='assessment'?`item:${id}`:`${kind}:${id}`,token:'layout-lease-placeholder',expiresAt:new Date(Date.now()+75000).toISOString(),holderName:owner.name,holderId:owner.id,baseVersion:1};}
@@ -125,14 +133,16 @@ try{
  await context.addInitScript(({config,owner})=>{localStorage.setItem('fpmc-compliance-config',JSON.stringify(config));sessionStorage.setItem('fpmc-compliance-session',JSON.stringify({user:owner,sessionToken:'layout-session-placeholder'}));localStorage.setItem('fpmc-compliance-language','zh');},{config:{url:qaUrl,anonKey:'layout-public-placeholder'},owner});
  const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});page.on('dialog',d=>d.accept());
  await page.goto(url,{waitUntil:'networkidle'});await page.getByRole('navigation',{name:'Main navigation'}).waitFor();
- const pages=[['overview','總覽'],['TMSA','TMSA'],['DRYBMS','DRYBMS'],['improvements','待改善項目'],['inspections','歷史檢查記錄'],['reports','報告中心'],['management','管理']];
+ const pages=improvementsOnly?[['improvements','待改善項目']]:[['overview','總覽'],['TMSA','TMSA'],['DRYBMS','DRYBMS'],['improvements','待改善項目'],['inspections','歷史檢查記錄'],['reports','報告中心'],['management','管理']];
  for(const width of [1440,390]){await page.setViewportSize({width,height:width===1440?1000:844});for(const [id,name] of pages){await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name,exact:true}).click();await capture(page,`${width}-${id}`);}}
  if(phase==='full-content'){
   for(const width of [1440,390]){
    await page.setViewportSize({width,height:width===1440?1000:844});
+   if(!improvementsOnly){
    await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'總覽',exact:true}).click();
    await page.locator('.secondary-filters>summary').click();await capture(page,`${width}-overview-expanded-filters`);
    const personSelect=page.getByRole('combobox',{name:'總覽人員'});await personSelect.selectOption(fixture.people.at(-1).id);await page.locator('.secondary-filters>summary').click();assert.ok(await page.locator('.filter-active').isVisible());await page.locator('.secondary-filters>summary').click();assert.equal(await personSelect.inputValue(),fixture.people.at(-1).id);await page.getByRole('button',{name:'清除篩選',exact:true}).click();
+   }
    await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'待改善項目',exact:true}).click();await page.locator('.secondary-filters>summary').click();await capture(page,`${width}-improvements-expanded-filters`);
    const urgency=page.locator('.secondary-filters label').filter({hasText:'急迫程度'}).locator('select');await urgency.selectOption('urgent');assert.equal(await page.locator('.improvement-table tbody tr').count(),fixture.improvements.filter(i=>i.urgency==='urgent').length);await page.locator('.secondary-filters>summary').click();assert.ok(await page.locator('.filter-active').isVisible());await page.locator('.secondary-filters>summary').click();assert.equal(await urgency.inputValue(),'urgent');await page.getByRole('button',{name:'清除篩選及選取',exact:true}).click();assert.equal(await page.locator('.improvement-table tbody tr').count(),fixture.improvements.length);
    if(await page.locator('.secondary-filters').getAttribute('open')!==null)await page.locator('.secondary-filters>summary').click();
@@ -144,6 +154,7 @@ try{
   }
   await page.locator('.improvement-table').evaluate(e=>{e.closest('.table-wrap').scrollLeft=e.scrollWidth;});await capture(page,'390-improvement-rightmost-actions');
   await page.locator('.improvement-table tbody tr').first().getByRole('button',{name:'直接更新',exact:true}).click();await page.getByRole('dialog').waitFor();await capture(page,'390-improvement-progress-editor');await page.getByRole('button',{name:'Close',exact:true}).click();
+  if(!improvementsOnly){
   for(const width of [1440,390]){
    await page.setViewportSize({width,height:width===1440?1000:844});
    await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'TMSA',exact:true}).click();
@@ -161,11 +172,14 @@ try{
    assert.equal(await page.getByRole('navigation',{name:'Main navigation'}).locator('[aria-current=page]').innerText(),item.frameworkId);
    assert.ok((await page.locator('.item-detail h2').innerText()).includes(item.code),'Related Item opens its original framework/item');
   }
+  }
  }
  await page.setViewportSize({width:1440,height:1000});await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'待改善項目',exact:true}).click();
  await page.locator('.improvement-table tbody tr').first().locator('.text-button').click();await page.getByRole('dialog').waitFor();assert.ok((await page.getByRole('dialog').innerText()).includes(fixture.improvements[0].content.en));assert.ok((await page.getByRole('dialog').innerText()).includes(fixture.improvements[0].content.zh));await capture(page,'1440-improvement-complete-detail');await page.getByRole('button',{name:'Close',exact:true}).click();
+ if(!improvementsOnly){
  await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'TMSA',exact:true}).click();await page.getByRole('button',{name:'修改',exact:true}).click();await page.locator('.assessment-editor').waitFor();await capture(page,'1440-TMSA-editor');await page.setViewportSize({width:390,height:844});await capture(page,'390-TMSA-editor');await page.getByRole('button',{name:'取消編輯',exact:true}).click();
- await page.getByRole('button',{name:'Switch language'}).click();for(const width of [1440,390]){await page.setViewportSize({width,height:width===1440?1000:844});for(const [id,name] of [['overview','Overview'],['TMSA','TMSA'],['DRYBMS','DRYBMS'],['improvements','Improvements'],['management','Management']]){await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name,exact:true}).click();await capture(page,`${width}-en-${id}`);}}
+ }
+ await page.getByRole('button',{name:'Switch language'}).click();for(const width of [1440,390]){await page.setViewportSize({width,height:width===1440?1000:844});for(const [id,name] of (improvementsOnly?[['improvements','Improvements']]:[['overview','Overview'],['TMSA','TMSA'],['DRYBMS','DRYBMS'],['improvements','Improvements'],['management','Management']])){await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name,exact:true}).click();await capture(page,`${width}-en-${id}`);}}
  assert.deepEqual(errors,[],'No console/runtime errors or unexpected outbound service');assert.ok(!requests.some(a=>['save','import_seed','role_permissions','site_password','transfer_owner'].includes(a)),'No business write invoked');
  assert.equal(JSON.stringify(fixture),fixtureBefore,'Layout does not mutate source records');
  await context.close();

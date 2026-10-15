@@ -259,7 +259,9 @@ test('source gap resolution requires added located source evidence', () => {
 test('focus wiring and fixed administrator management capabilities remain explicit', () => {
   assert.match(source('Improvements'), /PageProps & \{ focusId\?: string(?:;[^}]+)? \}/);
   assert.match(source('Improvements'), /resolveImprovementFocus\(state, ctx\.focusId/);
-  assert.match(source('Improvements'), /row\.itemIds\.includes\(filters\.itemId\)/);
+  assert.match(source('Improvements'), /filterImprovementList\(state, filters\)/);
+  assert.match(source('Improvements'), /filterImprovementList\(canonical, filters\)/);
+  assert.match(readFileSync(new URL('../src/improvementList.ts', import.meta.url), 'utf8'), /record\.itemIds\.includes\(filters\.itemId\)/);
   const management = source('Management');
   assert.match(management, /role === 'admin' && \['enterManagement', 'manageUsers'\]\.includes\(capability\)/);
   assert.match(management, /disabled=\{!owner \|\| locked\}/);

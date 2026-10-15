@@ -61,14 +61,25 @@
 .text-button{border:0;background:transparent;padding:0;color:var(--blue);font:inherit;text-align:left;cursor:pointer}
 .text-button:hover{text-decoration:underline}
 .preserve-lines{white-space:pre-wrap;overflow-wrap:anywhere}
-.improvement-table{table-layout:fixed;min-width:980px}
+.improvement-table{table-layout:fixed;min-width:760px}
 .improvement-table th{white-space:normal;overflow-wrap:anywhere}
 .improvement-table th:nth-child(1){width:60px}
 .improvement-table th:nth-child(2){width:auto}
-.improvement-table th:nth-child(3){width:11%}
-.improvement-table th:nth-child(4){width:9%}
-.improvement-table th:nth-child(5){width:11%}
-.improvement-table th:nth-child(6){width:17%}
+.improvement-table th:nth-child(3){width:280px}
+.improvement-meta-group+.improvement-meta-group{margin-top:7px}
+.improvement-meta-group>small{display:block;color:var(--muted);font-size:13px;margin-bottom:2px}
+.improvement-metadata{overflow-wrap:anywhere}
+.improvement-status-line{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.improvement-list-views{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 7px}
+.improvement-list-views .btn{min-height:32px;padding:4px 12px}
+.improvement-filters>.improvement-source-filter{flex:1 1 240px;min-width:0;max-width:320px}
+.improvement-source-filter select{width:100%;min-width:0;max-width:100%}
+.improvement-pagination{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:7px 0;font-size:14px}
+.improvement-pagination>span{margin-right:auto}
+.improvement-pagination label{display:flex;align-items:center;gap:5px}
+.improvement-pagination select{width:auto;min-width:54px;max-width:100px;height:30px;padding:3px 5px;font:inherit}
+.improvement-pagination .btn{min-height:30px;padding:3px 8px}
+@media(max-width:620px){.improvement-filters>.improvement-source-filter{flex:1 1 100%;width:100%;max-width:none}.improvement-pagination>span{flex-basis:100%}.improvement-pagination .btn,.improvement-pagination select{min-height:36px}}
 .improvement-table .bilingual{font-size:15px;line-height:1.45}
 .improvement-table .bilingual>div+div{padding:0;margin:0;border:0}
 .improvement-table .text-button{display:block;font-weight:600;margin-bottom:3px}

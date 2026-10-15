@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BiText, Improvement, PageProps, BrowseState, Inspection, ProgressEvent, SaveIntent } from './types';
-import { bi, departmentsLabel, filteredImprovements, hasPermission, isoNow, newBase, openIssuesFor, peopleLabel } from './domain';
-import type { Filters } from './domain';
+import { bi, departmentsLabel, hasPermission, isoNow, newBase, openIssuesFor, peopleLabel } from './domain';
+import { filterImprovementList, improvementListView, improvementPage, withImprovementListView } from './improvementList';
+import type { ImprovementListFilters, ImprovementListView } from './improvementList';
 import { BilingualText, EditorNotice, Empty, Modal, MultiSelect, MultiSelectDropdown, PageHeading, departmentOptions, peopleOptions } from './ui';
 import { useRecordEditor } from './useRecordEditor';
 import { withHydratedInspection } from './syncState';
@@ -58,7 +59,10 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   if(sourceOwner.current.api!==ctx.api||sourceOwner.current.session!==ctx.api.sessionToken||sourceOwner.current.actor!==ctx.user.id){sourceGeneration.current++;sourceOwner.current={api:ctx.api,session:ctx.api.sessionToken,actor:ctx.user.id};}
   const state=sourceInspection?withHydratedInspection(ctx.state,sourceInspection):ctx.state;
   const editor = useRecordEditor<Improvement>(ctx, 'improvement');
-  const [filters, setFilters] = useState<Filters & { itemId?: string }>({ frameworkId: 'all' });
+  const [filters, setFilterState] = useState<ImprovementListFilters>({ frameworkId: 'all' });
+  const [page, setPage] = useState(1);
+  const pageTop = useRef<HTMLDivElement>(null);
+  const setFilters = (next: ImprovementListFilters | ((old: ImprovementListFilters) => ImprovementListFilters)) => { setFilterState(next); setPage(1); };
   const [selected, setSelected] = useState<string[]>([]);
   const [mode, setMode] = useState<'full' | 'progress' | 'close' | 'reopen'>('full');
   const [stagedId, setStagedId] = useState('');
@@ -66,7 +70,12 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   const [exporting, setExporting] = useState(false);
   const [detailId, setDetailId] = useState('');
   const handledFocus = useRef('');
-  const visible = useMemo(() => filteredImprovements(state, filters).filter(row => !filters.itemId || row.itemIds.includes(filters.itemId)), [state, filters]);
+  const visible = useMemo(() => filterImprovementList(state, filters), [state, filters]);
+  const paged = improvementPage(visible, page);
+  const listView = improvementListView(filters);
+  const inspectionSources = useMemo(() => [...state.inspections].sort((a,b) => b.date.localeCompare(a.date) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id)), [state.inspections]);
+  useEffect(() => { if (page !== paged.page) setPage(paged.page); }, [page, paged.page]);
+  const goToPage = (next: number) => { setPage(next); pageTop.current?.scrollIntoView({block:'start'}); };
   const ids = effectiveSelection(selected, visible);
   const can = (cap: Parameters<typeof hasPermission>[2]) => hasPermission(state.settings.rolePermissions, ctx.user, cap);
   const draft = editor.draft;
@@ -80,7 +89,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   const detail = state.improvements.find(row => row.id === detailId);
   const statusLabel = (value: Improvement['status']) => value === 'closed' ? t('已結案', 'Closed') : value === 'in_progress' ? t('進行中', 'In progress') : t('待處理', 'Open');
   const urgencyLabel = (value: Improvement['urgency']) => ({ urgent: t('盡快', 'As soon as possible'), high: t('高', 'High'), medium: t('中', 'Medium'), low: t('低', 'Low') }[value]);
-  const setFilter = (key: keyof Filters, value: string) => setFilters(old => ({ ...old, [key]: value }));
+  const setFilter = (key: keyof ImprovementListFilters, value: string) => setFilters(old => ({ ...old, [key]: value, ...(key === 'status' && value === 'closed' ? { unfinished: false } : {}) }));
   const draftWriter = useRef(editor.setDraft);
   draftWriter.current = editor.setDraft;
   const patch = useCallback((value: Partial<Improvement>) => draftWriter.current(old => old ? { ...old, ...value } : old), []);
@@ -172,12 +181,12 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
     if (await editor.save(intent,{record:submitted})) ctx.onInlineClose?.();
   };
   const exportPdf = async () => {
-    const ids = effectiveSelection(selected, filteredImprovements(state, filters).filter(row => !filters.itemId || row.itemIds.includes(filters.itemId)));
+    const ids = effectiveSelection(selected, filterImprovementList(state, filters));
     if (!ids.length) { ctx.notify(t('請明確勾選仍符合篩選的改善記錄，空選不會匯出全部。', 'Explicitly select matching records. Empty selection never exports all.'), 'error'); return; }
     setExporting(true);
     try {
       const canonical = await ctx.api.authorizeExport({ format: 'pdf', kind: 'improvements', ids, snapshotToken: state.snapshotToken, filters });
-      const eligible = filteredImprovements(canonical, filters).filter(row => !filters.itemId || row.itemIds.includes(filters.itemId));
+      const eligible = filterImprovementList(canonical, filters);
       if (effectiveSelection(ids, eligible).length !== ids.length) throw new Error('EXPORT_RECORD_NOT_AVAILABLE');
       const { downloadImprovementsPdf } = await import('./reports');
       await downloadImprovementsPdf(canonical, ids, ctx.lang, t('待改善項目', 'Improvement actions'));
@@ -185,6 +194,12 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
     } catch (error) { ctx.notify(error instanceof Error ? error.message : String(error), 'error'); }
     finally { setExporting(false); }
   };
+  const pagination = (position: 'top' | 'bottom') => <nav className="improvement-pagination" aria-label={position === 'top' ? t('改善清單分頁（上方）', 'Improvement pagination (top)') : t('改善清單分頁（下方）', 'Improvement pagination (bottom)')}>
+    <span>{t('顯示', 'Showing')} {paged.start}–{paged.end} / {paged.total} · {t('每頁40筆', '40 per page')}</span>
+    <button className="btn neutral small" disabled={paged.page <= 1} onClick={() => goToPage(paged.page - 1)}>{t('上一頁', 'Previous')}</button>
+    <label>{t('跳至頁碼', 'Go to page')} <select aria-label={t('跳至頁碼', 'Go to page')} value={paged.page} onChange={event => goToPage(Number(event.target.value))}>{Array.from({length:paged.pages}, (_,index) => <option key={index+1} value={index+1}>{index+1}</option>)}</select> / {paged.pages}</label>
+    <button className="btn neutral small" disabled={paged.page >= paged.pages} onClick={() => goToPage(paged.page + 1)}>{t('下一頁', 'Next')}</button>
+  </nav>;
   const classification = (record: Improvement) => record.source === 'external' ? <small className="finding-classification">{t('分類', 'Classification')}: {findingClassificationLabel(improvementFindingClassification(state,record),ctx.lang)}</small> : null;
   const sourceDetails = (record: Improvement) => <div className="notice"><strong>{record.source === 'external' ? t('外部檢查來源', 'External inspection source') : t('非外部來源', 'Non-external source')}</strong><div>{classification(record)}</div>{record.inspectionId && <p>{state.inspections.find(row => row.id === record.inspectionId)?.title || record.inspectionId} · {record.findingId}</p>}{record.sources.map((source, index) => <p key={index}>{[source.source, source.file, source.sheet, source.cell, source.pages?.join(', '), source.rawItem, source.note].filter(Boolean).join(' · ')}</p>)}</div>;
   const eventList = (record: Improvement) => <div className="progress-history"><h3>{t('已保存進度（不可修改）', 'Saved progress (immutable)')}</h3>{record.events.filter(event => event.id !== stagedId).length ? record.events.filter(event => event.id !== stagedId).map(event => <article key={event.id} className="notice"><small>{event.at} · {state.people.find(person => person.id === event.by)?.name || event.by} · {statusLabel(event.status)} · {event.percent}%</small><p className="preserve-lines">{event.content}</p></article>) : <Empty>{t('尚無進度。', 'No progress events yet.')}</Empty>}</div>;
@@ -192,11 +207,15 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   return <>
     {!ctx.inlineTarget && <>
     <PageHeading title={t('待改善項目', 'Improvement actions')} subtitle={t('每筆改善只有一份進度；更新日期篩選為UTC，並非回溯快照。', 'One event stream per action. Update date filters use UTC, not historical reconstruction.')} actions={<>{can('createImprovements') && <button className="btn primary" disabled={editor.busy || !!draft} onClick={create}>{t('新增改善', 'New action')}</button>}{can('exportReports') && <button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportPdf()}>{exporting ? t('產生中…', 'Generating…') : `${t('匯出已選PDF', 'Export selected PDF')} (${ids.length})`}</button>}</>} />
-    <div className="toolbar">
+    <nav className="improvement-list-views" aria-label={t('改善清單', 'Improvement lists')}>
+      {(['all', 'unfinished', 'completed'] as ImprovementListView[]).map(view => <button key={view} className={`btn ${listView === view ? 'primary' : 'neutral'}`} aria-pressed={listView === view} onClick={() => setFilters(old => withImprovementListView(old, view))}>{view === 'all' ? t('總表', 'All actions') : view === 'unfinished' ? t('未完成', 'Unfinished') : t('已完成', 'Completed')}</button>)}
+    </nav>
+    <div className="toolbar improvement-filters">
       <label className="field">{t('搜尋', 'Search')}<input value={filters.query || ''} onChange={event => setFilter('query', event.target.value)} placeholder={t('標題、內容、Item或進度', 'Title, content, item or progress')} /></label>
-      <label className="field">{t('框架', 'Framework')}<select value={filters.frameworkId || 'all'} onChange={event => setFilters(old => ({ ...old, frameworkId: event.target.value as Filters['frameworkId'], chapterId: '' }))}><option value="all">{t('全部', 'All')}</option><option>TMSA</option><option>DRYBMS</option></select></label>
+      <label className="field">{t('框架', 'Framework')}<select value={filters.frameworkId || 'all'} onChange={event => setFilters(old => ({ ...old, frameworkId: event.target.value as ImprovementListFilters['frameworkId'], chapterId: '' }))}><option value="all">{t('全部', 'All')}</option><option>TMSA</option><option>DRYBMS</option></select></label>
       <label className="field">{t('章節', 'Chapter')}<select value={filters.chapterId || ''} onChange={event => setFilter('chapterId', event.target.value)}><option value="">{t('全部', 'All')}</option>{state.chapters.filter(chapter => !filters.frameworkId || filters.frameworkId === 'all' || chapter.frameworkId === filters.frameworkId).map(chapter => <option key={chapter.id} value={chapter.id}>{chapter.frameworkId} {chapter.code} · {bi(chapter.name, ctx.lang)}</option>)}</select></label>
       <label className="field">{t('狀態', 'Status')}<select value={filters.status || ''} onChange={event => setFilter('status', event.target.value)}><option value="">{t('全部', 'All')}</option>{(['open', 'in_progress', 'closed'] as const).map(status => <option key={status} value={status}>{statusLabel(status)}</option>)}</select></label>
+      <label className="field improvement-source-filter">{t('來源', 'Source')}<select value={filters.source || ''} onChange={event => setFilter('source', event.target.value)}><option value="">{t('全部來源', 'All sources')}</option><option value="non_external">{t('自行提出', 'Self-proposed')}</option>{inspectionSources.map(inspection => <option key={inspection.id} value={`inspection:${inspection.id}`}>{inspection.date} · {inspection.frameworkId} · {inspection.title}</option>)}</select></label>
       <details className="secondary-filters"><summary>{t('更多篩選（部門／人員／日期）', 'More filters (department / person / dates)')}{[filters.departmentId, filters.personId, filters.urgency, filters.from, filters.to].some(Boolean) && <span className="filter-active"> · {t('已套用', 'Active')}</span>}</summary><div className="secondary-filter-fields">
       <label className="field">{t('部門', 'Department')}<select value={filters.departmentId || ''} onChange={event => setFilter('departmentId', event.target.value)}><option value="">{t('全部', 'All')}</option>{state.settings.departments.map(dept => <option key={dept.id} value={dept.id}>{bi(dept.name, ctx.lang)}</option>)}</select></label>
       <label className="field">{t('執行人', 'Assignee')}<select value={filters.personId || ''} onChange={event => setFilter('personId', event.target.value)}><option value="">{t('全部', 'All')}</option>{state.people.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
@@ -209,7 +228,14 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
     {filters.itemId && <div className="notice">{t('限定相關Item；新增改善將預填此Item', 'Filtered to related item; new actions prefill this item')}: {state.items.find(row => row.id === filters.itemId)?.code || filters.itemId} <button className="btn neutral" onClick={() => setFilters(old => ({ ...old, itemId: undefined }))}>{t('取消Item限定', 'Clear item scope')}</button></div>}
     <div className="list-selection-summary"><span>{t('符合篩選', 'Matching')}: {visible.length} · {t('已選', 'Selected')}: {ids.length}</span><button className="btn neutral small" onClick={() => setSelected([])}>{t('取消全部勾選', 'Clear selection')}</button><span className="list-hint">{t('清單顯示全文；點標題查看詳情', 'Full content shown; open the title for details')}</span></div>
     <EditorNotice error={draft ? '' : editor.error} lost={editor.lost} />
-    {!visible.length ? <Empty>{t('沒有符合篩選的改善記錄。', 'No matching improvement records.')}</Empty> : <div className="table-wrap"><table className="data-table improvement-table"><thead><tr><th>{t('選取', 'Select')}</th><th>{t('內容／相關Item', 'Action / related items')}</th><th>{t('部門／執行人', 'Departments / assignees')}</th><th>{t('狀態／急迫程度', 'Status / urgency')}</th><th>{t('目標／更新', 'Target / updated')}</th><th>{t('操作', 'Actions')}</th></tr></thead><tbody>{visible.map(record => <tr key={record.id}><td><input type="checkbox" aria-label={`${t('選取', 'Select')} ${record.title}`} checked={ids.includes(record.id)} onChange={event => setSelected(old => event.target.checked ? [...old, record.id] : old.filter(id => id !== record.id))} /></td><td><button className="text-button" onClick={() => setDetailId(record.id)}><BilingualText value={improvementTitle(record.title)} /></button><div className="improvement-content"><BilingualText value={record.content} /></div>{classification(record)}<div className="item-references">{record.itemIds.map(id => <button key={id} className="btn neutral" onClick={() => { const item = state.items.find(row => row.id === id); if (item) ctx.navigate(item.frameworkId, id); }}>{openIssuesFor(state, id).length > 0 ? '⭐ ' : ''}{state.items.find(item => item.id === id)?.code || id}</button>)}</div></td><td>{departmentsLabel(state, record.departmentIds, ctx.lang)}<br />{peopleLabel(state, record.assigneeIds)}</td><td><span className={`status-pill ${record.status}`}>{statusLabel(record.status)}</span><br />{urgencyLabel(record.urgency)} · {record.percent}%</td><td>{record.targetDate || '—'}<br /><small>{record.updatedAt}</small></td><td><div className="page-actions">{can('updateImprovements') && record.status !== 'closed' && <button className="btn primary" disabled={!!draft || editor.busy} onClick={() => void start(record, 'progress')}>{t('直接更新', 'Update progress')}</button>}{can('updateImprovements') && <button className="btn neutral" disabled={!!draft || editor.busy} onClick={() => void start(record)}>{t('完整編輯', 'Full edit')}</button>}{can('closeImprovements') && <button className={`btn ${record.status === 'closed' ? 'warning' : 'success'}`} disabled={!!draft || editor.busy} onClick={() => void start(record, record.status === 'closed' ? 'reopen' : 'close')}>{record.status === 'closed' ? t('重開', 'Reopen') : t('結案', 'Close')}</button>}</div></td></tr>)}</tbody></table></div>}
+    <div ref={pageTop}>{pagination('top')}</div>
+    {!visible.length ? <Empty>{t('沒有符合篩選的改善記錄。', 'No matching improvement records.')}</Empty> : <div className="table-wrap"><table className="data-table improvement-table"><thead><tr><th>{t('選取', 'Select')}</th><th>{t('內容／相關Item', 'Action / related items')}</th><th>{t('跟進資訊／操作', 'Follow-up / actions')}</th></tr></thead><tbody>{paged.rows.map(record => <tr key={record.id}><td><input type="checkbox" aria-label={`${t('選取', 'Select')} ${record.title}`} checked={ids.includes(record.id)} onChange={event => { const checked = event.target.checked; setSelected(old => checked ? [...old, record.id] : old.filter(id => id !== record.id)); }} /></td><td><button className="text-button" onClick={() => setDetailId(record.id)}><BilingualText value={improvementTitle(record.title)} /></button><div className="improvement-content"><BilingualText value={record.content} /></div>{classification(record)}<div className="item-references">{record.itemIds.map(id => <button key={id} className="btn neutral" onClick={() => { const item = state.items.find(row => row.id === id); if (item) ctx.navigate(item.frameworkId, id); }}>{openIssuesFor(state, id).length > 0 ? '⭐ ' : ''}{state.items.find(item => item.id === id)?.code || id}</button>)}</div></td><td className="improvement-metadata">
+      <div className="improvement-meta-group"><small>{t('部門／執行人', 'Departments / assignees')}</small><div>{departmentsLabel(state, record.departmentIds, ctx.lang)}{record.assigneeIds.length > 0 && <><br />{peopleLabel(state, record.assigneeIds)}</>}</div></div>
+      <div className="improvement-meta-group"><small>{t('狀態／急迫程度', 'Status / urgency')}</small><div className="improvement-status-line"><span className={`status-pill ${record.status}`}>{statusLabel(record.status)}</span><span>{urgencyLabel(record.urgency)} · {record.percent}%</span></div></div>
+      <div className="improvement-meta-group"><small>{t('目標／更新', 'Target / updated')}</small><div>{record.targetDate || '—'}<br /><small>{record.updatedAt}</small></div></div>
+      <div className="improvement-meta-group"><small>{t('操作', 'Actions')}</small><div className="page-actions">{can('updateImprovements') && record.status !== 'closed' && <button className="btn primary" disabled={!!draft || editor.busy} onClick={() => void start(record, 'progress')}>{t('直接更新', 'Update progress')}</button>}{can('updateImprovements') && <button className="btn neutral" disabled={!!draft || editor.busy} onClick={() => void start(record)}>{t('完整編輯', 'Full edit')}</button>}{can('closeImprovements') && <button className={`btn ${record.status === 'closed' ? 'warning' : 'success'}`} disabled={!!draft || editor.busy} onClick={() => void start(record, record.status === 'closed' ? 'reopen' : 'close')}>{record.status === 'closed' ? t('重開', 'Reopen') : t('結案', 'Close')}</button>}</div></div>
+    </td></tr>)}</tbody></table></div>}
+    {visible.length > 0 && pagination('bottom')}
     </>}
     {ctx.inlineTarget && !draft && !detail && <Modal title={t('改善事項', 'Improvement action')} wide onClose={discard}><EditorNotice error={editor.error || validation} lost={editor.lost} />{!editor.error && !validation && <p>{t('正在準備編輯視窗…', 'Preparing the editor…')}</p>}</Modal>}
     {detail && !draft && <Modal title={t('改善詳情', 'Action detail')} wide onClose={() => { setDetailId(''); ctx.onInlineClose?.(); }}><BilingualText value={improvementTitle(detail.title)} /><BilingualText value={detail.content} /><p>{t('計劃', 'Plan')}: {detail.plan}</p>{sourceDetails(detail)}{eventList(detail)}{ctx.inlineTarget && can('updateImprovements') && <button className="btn neutral" disabled={editor.busy} onClick={() => void start(detail)}>{t('完整編輯', 'Full edit')}</button>}</Modal>}
