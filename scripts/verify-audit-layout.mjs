@@ -74,7 +74,7 @@ try {
    assert(g.documentWidth<=width+1,`${id}: no document-wide horizontal overflow`);
    assert.equal(g.clippedCells,0,`${id}: all cell contents wrap without overlap or clipping`);
    assert(g.summaryStyles.every(s=>s.whiteSpace==='pre-wrap'&&s.clamp==='none'&&parseFloat(s.fontSize)>=15),`${id}: preserve full text, newlines and original readable font`);
-   assert.deepEqual(await table.locator('tbody td:nth-child(4)').allTextContents(),auditRows.map(row=>row.summary));
+   assert.deepEqual(await table.locator('.audit-original-summary').allTextContents(),auditRows.map(row=>row.summary));
    assert.deepEqual(await table.locator('tbody td:nth-child(3) small').allTextContents(),auditRows.map(row=>row.entityId));
    if(width===390){
     await table.evaluate(el=>{el.closest('.table-wrap').scrollLeft=el.scrollWidth;});
@@ -93,7 +93,7 @@ try {
  await page.setViewportSize({width:1440,height:1000});
  await page.locator('.toolbar label').filter({hasText:/^Record kind/}).locator('select').selectOption('improvement');await page.getByRole('button',{name:'Query server',exact:true}).click();
  await expect(table.locator('tbody tr')).toHaveCount(2);
- assert.deepEqual(await table.locator('tbody td:nth-child(4)').allTextContents(),auditRows.filter(row=>row.kind==='improvement').map(row=>row.summary));
+ assert.deepEqual(await table.locator('.audit-original-summary').allTextContents(),auditRows.filter(row=>row.kind==='improvement').map(row=>row.summary));
  receipt.cases.push({id:'original-kind-query-retains-full-summary',status:'PASS'});
  assert.equal(JSON.stringify({fixture,auditRows}),frozen,'The layout does not mutate fixture records');
  assert.equal(receipt.blockedExternal,0);assert.deepEqual(receipt.deniedActions,[]);assert.deepEqual(receipt.errors,[]);

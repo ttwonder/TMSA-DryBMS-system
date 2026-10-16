@@ -12,6 +12,7 @@
     "qa:browser": "node scripts/verify-browser.mjs",
     "qa:layout": "node --experimental-strip-types scripts/verify-layout.mjs",
     "qa:audit-layout": "node --experimental-strip-types scripts/verify-audit-layout.mjs",
+    "qa:audit-details": "node --experimental-strip-types scripts/verify-audit-details.mjs",
     "qa:inspection-sections-bulk": "node --experimental-strip-types scripts/verify-inspection-sections-bulk.mjs",
     "qa:improvement-input": "node --experimental-strip-types scripts/verify-improvement-input.mjs",
     "qa:improvement-list": "node --experimental-strip-types scripts/verify-improvement-list.mjs",
