@@ -93,6 +93,12 @@
 - 稽核建立時固定完整啟用框架及要求版本；逐項評定、觀察、建議、分數方法留在快照。依最新明確要求，歷史檢查（含已發布／已導入）直接修改同一 stable id，不再建立修訂副本；已發布保持final，原snapshot標準、finding id／來源raw與既有linked improvement sourceKey／ID不得更換，之前版本由原append-only audit before／after留存。外部觀察產生改善仍有去重鍵，不把正面觀察/指引當缺失。
 - 條目刪減採停用/再啟用，歷史及關聯保存；不硬刪。人員停用保存歷史，已停用人員/改角色之舊session不可繼續寫。新增條目/章節、改標準文字/代碼/排序只限Owner/admin。
 
+## 涉及部門 → 執行跟進人候選篩選
+- 所有可編輯「涉及部門＋執行跟進人」入口（改善新增／完整編輯／進度更新、TMSA／DRYBMS自評及inline改善、歷史發現建立改善）沿用原多選；候選只取已選部門的啟用人員，多部門聯集按stable person ID去重，不按角色代替部門、不自動勾選。無匹配維持空選項，不回退所有人。
+- 未選部門維持原「全部啟用人員、未限定」語義；清空部門不清人。所有既有已選ID／歷史保持不變，換部門或名冊刷新不自動移除、不sanitize保存payload。已選範圍外者仍顯示姓名（名冊缺少則原ID）、可手動移除，提示「不在目前涉及部門，請核對」／英文等義文案；停用／缺名冊者保留原既選語義，移除後不可作為新的不合格候選重選。
+- 僅候選投影及必要提示；原MultiSelect／MultiSelectDropdown、密度、欄位順序、角色、手動保存、useRecordEditor／lease／CAS／ACK／pendingUnknown及10秒同步不改。清單搜尋、唯讀顯示、名冊管理、評分、歷史原文、匯出與SQL不在本批修改範圍；不新增業務cache或filter自動寫入。
+- 本機證據、完整入口盤點及可重跑命令見 `docs/DEPARTMENT_ASSIGNEE_FILTER_DELIVERY.md`。原App＋合成資料／owned native PostgreSQL/HTTP的PASS不等同正式Supabase；本批按核驗後獨立本機commit交付，Push與正式操作仍由使用者決定。
+
 ## 人員
 ### 最新追加：General Manager 固定唯讀角色
 依已確認的 `docs/MANAGEMENT_VIEWER_ACCEPTANCE.md`，新增 `management_viewer`，不是Owner／管理員，也不按姓名或部門授權。此角色只顯示六入口，管理僅人員／框架／部門唯讀，保留指定匯出；全量／增量／匯出均由伺服器排除改善、操作紀錄及其衍生件數。歷史原始缺失／建議、自評與凍結標準不清洗。依最新 GM-R1 修訂，TMSA／DRYBMS 手動 `assessment.remarks`／`remarksStatus` 對此角色完整缺席：原App不顯示整塊備註、報告中心無條目備註入口，直接備註builder及新舊export_authorize的remarks variant拒絕，伺服器全量／增量與授權及持久化匯出快照不回傳這兩欄。只按真實角色與伺服器viewScope，不按帳號名稱／部門；其他角色的手動原文、五態、保存／匯出及來源note不變。015在已安裝014上最小受保護DDL，零業務／歷史／audit改寫；新獨立readback及本機證據見 `docs/MANAGEMENT_VIEWER_REMARKS_DELIVERY.md`。Owner／管理員可在既有新增人員表單選擇此固定角色，必須設定個人密碼；不列入可配置權限矩陣。以下三角色／七入口描述繼續適用於原角色，僅由本追加條款明確擴充。013只做本機實作及升級演練；正式SQL／readback／發布／安全建帳由使用者執行，不硬編碼帳號或憑證。
