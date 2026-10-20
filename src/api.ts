@@ -1,5 +1,5 @@
 import type {ApiClient, Assessment, Framework, FrameworkId, AuditQuery, AuditLog, BaseEntity, ExportRequest, Lease, Person, RosterPerson, PlatformState, BrowseState, Inspection, ReadonlyInspectionSummary, RecordKind, RpcResult, SaveIntent, SeedBundle, SupabaseConfig, SystemSettings} from './types';
-import {collectionFor,mergeAcknowledgement,mergeSync,inspectionSummary,type SyncEnvelope} from './syncState.ts';
+import {collectionFor,mergeAcknowledgement,mergeSync,inspectionSummary,immutableSnapshot,validateSyncCheck,validSyncMarker,type SyncEnvelope} from './syncState.ts';
 
 const SESSION_KEY='fpmc-compliance-session';
 const CLIENT_KEY='fpmc-compliance-client-id';
@@ -21,10 +21,16 @@ export class RpcError extends Error {
 class SupabaseApi implements ApiClient {
   readonly clientId:string; readonly config:SupabaseConfig;
   user:Person|null=null;sessionToken='';private epoch=0;private settings:SystemSettings|null=null;private leaseContexts=new Map<string,{kind:RecordKind;id:string;intent:SaveIntent}>();
-  private cache:BrowseState|null=null;private cacheContext='';private metadataToken='';private ackSerial=0;private syncFlight:{context:string;promise:Promise<BrowseState>}|null=null;
+  private cache:BrowseState|null=null;private cacheContext='';private metadataToken='';private ackSerial=0;private syncFlight:{context:string;promise:Promise<BrowseState>;full:boolean}|null=null;
   private detailFlights=new Map<string,Promise<Inspection>>();
+  private syncMarker='';private markerContext='';private markerCapable=false;
+  private publishedSource:BrowseState|null=null;private published:BrowseState|null=null;
   private context(){return `${this.epoch}:${this.sessionToken}:${this.user?.id??''}:${this.config.url}:${this.config.anonKey}`;}
-  cachedState(){return this.cacheContext===this.context()&&this.cache?structuredClone(this.cache):null;}
+  cachedState(){
+    if(this.cacheContext!==this.context()||!this.cache)return null;
+    if(this.publishedSource!==this.cache){this.published=immutableSnapshot(this.cache);this.publishedSource=this.cache;}
+    return this.published;
+  }
   constructor(config:SupabaseConfig){
     this.config={url:config.url.replace(/\/$/,''),anonKey:config.anonKey};
     const s=storage();this.clientId=s?.getItem(CLIENT_KEY)||id();s?.setItem(CLIENT_KEY,this.clientId);
@@ -106,23 +112,45 @@ class SupabaseApi implements ApiClient {
     if(this.sessionToken!==session||this.epoch!==epoch)throw new RpcError('STALE_SESSION','登入已切換，舊資料回覆未套用。');
     this.user=user;this.settings=structuredClone(state.settings);this.publishSession();return state;
   }
-  sync():Promise<BrowseState>{
+  sync(forceFull=false):Promise<BrowseState>{
     const context=this.context();
-    if(this.syncFlight?.context===context)return this.syncFlight.promise;
+    if(this.syncFlight?.context===context){
+      const flight=this.syncFlight;
+      if(!forceFull||flight.full)return flight.promise;
+      return flight.promise.then(()=>{if(context!==this.context())throw new RpcError('STALE_SESSION');return this.sync(true);});
+    }
     const promise=(async()=>{
       for(let attempt=0;attempt<4;attempt++){
         const serial=this.ackSerial,base=this.cacheContext===context?this.cache:null,versions:Record<string,number>={};
+        if(!forceFull&&base&&base.snapshotToken&&this.markerContext===context&&this.syncMarker){
+          try{
+            const check=await this.rpc<unknown>('sync_check',{syncMarker:this.syncMarker},true);
+            if(context!==this.context())throw new RpcError('STALE_SESSION');
+            if(serial!==this.ackSerial)continue;
+            if(validateSyncCheck(base,this.syncMarker,check))return this.cachedState()!;
+          }catch(error){
+            // Only the exact unsupported action result may fall back. Never auth,
+            // transport, permission, coverage or malformed-response failures.
+            if(!(error instanceof RpcError)||error.code!=='INVALID_PERFORMANCE_ROUTE')throw error;
+            this.syncMarker='';this.markerCapable=false;
+          }
+        }
         if(base)for(const [kind,key] of Object.entries(collectionFor)){const rows=key==='settings'?[base.settings]:base[key as Exclude<keyof PlatformState,'cycles'|'provenance'>] as BaseEntity[];for(const row of rows)versions[`${kind}:${row.id}`]=row.version;}
         const envelope=await this.rpc<SyncEnvelope>('sync',{versions,metadataToken:base?this.metadataToken:''},true);
         if(context!==this.context())throw new RpcError('STALE_SESSION');
         // A read admitted before a local committed ACK cannot certify that ACK's token.
         if(serial!==this.ackSerial)continue;
         if(base&&!('historyMode' in base)&&envelope.metadataToken&&envelope.metadataToken!==this.metadataToken&&(!Array.isArray(envelope.cycles)||!Array.isArray(envelope.provenance)))throw new RpcError('SYNC_METADATA_INCOMPLETE');
-        const next=mergeSync(base,envelope);this.cache=next;this.cacheContext=context;this.metadataToken=envelope.metadataToken??'';this.user=envelope.user;this.settings=structuredClone(next.settings);this.publishSession();return structuredClone(next);
+        const next=mergeSync(base,envelope);
+        if(envelope.syncMarker!==undefined){
+          if(!validSyncMarker(envelope.syncMarker)||envelope.historyMode!=='readonly-summary-v1'||typeof envelope.metadataToken!=='string'||!envelope.metadataToken||typeof envelope.snapshotToken!=='string'||!envelope.snapshotToken)throw new RpcError('SYNC_MARKER_INVALID');
+        }else if(this.markerContext===context&&this.markerCapable)throw new RpcError('SYNC_MARKER_MISSING');
+        this.syncMarker=envelope.syncMarker??'';this.markerCapable=!!this.syncMarker;this.markerContext=context;
+        this.cache=next;this.cacheContext=context;this.metadataToken=envelope.metadataToken??'';this.user=envelope.user;this.settings=structuredClone(next.settings);this.publishSession();return this.cachedState()!;
       }
       throw new RpcError('SYNC_BUSY','保存已確認；同步尚未取得穩定版本。');
     })();
-    const flight={context,promise};this.syncFlight=flight;
+    const flight={context,promise,full:forceFull};this.syncFlight=flight;
     void promise.finally(()=>{if(this.syncFlight===flight)this.syncFlight=null;}).catch(()=>{});
     return promise;
   }
@@ -171,7 +199,19 @@ class SupabaseApi implements ApiClient {
     return canonical;
   }
   queryAudit(query:AuditQuery){return this.rpc<{rows:AuditLog[];total:number}>('audit_query',query);}
-  authorizeExport(request:ExportRequest){return this.rpc<PlatformState>('export_authorize',request,request.snapshotToken.startsWith('performance-v1:'));}
+  async authorizeExport(request:ExportRequest){
+    // GM polling intentionally ignores hidden control changes. Export keeps the
+    // original stricter snapshotToken: refresh it only at this explicit action,
+    // and only if the complete visible baseline is still exactly the same.
+    const context=this.context(),marker=this.syncMarker;
+    if(this.user?.role==='management_viewer'&&this.cacheContext===context&&this.markerContext===context&&marker&&request.snapshotToken&&request.snapshotToken===this.cache?.snapshotToken){
+      const fresh=await this.sync(true);
+      if(context!==this.context())throw new RpcError('STALE_SESSION');
+      if(this.syncMarker!==marker)throw new RpcError('SNAPSHOT_STALE');
+      request={...request,snapshotToken:fresh.snapshotToken};
+    }
+    return this.rpc<PlatformState>('export_authorize',request,request.snapshotToken.startsWith('performance-v1:'));
+  }
   importSeed(seed:SeedBundle){return this.rpc<{imported:number}>('import_seed',{seed,operationId:id()});}
 }
 export interface SharedTargetRequest {frameworkId:FrameworkId;targets:Record<string,number|null>;expectedVersion:number;leaseToken:string;operationId:string}

@@ -1,11 +1,11 @@
 import http from 'node:http';
 import pg from 'pg';
-import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,readdirSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createNativeDatabase,setupQaIdentities,syntheticSeed,rpc,root} from './native-postgres.mjs';
 
-export async function startQaServer({seed=syntheticSeed(),port=0,evidenceDir=join(root,'qa-evidence'),afterCommit,performance=true}={}) {
+export async function startQaServer({seed=syntheticSeed(),port=0,evidenceDir=join(root,'qa-evidence'),afterCommit,performance=true,latestMigration=5}={}) {
   mkdirSync(evidenceDir,{recursive:true});
   const db=await createNativeDatabase({evidenceDir});
   const handlesPath=join(evidenceDir,'session-handles.json');
@@ -19,6 +19,8 @@ export async function startQaServer({seed=syntheticSeed(),port=0,evidenceDir=joi
     for(const file of ['002_import_timeout.sql','003_read_timeout.sql','004_office_directory.sql'])await db.setup.query(readFileSync(join(root,'supabase','migrations',file),'utf8'));
     if(performance)await db.setup.query(readFileSync(join(root,'supabase','migrations','005_performance.sql'),'utf8'));
     const users=await setupQaIdentities(db,{seed,handlesPath});
+    if(!Number.isInteger(latestMigration)||latestMigration<5||latestMigration>14||latestMigration>5&&!performance)throw Error('Invalid QA migration range');
+    for(const file of readdirSync(join(root,'supabase/migrations')).filter(f=>/^\d{3}_.*\.sql$/.test(f)&&Number(f.slice(0,3))>5&&Number(f.slice(0,3))<=latestMigration).sort())await db.setup.query(readFileSync(join(root,'supabase/migrations',file),'utf8'));
     pool=new pg.Pool({...db.connection,max:12,idleTimeoutMillis:10000});
     server=http.createServer(async(req,res)=>{
       const origin=req.headers.origin;

@@ -1,0 +1,82 @@
+// Owned native PostgreSQL, synthetic data, actual original RPC. No hosted calls.
+import assert from 'node:assert/strict';
+import {readFileSync,writeFileSync,mkdirSync,readdirSync,existsSync} from 'node:fs';
+import {join} from 'node:path';
+import {execFileSync} from 'node:child_process';
+import http from 'node:http';
+import {startQaServer} from './qa-server.mjs';
+import {createApiClient} from '../src/api.ts';
+import {root,syntheticSeed,sha256,opaque,rpc} from './native-postgres.mjs';
+const red=process.argv.includes('--red');
+const out=join(root,'qa-evidence/sync-efficiency',`${red?'native-red':'native'}-${new Date().toISOString().replaceAll(':','-')}`);mkdirSync(out,{recursive:true});
+const inputs=()=>Object.fromEntries(['package.json',...['src','tests','scripts','supabase/migrations'].flatMap(d=>readdirSync(join(root,d)).filter(n=>/\.(tsx?|mjs|sql|css)$/.test(n)).map(n=>d+'/'+n)),...['supabase/sync-efficiency-readback.sql'].filter(p=>existsSync(join(root,p)))].map(p=>[p,sha256(readFileSync(join(root,p)))]));
+const receipt={layer:'原生本機PG＋合成資料；localhost HTTP bytes，不是Supabase計費',head:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),inputHashes:inputs(),cases:[],measurements:{},productionRequests:0};
+let qa,current='setup';
+const persist=()=>writeFileSync(join(out,'receipt.json'),JSON.stringify(receipt,null,2));
+const run=async(id,fn)=>{current=id;try{await fn();receipt.cases.push({id,status:'PASS'});}catch(e){receipt.cases.push({id,status:'FAIL'});throw e;}finally{persist();}};
+const ok=r=>{assert.equal(r.value.ok,true,r.value.code);return r.value.data;};
+const denied=(r,c)=>{assert.equal(r.value.ok,false);assert.equal(r.value.code,c);};
+try{
+ const seed=syntheticSeed();
+ // Larger synthetic vector only; never load company source datasets.
+ for(let i=0;i<696;i++){const id=`synth-${i}`;seed.items.push({...structuredClone(seed.items[0]),id,code:`S-${i}`,order:i+5});seed.assessments.push({...structuredClone(seed.assessments[0]),id:'assessment-'+id,itemId:id});}
+ qa=await startQaServer({seed,evidenceDir:out});
+ for(const f of readdirSync(join(root,'supabase/migrations')).filter(f=>/^(00[6-9]|01[0-3])_/.test(f)).sort())await qa.db.setup.query(readFileSync(join(root,'supabase/migrations',f),'utf8'));
+ const call=(action,payload={},role='owner')=>new Promise((resolve,reject)=>{
+  const u=qa.users[role];const body=JSON.stringify({p_action:action,p_session:u?.sessionToken??'',p_client_id:u?.clientId??'qa-anon',p_payload:payload,p_sync_mode:'performance-v1'}),start=performance.now();
+  // Fresh HTTP/1.1 socket per sample: actual socket counters, not compression estimates.
+  const req=http.request(qa.url+'/rest/v1/rpc/compliance_rpc',{method:'POST',agent:false,headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}},res=>{const chunks=[];res.on('data',x=>chunks.push(x));res.on('end',()=>{const text=Buffer.concat(chunks);resolve({value:JSON.parse(text),requestJsonBytes:Buffer.byteLength(body),responseJsonBytes:text.length,requestWireBytes:req.socket.bytesWritten,responseWireBytes:req.socket.bytesRead,elapsedMs:Math.round((performance.now()-start)*100)/100,requestCount:1});});});req.on('error',reject);req.end(body);
+ });
+ const metrics=r=>Object.fromEntries(Object.entries(r).filter(([k])=>k!=='value'));
+ const cold=await call('sync',{versions:{},metadataToken:''}),base=ok(cold);
+ const warm=await call('sync',{versions:base.versions,metadataToken:base.metadataToken});assert.deepEqual(ok(warm).records,[]);
+ receipt.measurements.A={cold:metrics(cold),warm:metrics(warm)};persist();
+ const api=createApiClient(qa.config);api.user=qa.users.owner.user;api.sessionToken=qa.users.owner.sessionToken;
+ if(!red){
+  await run('original-Api-old-backend-cold-and-warm-compatible',async()=>{const a=await api.sync(),b=await api.sync();assert.deepEqual(a.items,b.items);assert.equal(a.items.length,700);});
+  const prior=(await qa.db.setup.query("select body from compliance_private.records where kind='assessment' and id='assessment-item-a'")).rows[0].body;
+  await qa.db.setup.query("update compliance_private.records set version=version+1,body=jsonb_set(jsonb_set(body,'{version}',to_jsonb(version+1)),'{selfAssessment,en}',to_jsonb('Changed synthetic'::text)) where kind='assessment' and id='assessment-item-a'");
+  const changed=await call('sync',{versions:base.versions,metadataToken:base.metadataToken});assert.equal(ok(changed).records.length,1);receipt.measurements.A.changed=metrics(changed);
+  await qa.db.setup.query("update compliance_private.records set version=$1,body=$2::jsonb where kind='assessment' and id='assessment-item-a'",[prior.version,JSON.stringify(prior)]);
+ }
+ if(red){await run('warm-sync-check-is-small-authorized-and-unchanged',async()=>{const r=await call('sync_check',{syncMarker:base.syncMarker??''});assert.equal(r.value.ok,true,'Original RPC lacks sync_check');assert.equal(r.value.data.unchanged,true);});}
+ else {
+  const catalog=async()=>(await qa.db.setup.query("select p.oid::regprocedure::text identity,md5(replace(prosrc,E'\\r\\n',E'\\n')) hash,proowner,proacl,proconfig,prosecdef,proargnames from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='compliance_private' or n.nspname='public' and p.proname='compliance_rpc' order by 1")).rows;
+  const tables=(await qa.db.setup.query("select relname,relowner,relacl,relrowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='compliance_private' and relkind='r' order by 1")).rows;
+  const ledger=async()=>{const v={};for(const t of tables)v[t.relname]=(await qa.db.setup.query(`select count(*)::int n,md5(coalesce(jsonb_agg(to_jsonb(t)||jsonb_build_object('xmin',xmin::text,'ctid',ctid::text) order by to_jsonb(t)::text)::text,'[]')) hash from compliance_private.${t.relname} t`)).rows[0];return v;};
+  const sql=readFileSync(join(root,'supabase/migrations/014_sync_efficiency.sql'),'utf8');
+  await run('014-unknown-predecessor-fails-closed',async()=>{const before=await catalog(),rows=await ledger();const original=(await qa.db.setup.query("select pg_get_functiondef('compliance_private.performance_dispatch(text,text,text,jsonb)'::regprocedure) d")).rows[0].d;await qa.db.setup.query(original.replace('#variable_conflict use_column','#variable_conflict use_column\n-- synthetic drift'));let error;try{await qa.db.setup.query(sql);}catch(e){error=e;}finally{await qa.db.setup.query('rollback');await qa.db.setup.query(original);}assert.match(error?.message??'',/SYNC_EFFICIENCY_UNKNOWN_PREDECESSOR/);assert.deepEqual(await ledger(),rows);assert.deepEqual(await catalog(),before);});
+  await run('014-install-preserves-all-physical-rows-and-catalog-ACL',async()=>{const before=await catalog(),rows=await ledger();await qa.db.setup.query(sql);const after=await catalog();assert.deepEqual(after.map(({hash,...a})=>a),before.map(({hash,...a})=>a));assert.deepEqual(await ledger(),rows);receipt.install={before,after,tables,rows};});
+  await run('014-reinstall-refused',async()=>{const before=await catalog();let error;try{await qa.db.setup.query(sql);}catch(e){error=e;}finally{await qa.db.setup.query('rollback');}assert.match(error?.message??'',/SYNC_EFFICIENCY_ALREADY_INSTALLED/);assert.deepEqual(await catalog(),before);});
+  const first=await call('sync',{versions:{},metadataToken:''}),initial=ok(first);receipt.measurements.B={cold:metrics(first)};
+  await run('warm-sync-check-is-small-authorized-and-unchanged',async()=>{const r=await call('sync_check',{syncMarker:initial.syncMarker});const d=ok(r);assert.equal(d.unchanged,true);assert.equal(d.syncMarker,initial.syncMarker);assert(!['versions','records','user','auditLogs','snapshotToken'].some(k=>k in d));assert(r.responseJsonBytes<=2048);receipt.measurements.B.warm=metrics(r);});
+  await run('empty-unknown-marker-never-unchanged',async()=>{for(const m of ['', 'sync-check-v1:'+'0'.repeat(64)])assert.equal(ok(await call('sync_check',{syncMarker:m})).unchanged,false);denied(await call('sync_check',{}),'INVALID_PAYLOAD');});
+  const mutate=async()=>qa.db.setup.query("update compliance_private.records set version=version+1,body=jsonb_set(jsonb_set(body,'{version}',to_jsonb(version+1)),'{selfAssessment,en}',to_jsonb('Changed synthetic'::text)) where kind='assessment' and id='assessment-item-a'");
+  await run('single-visible-change-check-plus-delta-and-complete-vector',async()=>{await mutate();const check=await call('sync_check',{syncMarker:initial.syncMarker});assert.equal(ok(check).unchanged,false);const delta=await call('sync',{versions:initial.versions,metadataToken:initial.metadataToken});assert.equal(ok(delta).records.length,1);assert.equal(ok(delta).records[0].body.version,initial.versions['assessment:assessment-item-a']+1);receipt.measurements.B.changed={check:metrics(check),delta:metrics(delta),requestCount:2};});
+  await run('check-then-change-sync-uses-own-snapshot',async()=>{const a=ok(await call('sync',{versions:{}}));assert.equal(ok(await call('sync_check',{syncMarker:a.syncMarker})).unchanged,true);await mutate();const b=ok(await call('sync',{versions:a.versions}));assert.notEqual(a.syncMarker,b.syncMarker);assert.equal(b.records.length,1);assert.equal(ok(await call('sync_check',{syncMarker:b.syncMarker})).unchanged,true);});
+  await run('export-only-audit-detected-with-original-export-token',async()=>{const a=ok(await call('sync',{versions:{}}));const exp=await call('export_authorize',{kind:'framework',format:'pdf',frameworkId:'TMSA',ids:['item-a'],snapshotToken:a.snapshotToken});ok(exp);receipt.measurements.B.export=metrics(exp);const check=ok(await call('sync_check',{syncMarker:a.syncMarker}));assert.equal(check.unchanged,false);const b=ok(await call('sync',{versions:a.versions}));assert.deepEqual(b.records,[]);assert.equal(b.snapshotToken,a.snapshotToken);assert.notEqual(b.syncMarker,a.syncMarker);await mutate();denied(await call('export_authorize',{kind:'framework',format:'pdf',frameworkId:'TMSA',ids:['item-a'],snapshotToken:a.snapshotToken}),'SNAPSHOT_STALE');});
+  const native=async(action,payload={},role='owner')=>{const u=qa.users[role];const r=await rpc(qa.db,action,payload,u?.sessionToken??'',u?.clientId??'qa');assert.equal(r.ok,true,r.code);return r.data;};
+  const savePerson=async(body)=>{const l=await native('claim',{kind:'person',id:body.id});try{return await native('save',{kind:'person',record:body,expectedVersion:body.version,leaseToken:l.token,intent:'update',operationId:opaque()});}finally{await native('release',{kind:'person',id:body.id,leaseToken:l.token});}};
+  await run('session-role-disable-and-revoke-checked-before-token',async()=>{for(const [role,change] of [['operator',{role:'admin'}],['peer',{active:false}]]){const a=ok(await call('sync',{versions:{}},role));await savePerson({...qa.users[role].user,...change});denied(await call('sync_check',{syncMarker:a.syncMarker},role),'SESSION_INVALID');}const a=ok(await call('sync',{versions:{}},'vessel'));await native('logout',{},'vessel');denied(await call('sync_check',{syncMarker:a.syncMarker},'vessel'),'SESSION_INVALID');denied(await call('sync_check',{syncMarker:initial.syncMarker},'missing'),'SESSION_INVALID');});
+  const secret=sha256(opaque()),viewer={id:'qa-sync-viewer',version:0,username:'QA viewer',name:'QA viewer',departmentId:'management',role:'management_viewer',active:true,credentialHash:secret};const l=await native('claim',{kind:'person',id:viewer.id,intent:'create'});await native('save',{kind:'person',record:viewer,expectedVersion:0,leaseToken:l.token,intent:'create',operationId:opaque()});await native('release',{kind:'person',id:viewer.id,leaseToken:l.token});const gate=await native('gate',{passwordHash:qa.db.qaCredentials.gateHash});const auth=await native('login',{gateToken:gate.gateToken,personId:viewer.id,passwordHash:secret});qa.users.viewer={...auth,clientId:'qa-sync-viewer-client'};
+  await run('GM-hidden-improvement-audit-cycles-provenance-do-not-change-marker',async()=>{const a=ok(await call('sync',{versions:{}},'viewer'));assert.equal(a.viewScope,'management_viewer');await qa.db.setup.query("insert into compliance_private.records(kind,id,version,body) values('improvement','synthetic-hidden',1,'{\"id\":\"synthetic-hidden\",\"version\":1}');update compliance_private.control set cycles='[{\"hidden\":true}]',provenance='[{\"hidden\":true}]' where singleton");const owner=ok(await call('sync',{versions:{}}));ok(await call('export_authorize',{kind:'framework',format:'pdf',frameworkId:'TMSA',ids:['item-a'],snapshotToken:owner.snapshotToken}));const b=ok(await call('sync_check',{syncMarker:a.syncMarker},'viewer'));assert.equal(b.unchanged,true);assert.equal(b.syncMarker,a.syncMarker);assert.equal(b.viewScope,'management_viewer');const full=ok(await call('sync',{versions:a.versions},'viewer'));assert.equal(full.syncMarker,a.syncMarker);assert.deepEqual(full.records,[]);await mutate();assert.equal(ok(await call('sync_check',{syncMarker:a.syncMarker},'viewer')).unchanged,false);});
+  await run('marker-bound-to-actor-client-and-coverage',async()=>{denied(await call('sync_check',{syncMarker:initial.syncMarker,versions:{}}),'INVALID_PAYLOAD');const a=ok(await call('sync',{versions:{}},'admin'));assert.equal(ok(await call('sync_check',{syncMarker:a.syncMarker},'owner')).unchanged,false);});
+  await run('original-Api-native-cold-warm-changed-and-export-freshness',async()=>{
+   const a=createApiClient(qa.config);a.user=qa.users.owner.user;a.sessionToken=qa.users.owner.sessionToken;
+   const first=await a.sync(),same=await a.sync();assert.equal(first,same);assert.equal(a.cachedState(),first);
+   await mutate();const next=await a.sync();assert.notEqual(next,first);assert.equal(next.assessments.find(x=>x.id==='assessment-item-a').version,first.assessments.find(x=>x.id==='assessment-item-a').version+1);
+   const exp=await a.authorizeExport({kind:'framework',format:'pdf',frameworkId:'TMSA',ids:['item-a'],snapshotToken:next.snapshotToken});assert.equal(exp.items.length,1);
+   const audit=await a.sync();assert.notEqual(audit,next);assert.equal(audit.snapshotToken,next.snapshotToken);
+  });
+  await run('GM-hidden-control-check-does-not-strand-original-export-freshness',async()=>{
+   const a=createApiClient(qa.config);a.user=qa.users.viewer.user;a.sessionToken=qa.users.viewer.sessionToken;
+   const first=await a.sync();await qa.db.setup.query("update compliance_private.control set cycles=cycles||'[{\"hiddenAgain\":true}]'::jsonb where singleton");assert.equal(await a.sync(),first);
+   const exported=await a.authorizeExport({kind:'framework',format:'pdf',frameworkId:'TMSA',ids:['item-a'],snapshotToken:first.snapshotToken});assert.equal(exported.items.length,1);assert.deepEqual(exported.improvements,[]);
+   const fresh=await a.sync();await mutate();await assert.rejects(a.authorizeExport({kind:'framework',format:'pdf',frameworkId:'TMSA',ids:['item-a'],snapshotToken:fresh.snapshotToken}),/SNAPSHOT_STALE/);
+  });
+  await run('visible-control-metadata-only-invalidates-check',async()=>{const a=ok(await call('sync',{versions:{}}));await qa.db.setup.query("update compliance_private.control set cycles=cycles||'[{\"synthetic\":true}]'::jsonb where singleton");assert.equal(ok(await call('sync_check',{syncMarker:a.syncMarker})).unchanged,false);const b=ok(await call('sync',{versions:a.versions}));assert.deepEqual(b.records,[]);assert.notEqual(b.metadataToken,a.metadataToken);assert.equal(b.controlSummary.cycles,a.controlSummary.cycles+1);});
+  await run('014-readonly-readback',async()=>{const before=await ledger();const r=await qa.db.setup.query(readFileSync(join(root,'supabase/sync-efficiency-readback.sql'),'utf8'));receipt.readback=r.flatMap(x=>x.rows??[]).find(x=>x.sync_efficiency_readback)?.sync_efficiency_readback;assert.equal(receipt.readback?.status,'PASS_SYNC_EFFICIENCY_INSTALL_ONLY');assert.deepEqual(await ledger(),before);});
+ }
+ receipt.status='PASS';
+}catch(e){receipt.status='FAIL';receipt.error={case:current,name:e.name,code:e.code,message:e.message};process.exitCode=1;}
+finally{const apiPort=qa?.server.address()?.port;await qa?.stop();receipt.cleanup={ownedServerStopped:!qa?.server.listening,ownedPostgresStopped:!qa||!existsSync(join(qa.db.dataDir,'postmaster.pid')),ports:{api:apiPort,pg:qa?.db.port}};receipt.endingInputHashes=inputs();persist();console.log(JSON.stringify({status:receipt.status,cases:receipt.cases.length,error:receipt.error,measurements:receipt.measurements,receipt:join(out,'receipt.json')}));}

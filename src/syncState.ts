@@ -17,7 +17,7 @@ export function mergeAcknowledgement<T extends BrowseState>(state:T,kind:RecordK
  const next=old?rows.map(x=>x.id===record.id?body:x):[...rows,body].sort((a,b)=>a.id.localeCompare(b.id));
  return {...state,[key]:next,snapshotToken:''};
 }
-export interface SyncEnvelope {viewScope?:'management_viewer';user:PlatformState['people'][number];versions:Record<string,number>;records:{kind:RecordKind;body:BaseEntity}[];metadataToken?:string;cycles?:unknown[];provenance?:unknown[];historyMode?:'readonly-summary-v1';controlSummary?:LiveView['controlSummary'];auditLogs:PlatformState['auditLogs'];serverTime:string;snapshotToken:string;baseline:boolean}
+export interface SyncEnvelope {syncMarker?:string;viewScope?:'management_viewer';user:PlatformState['people'][number];versions:Record<string,number>;records:{kind:RecordKind;body:BaseEntity}[];metadataToken?:string;cycles?:unknown[];provenance?:unknown[];historyMode?:'readonly-summary-v1';controlSummary?:LiveView['controlSummary'];auditLogs:PlatformState['auditLogs'];serverTime:string;snapshotToken:string;baseline:boolean}
 /** A complete version vector covers summaries too; a summary is never a full body. */
 export function mergeSync(state:BrowseState|null,envelope:SyncEnvelope):BrowseState{
  if(!state&&!envelope.baseline)throw Error('SYNC_BASELINE_REQUIRED');
@@ -43,4 +43,23 @@ export function mergeSync(state:BrowseState|null,envelope:SyncEnvelope):BrowseSt
  }
  if(Object.keys(envelope.versions).some(id=>!cachedKeys.has(id)))throw Error('SYNC_VECTOR_MISMATCH');
  return {...next,...(restricted?{viewScope:'management_viewer' as const}:{}),...('historyMode' in next?{controlSummary:envelope.controlSummary!}:{cycles:envelope.cycles??next.cycles,provenance:envelope.provenance??next.provenance}),auditLogs:envelope.auditLogs,serverTime:envelope.serverTime,snapshotToken:envelope.snapshotToken};
+}
+
+/** The published baseline is immutable and reused, never shared as a writable cache. */
+export function immutableSnapshot<T>(state:T):T {
+ const copy=structuredClone(state);
+ const freeze=(value:unknown):void=>{if(value&&typeof value==='object'){for(const child of Object.values(value))freeze(child);Object.freeze(value);}};
+ freeze(copy);return copy;
+}
+export const validSyncMarker=(value:unknown):value is string=>typeof value==='string'&&/^sync-check-v1:[a-f0-9]{64}$/.test(value);
+/** No replacement snapshot/export token is accepted from a small check. */
+export function validateSyncCheck(base:BrowseState,marker:string,value:unknown):boolean {
+ if(!validSyncMarker(marker)||!base.snapshotToken||!('historyMode' in base)||base.historyMode!=='readonly-summary-v1')throw Error('SYNC_BASELINE_REQUIRED');
+ if(!value||typeof value!=='object'||Array.isArray(value))throw Error('SYNC_CHECK_INVALID');
+ const c=value as Record<string,unknown>;
+ if(Object.keys(c).some(k=>!['syncMarker','unchanged','historyMode','viewScope'].includes(k))||!validSyncMarker(c.syncMarker)||typeof c.unchanged!=='boolean')throw Error('SYNC_CHECK_INVALID');
+ if(c.viewScope!==base.viewScope)throw Error('SYNC_SCOPE_MISMATCH');
+ if(c.historyMode!==base.historyMode)throw Error('SYNC_COVERAGE_MISMATCH');
+ if(c.unchanged&&c.syncMarker!==marker)throw Error('SYNC_MARKER_MISMATCH');
+ return c.unchanged;
 }

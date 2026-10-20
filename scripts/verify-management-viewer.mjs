@@ -9,7 +9,7 @@ import {startQaServer} from './qa-server.mjs';
 import {root,syntheticSeed,rpc,opaque,sha256} from './native-postgres.mjs';
 const baseline=process.argv.includes('--baseline');
 const out=join(root,'qa-evidence/management-viewer',`${baseline?'baseline':'green'}-${new Date().toISOString().replaceAll(':','-')}`);mkdirSync(out,{recursive:true});
-const migrations=readdirSync(join(root,'supabase/migrations')).filter(f=>/^(00[1-9]|01[0-3])_.*\.sql$/.test(f)).sort();
+const migrations=readdirSync(join(root,'supabase/migrations')).filter(f=>/^(00[1-9]|01[0-4])_.*\.sql$/.test(f)&&(process.argv.includes('--latest')||!f.startsWith('014_'))).sort();
 const inputs=['scripts/verify-management-viewer.mjs','scripts/native-postgres.mjs','scripts/qa-server.mjs',...migrations.map(f=>'supabase/migrations/'+f),...(existsSync(join(root,'supabase/management-viewer-readback.sql'))?['supabase/management-viewer-readback.sql']:[])];
 const inputHashes=()=>Object.fromEntries(inputs.map(p=>[p,sha256(readFileSync(join(root,p)))]));
 const receipt={layer:'合成資料＋原生PostgreSQL；無瀏覽器／非正式環境',head:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),inputHashes:inputHashes(),cases:[]};
@@ -80,6 +80,7 @@ try{
   });
   await run('existing-role-full-and-performance-read-parity',async()=>{for(const role of Object.keys(priorReads)){assert.deepEqual(stripped(ok(await call(role,'read'))),priorReads[role].full);assert.deepEqual(stripped(ok(await call(role,'sync',{versions:{}},'performance'))),priorReads[role].sync);assert(!('viewScope' in priorReads[role].full));assert(!('viewScope' in priorReads[role].sync));}});
  }
+ if(process.argv.includes('--latest')&&!baseline){await qa.db.setup.query(readFileSync(join(root,'supabase/migrations/014_sync_efficiency.sql'),'utf8'));receipt.latestMigration=14;}
  const credentialHash=sha256(opaque()),id='qa-management-viewer';
  // Original native RED: admin's real lease/CAS save rejected INVALID_PERSON through 012.
  await run('admin-creates-dedicated-readonly-account-with-existing-person-save',async()=>{
@@ -174,7 +175,7 @@ try{
   ok(await save('admin','person',{...await row('person',id),active:false},'archive'));denied(await call('viewer','read'),'SESSION_INVALID');denied(await call('viewer','sync',{versions:{}},'performance'),'SESSION_INVALID');denied(await login(id),'LOGIN_DENIED');ok(await save('admin','person',{...await row('person',id),active:true},'activate'));const fresh=ok(await login(id));qa.users.viewer={user:fresh.user,sessionToken:fresh.sessionToken,clientId:'qa-viewer-client'};publicOnly(ok(await call('viewer','read')));
  });
  await run('viewer-logout-works-and-invalidates-session',async()=>{ok(await call('viewer','logout'));denied(await call('viewer','current_user'),'SESSION_INVALID');denied(await call('viewer','read'),'SESSION_INVALID');});
- await run('013-independent-readonly-catalog-and-acl-readback',async()=>{const before=await ledger();const results=await qa.db.setup.query(readFileSync(join(root,'supabase/management-viewer-readback.sql'),'utf8'));receipt.readback=results.flatMap(r=>r.rows||[]).find(r=>r.management_viewer_readback)?.management_viewer_readback;assert.equal(receipt.readback?.status,'PASS_MANAGEMENT_VIEWER_INSTALL_ONLY');assert.deepEqual(await ledger(),before);});
+ await run('013-independent-readonly-catalog-and-acl-readback',async()=>{const before=await ledger();const latest=process.argv.includes('--latest'),key=latest?'sync_efficiency_readback':'management_viewer_readback';const results=await qa.db.setup.query(readFileSync(join(root,latest?'supabase/sync-efficiency-readback.sql':'supabase/management-viewer-readback.sql'),'utf8'));receipt.readback=results.flatMap(r=>r.rows||[]).find(r=>r[key])?.[key];assert.equal(receipt.readback?.status,latest?'PASS_SYNC_EFFICIENCY_INSTALL_ONLY':'PASS_MANAGEMENT_VIEWER_INSTALL_ONLY');assert.deepEqual(await ledger(),before);});
  await run('013-repeat-refused-without-data-or-catalog-change',async()=>{const before=await ledger(),catalog=await catalogue();let error;try{await qa.db.setup.query(readFileSync(join(root,'supabase/migrations/013_management_viewer.sql'),'utf8'));}catch(e){error=e;}finally{await qa.db.setup.query('rollback');}assert.equal(error?.message,'MANAGEMENT_VIEWER_ALREADY_INSTALLED_VERIFY_READBACK');assert.deepEqual(await ledger(),before);assert.deepEqual(await catalogue(),catalog);});
  receipt.finalLedger=await ledger();receipt.result='PASS';
 }catch(e){receipt.result='FAIL';receipt.failure={case:current,message:e.message,code:e.code};process.exitCode=1;}
