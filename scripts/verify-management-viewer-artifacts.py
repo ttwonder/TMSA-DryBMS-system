@@ -1,4 +1,4 @@
-"""Check the 12 original-browser GM downloads; synthetic data only.
+"""Check original-browser downloads (015 GM + ordinary-role controls, or historical 013); synthetic data only.
 uv run --offline --no-project --python 3.12 --with pymupdf==1.26.5 --with openpyxl==3.1.5 --with pywin32 python scripts/verify-management-viewer-artifacts.py RECEIPT
 """
 from pathlib import Path
@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import unicodedata
+import zipfile
 import fitz
 import openpyxl
 
@@ -22,14 +23,24 @@ def compact(text):
     return re.sub(r'\s+', '', unicodedata.normalize('NFKC', text))
 
 
+STATUSES = [('完全符合','DFF2E6'),('部分符合可完善','E1EFFA'),('部分符合近期無法完善','EEE5F7'),('不符合可完善','FCE8CD'),('不符合近期無法完善','FBE1E1')]
+
 def expected_text(kind):
     return {'framework': ['CURRENT_ASSESSMENT_RETAINED'], 'remarks': ['MANUAL_REMARKS_RETAINED', '備註完整保留', '部分符合可完善'], 'inspection': ['FROZEN_ORIGINAL_OBSERVATION', 'FROZEN_ORIGINAL_RECOMMENDATION', 'FROZEN_ORIGINAL_FINDING', 'FROZEN_ORIGINAL_ADVICE', 'FROZEN_ORIGINAL_SOURCE'], 'overview': ['上次凍結檢查', '目前得分']}[kind]
 
 
-def check_text(text, kind):
+def check_text(text, kind, role='viewer', latest=False):
     actual = compact(text)
     for forbidden in ['HIDDEN_LIVE_IMPROVEMENT_QA', '未結案改善', '關聯改善', '改善結案', '改善篩選', '未結案事項與執行計劃', '★', '⭐']:
         assert compact(forbidden) not in actual, f'Private marker/label retained: {forbidden}'
+    if latest and role == 'viewer':
+        for forbidden in ['MANUAL_REMARKS_RETAINED', '備註完整保留', 'remarksStatus', '備註狀態', '備註內容', 'Remarks status']:
+            assert compact(forbidden) not in actual, f'Manual remarks leaked: {forbidden}'
+    if latest and kind == 'remarks':
+        for label, _ in STATUSES:
+            assert compact(label) in actual, f'Missing five-state label: {label}'
+    if latest and kind == 'framework':
+        assert 'LEGAL_SOURCE_NOTE' in actual and 'LEGAL_EVIDENCE_RETAINED' in actual
     for required in expected_text(kind):
         assert compact(required) in actual, f'Required original content missing: {required}'
 
@@ -84,18 +95,30 @@ def main(receipt_path):
     receipt_path = Path(receipt_path)
     receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
     downloads = receipt['downloads']
-    expected = {(fw, kind, fmt) for fw in ['TMSA', 'DRYBMS'] for kind, fmt in [('framework', 'xlsx'), ('framework', 'pdf'), ('remarks', 'xlsx'), ('remarks', 'pdf'), ('inspection', 'pdf'), ('overview', 'pdf')]}
-    assert len(downloads) == len(expected) == 12
-    assert {(x['framework'], x['kind'], x['format']) for x in downloads} == expected
+    latest = receipt.get('migration') == 15
+    if latest:
+        expected = {(role, fw, kind, fmt) for fw in ['TMSA', 'DRYBMS'] for role, kind, fmt in [('viewer','framework','xlsx'),('viewer','framework','pdf'),('viewer','inspection','pdf'),('viewer','overview','pdf'),('operator','remarks','xlsx'),('operator','remarks','pdf')]}
+        assert {(x['role'],x['framework'],x['kind'],x['format']) for x in downloads} == expected
+        assert not any(x['role']=='viewer' and x['kind']=='remarks' for x in downloads)
+    else:
+        expected = {(fw, kind, fmt) for fw in ['TMSA', 'DRYBMS'] for kind, fmt in [('framework', 'xlsx'), ('framework', 'pdf'), ('remarks', 'xlsx'), ('remarks', 'pdf'), ('inspection', 'pdf'), ('overview', 'pdf')]}
+        assert {(x['framework'], x['kind'], x['format']) for x in downloads} == expected
+    assert len(downloads) == len(expected)
     result = {'layer': 'Saved actual browser downloads / synthetic native QA', 'verifierSha256': digest(Path(__file__)), 'result': 'PASS', 'artifacts': []}
     for entry in downloads:
         path = Path(entry['path'])
-        row = {'framework': entry['framework'], 'kind': entry['kind'], 'format': entry['format'], 'path': str(path)}
+        role = entry.get('role','viewer')
+        row = {'role': role, 'framework': entry['framework'], 'kind': entry['kind'], 'format': entry['format'], 'path': str(path)}
         try:
             assert digest(path) == entry['sha256']
             if entry['format'] == 'pdf':
                 doc = fitz.open(path)
-                check_text('\n'.join(p.get_text() for p in doc), entry['kind'])
+                check_text('\n'.join(p.get_text() for p in doc), entry['kind'], role, latest)
+                if latest and entry['kind']=='remarks':
+                    fills = {tuple(round(c*255) for c in drawing['fill']) for page in doc for drawing in page.get_drawings() if drawing.get('fill')}
+                    for _, color in STATUSES:
+                        assert tuple(int(color[n:n+2],16) for n in [0,2,4]) in fills, f'Missing PDF status fill {color}'
+                    row['fiveStatusColours'] = True
                 for page in doc:
                     for b in page.get_text('dict')['blocks']:
                         for line in b.get('lines', []):
@@ -114,14 +137,22 @@ def main(receipt_path):
             else:
                 book = openpyxl.load_workbook(path, read_only=True, data_only=False)
                 text = '\n'.join(str(c.value or '') for sheet in book for cells in sheet for c in cells)
-                check_text(text, entry['kind'])
+                check_text(text, entry['kind'], role, latest)
+                if latest and entry['kind']=='remarks':
+                    cells = [c for sheet in book for rowcells in sheet for c in rowcells]
+                    for label,color in STATUSES:
+                        assert any(c.value==label and c.fill.fgColor.rgb=='FF'+color for c in cells), f'Missing Excel colour {color}'
+                    row['fiveStatusColours'] = True
+                if latest and role=='viewer':
+                    with zipfile.ZipFile(path) as z:
+                        assert all(b'MANUAL_REMARKS_RETAINED' not in z.read(name) for name in z.namelist()), 'Manual marker hidden in XLSX package'
                 row['sheets'] = book.sheetnames
                 book.close()
                 worker = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--native', str(path)], capture_output=True, text=True, encoding='utf-8', timeout=120)
                 assert worker.returncode == 0, worker.stderr
                 row['nativeExcel'] = json.loads(worker.stdout)
                 native_pdf = fitz.open(row['nativeExcel']['nativePdf'])
-                check_text('\n'.join(p.get_text() for p in native_pdf), entry['kind'])
+                check_text('\n'.join(p.get_text() for p in native_pdf), entry['kind'], role, latest)
                 row['nativePrintPages'] = len(native_pdf)
             assert digest(path) == entry['sha256'], 'Source artifact modified'
             row['status'] = 'PASS'

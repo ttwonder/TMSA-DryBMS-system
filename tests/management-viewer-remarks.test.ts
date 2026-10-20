@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {DEFAULT_PERMISSIONS} from '../src/domain.ts';
+import type {PlatformState} from '../src/types.ts';
+import {selectedRemarkRows,buildRemarksExcel,buildRemarksPdf} from '../src/reports.ts';
+const base={version:1,createdAt:'',updatedAt:'',updatedBy:''};
+const bi={en:'Synthetic',zh:'測試'};
+const state={viewScope:'management_viewer',frameworks:[{...base,id:'TMSA',active:true}],chapters:[{...base,id:'c',frameworkId:'TMSA',active:true,code:'1',order:1,name:bi}],items:[{...base,id:'i',frameworkId:'TMSA',chapterId:'c',active:true,level:1,order:1,code:'1.1'}],assessments:[{...base,id:'a',itemId:'i',remarks:'FORBIDDEN_MANUAL_MARKER',remarksStatus:'fully_met'}],improvements:[],inspections:[],people:[],dryScores:[],cycles:[],provenance:[],auditLogs:[],settings:{...base,id:'settings',departments:[],rolePermissions:DEFAULT_PERMISSIONS,siteGateConfigured:true},serverTime:'2026-01-01',snapshotToken:'synthetic'} as unknown as PlatformState;
+test('GM direct remarks selector rejects even populated manual fields',()=>{assert.throws(()=>selectedRemarkRows(state,'TMSA',['c']),/^Error: FORBIDDEN$/);});
+test('GM direct Excel and PDF remarks builders reject before asset IO',async()=>{await assert.rejects(buildRemarksExcel(state,'TMSA','zh',['c']),/^Error: FORBIDDEN$/);await assert.rejects(buildRemarksPdf(state,'TMSA','en',['c']),/^Error: FORBIDDEN$/);});
+test('ordinary authorized snapshot retains manual bytes and status',()=>{const ordinary={...state,viewScope:undefined};const before=JSON.stringify(ordinary);const rows=selectedRemarkRows(ordinary,'TMSA',['c']);assert.equal(rows[0].assessment.remarks,'FORBIDDEN_MANUAL_MARKER');assert.equal(rows[0].assessment.remarksStatus,'fully_met');assert.equal(JSON.stringify(ordinary),before);});

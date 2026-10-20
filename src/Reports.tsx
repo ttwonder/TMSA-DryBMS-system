@@ -28,7 +28,7 @@ export default function Reports(ctx:PageProps) {
   const remarksCount=state.assessments.filter(a=>hasItemRemarks(a)&&state.items.some(i=>i.id===a.itemId&&i.active&&i.frameworkId===frameworkId&&selectedChapters.includes(i.chapterId))).length;
   const changeKind=(value:ReportKind)=>{setKind(value);setError('');if(value!=='framework'&&value!=='remarks')setFormat('pdf');};
   const exportReport=async()=>{
-    if(busy||!allowed||restricted&&kind==='improvements')return;
+    if(busy||!allowed||restricted&&(kind==='improvements'||kind==='remarks'))return;
     const ids=kind==='improvements'?effectiveSelection:kind==='inspection'?(inspectionId?[inspectionId]:[]):kind==='overview'?overviewScope:selectedChapters;
     if(!ids.length){setError(t('請明選仍符合篩選的有效項目。空選不會輸出全部。','Select valid records still matching the filters. An empty selection never means all.'));return;}
     if(kind!=='remarks'&&filters.from&&filters.to&&filters.from>filters.to){setError(t('起始日期不可晚於結束日期。','The start date must not be after the end date.'));return;}
@@ -54,7 +54,7 @@ export default function Reports(ctx:PageProps) {
     {!allowed&&<div className="notice warning" role="status">{t('目前角色沒有報告輸出權限。','Your role does not permit report export.')}</div>}
     <section className="panel">
       <div className="toolbar">
-        <label><span>{t('報告種類','Report type')}</span><select aria-label={t('報告種類','Report type')} value={kind} disabled={busy} onChange={event=>changeKind(event.target.value as ReportKind)}><option value="framework">{t('框架完整自評','Full framework assessment')}</option><option value="remarks">{t('條目備註','Item remarks')}</option>{!restricted&&<option value="improvements">{t('明選改善項目','Selected improvements')}</option>}<option value="inspection">{t('凍結歷史檢查','Frozen inspection')}</option><option value="overview">{t('管控總覽','Management overview')}</option></select></label>
+        <label><span>{t('報告種類','Report type')}</span><select aria-label={t('報告種類','Report type')} value={kind} disabled={busy} onChange={event=>changeKind(event.target.value as ReportKind)}><option value="framework">{t('框架完整自評','Full framework assessment')}</option>{!restricted&&<option value="remarks">{t('條目備註','Item remarks')}</option>}{!restricted&&<option value="improvements">{t('明選改善項目','Selected improvements')}</option>}<option value="inspection">{t('凍結歷史檢查','Frozen inspection')}</option><option value="overview">{t('管控總覽','Management overview')}</option></select></label>
         <label><span>{t('文件格式','File format')}</span><select aria-label={t('文件格式','File format')} disabled={busy||(kind!=='framework'&&kind!=='remarks')} value={format} onChange={event=>setFormat(event.target.value as ExportRequest['format'])}><option value="xlsx">Excel (.xlsx)</option><option value="pdf">PDF (.pdf)</option></select></label>
         {(kind==='framework'||kind==='overview'||kind==='remarks')&&<label><span>{t('框架','Framework')}</span><select aria-label={t('報告框架','Report framework')} value={frameworkId} disabled={busy} onChange={event=>{const fw=event.target.value as FrameworkId;setFrameworkId(fw);setChapterIds(state.chapters.filter(c=>c.active&&c.frameworkId===fw).map(c=>c.id));}}><option>TMSA</option><option>DRYBMS</option></select></label>}
         <button className="btn primary" disabled={!allowed||busy} onClick={()=>void exportReport()}>{busy?t('產生中…','Generating…'):t('生成並下載','Generate and download')}</button>

@@ -33,6 +33,7 @@ function selectedChapters(state:BrowseState,frameworkId:FrameworkId,ids?:string[
 }
 /** Select only current, active items within the explicitly authorized chapter scope. */
 export function selectedRemarkRows(state:BrowseState,frameworkId:FrameworkId,chapterIds?:string[]) {
+  if(state.viewScope==='management_viewer')throw new Error('FORBIDDEN');
   return selectedChapters(state,frameworkId,chapterIds).flatMap(chapter=>state.items
     .filter(item=>item.active&&item.frameworkId===frameworkId&&item.chapterId===chapter.id)
     .sort((a,b)=>a.level-b.level||a.order-b.order||a.code.localeCompare(b.code))

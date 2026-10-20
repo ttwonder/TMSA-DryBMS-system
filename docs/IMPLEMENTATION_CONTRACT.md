@@ -57,7 +57,7 @@
 - 這是手動補充判斷，不聯動 response／conformity／reviewed、來源缺口、TMSA分數、DRYBMS百分比或改善生命週期。沿用原修改自評／匯出權限、lease／CAS／ACK；輸入及取消不寫雲端，未知ACK保稿並只重播同一操作。
 - 報告中心新增「條目備註」，可選體系、章節及Excel／PDF；僅收錄所選啟用章節／Item中有手動備註文字的條目。空白／僅空白字元及只有狀態而無文字的Item不輸出；有文字但未選狀態則顯示未選擇。空選不回退全部。
 - 匯出四欄為對應章節、Item、備註狀態、完整備註。五態文字／色彩與UI共用定義；長Excel使用同Item續列，PDF重複表頭及短識別資訊，保留全文與14／15pt字級。原完整自評／歷史／改善／總覽報表維持原內容。
-- 沿用既有 framework 授權快照與 exportReports 權限，以 `filters.reportVariant=remarks` 記錄內容種類；builder只接收伺服器已授權快照，不輸出未保存草稿、不擴權或新增公開資料入口。
+- 沿用既有 framework 授權快照與 exportReports 權限，以 `filters.reportVariant=remarks` 記錄內容種類；builder只接收伺服器已授權快照，不輸出未保存草稿、不擴權或新增公開資料入口。最新 GM-R1 例外：management_viewer 不可查看／匯出手動備註及其狀態；以上編輯與匯出規則對其餘原角色不變。
 - 012 migration 在011之後安裝，只替換私有驗證函式並保存既有驗證鏈、ACL與owner，零業務資料／歷史批改。舊客戶端省略兩欄時保留現存值，明確空字串才清空。重複安裝或未知前置版本拒絕，正式安裝前先保存草稿；正式SQL及Push仍由使用者執行。
 - 本機實證與限制見 `docs/ITEM_REMARKS_ACCEPTANCE.md`；SQL readback 的PASS僅證明安裝，不等同正式UI／保存／匯出驗收。
 
@@ -95,7 +95,7 @@
 
 ## 人員
 ### 最新追加：General Manager 固定唯讀角色
-依已確認的 `docs/MANAGEMENT_VIEWER_ACCEPTANCE.md`，新增 `management_viewer`，不是Owner／管理員，也不按姓名或部門授權。此角色只顯示六入口，管理僅人員／框架／部門唯讀，保留指定匯出；全量／增量／匯出均由伺服器排除改善、操作紀錄及其衍生件數。歷史原始缺失／建議、自評、備註與凍結標準不清洗。Owner／管理員可在既有新增人員表單選擇此固定角色，必須設定個人密碼；不列入可配置權限矩陣。以下三角色／七入口描述繼續適用於原角色，僅由本追加條款明確擴充。013只做本機實作及升級演練；正式SQL／readback／發布／安全建帳由使用者執行，不硬編碼帳號或憑證。
+依已確認的 `docs/MANAGEMENT_VIEWER_ACCEPTANCE.md`，新增 `management_viewer`，不是Owner／管理員，也不按姓名或部門授權。此角色只顯示六入口，管理僅人員／框架／部門唯讀，保留指定匯出；全量／增量／匯出均由伺服器排除改善、操作紀錄及其衍生件數。歷史原始缺失／建議、自評與凍結標準不清洗。依最新 GM-R1 修訂，TMSA／DRYBMS 手動 `assessment.remarks`／`remarksStatus` 對此角色完整缺席：原App不顯示整塊備註、報告中心無條目備註入口，直接備註builder及新舊export_authorize的remarks variant拒絕，伺服器全量／增量與授權及持久化匯出快照不回傳這兩欄。只按真實角色與伺服器viewScope，不按帳號名稱／部門；其他角色的手動原文、五態、保存／匯出及來源note不變。015在已安裝014上最小受保護DDL，零業務／歷史／audit改寫；新獨立readback及本機證據見 `docs/MANAGEMENT_VIEWER_REMARKS_DELIVERY.md`。Owner／管理員可在既有新增人員表單選擇此固定角色，必須設定個人密碼；不列入可配置權限矩陣。以下三角色／七入口描述繼續適用於原角色，僅由本追加條款明確擴充。013只做本機實作及升級演練；正式SQL／readback／發布／安全建帳由使用者執行，不硬編碼帳號或憑證。
 
 沿用Ship Dynamics的辦公室人員／部門及管理操作，但依使用者本次決定，畫面與新增人員只提供Owner／管理員／操作員三角色，不轉入船端或分管船舶。Owner全權；admin可管理非Owner/框架/稽核/操作紀錄；operator保留原業務自評、改善及報告權限。舊vessel資料型別及後端相容契約保留，不改既有業務能力矩陣，也不提供新建vessel的UI。Owner必須保留個人密碼；admin/operator個人密碼可選，沒有密碼時仍須通過公司進站密碼，已設定密碼的帳戶仍須正確驗證。人員按真部門名稱/姓名選擇，無Email要求；缺英文部門名稱則顯示來源中文，不造譯。進站密碼、Owner轉移與角色能力矩陣僅Owner；管理員不能修改/停用Owner。密碼只以雜湊/伺服器crypt保存；不包含在日誌、seed、讀取結果、原始碼。雲端權限在RPC再次驗證，不只是隱藏按鈕。第一位Owner仍須專用一次性初始化碼，不重跑或新建第二Owner。
 

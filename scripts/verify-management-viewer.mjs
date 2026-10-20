@@ -7,10 +7,14 @@ import {randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {startQaServer} from './qa-server.mjs';
 import {root,syntheticSeed,rpc,opaque,sha256} from './native-postgres.mjs';
+import {beforeRemarksPredecessor,installRemarks,verifyRemarks,noManual,remarksReadback} from './management-viewer-remarks-checks.mjs';
 const baseline=process.argv.includes('--baseline');
-const out=join(root,'qa-evidence/management-viewer',`${baseline?'baseline':'green'}-${new Date().toISOString().replaceAll(':','-')}`);mkdirSync(out,{recursive:true});
-const migrations=readdirSync(join(root,'supabase/migrations')).filter(f=>/^(00[1-9]|01[0-4])_.*\.sql$/.test(f)&&(process.argv.includes('--latest')||!f.startsWith('014_'))).sort();
-const inputs=['scripts/verify-management-viewer.mjs','scripts/native-postgres.mjs','scripts/qa-server.mjs',...migrations.map(f=>'supabase/migrations/'+f),...(existsSync(join(root,'supabase/management-viewer-readback.sql'))?['supabase/management-viewer-readback.sql']:[])];
+const remarksRed=process.argv.includes('--remarks-red');
+const latest=process.argv.includes('--latest');
+const remarksHidden=latest||remarksRed;
+const out=join(root,'qa-evidence/gm-remarks',`${remarksRed?'remarks-red':baseline?'baseline':'green'}-${new Date().toISOString().replaceAll(':','-')}`);mkdirSync(out,{recursive:true});
+const migrations=readdirSync(join(root,'supabase/migrations')).filter(f=>/^(00[1-9]|01[0-5])_.*\.sql$/.test(f)&&(latest||remarksRed&&!f.startsWith('015_')||Number(f.slice(0,3))<=13)).sort();
+const inputs=['scripts/management-viewer-remarks-checks.mjs',...(latest?['supabase/management-viewer-remarks-readback.sql']:[]),'scripts/verify-management-viewer.mjs','scripts/native-postgres.mjs','scripts/qa-server.mjs',...migrations.map(f=>'supabase/migrations/'+f),...(existsSync(join(root,'supabase/management-viewer-readback.sql'))?['supabase/management-viewer-readback.sql']:[])];
 const inputHashes=()=>Object.fromEntries(inputs.map(p=>[p,sha256(readFileSync(join(root,p)))]));
 const receipt={layer:'合成資料＋原生PostgreSQL；無瀏覽器／非正式環境',head:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),inputHashes:inputHashes(),cases:[]};
 let qa,current='setup';
@@ -22,6 +26,7 @@ const bi=s=>({en:s,zh:'測試 '+s});
 const hidden=['HIDDEN_LIVE_ACTION','action-hidden-tmsa','action-hidden-dry','action-hidden-loose','HIDDEN_CONTROL_CYCLE','HIDDEN_CONTROL_PROVENANCE'];
 const stripped=v=>{const x=structuredClone(v);delete x.serverTime;return x;};
 const publicOnly=data=>{
+ if(remarksHidden)noManual(data);
  const text=JSON.stringify(data);for(const marker of hidden)assert(!text.includes(marker),`hidden marker leaked: ${marker}`);
  assert.equal(data.viewScope,'management_viewer','server must author viewScope');
  for(const key of ['improvements','auditLogs','cycles','provenance'])assert.deepEqual(data[key],[],`${key} must keep empty state shape`);
@@ -62,6 +67,7 @@ try{
   try{return await call(role,'save',{kind,record:body,intent,expectedVersion:body.version||0,leaseToken:lease.token,operationId:randomUUID(),...extra});}
   finally{ok(await call(role,'release',{kind,id:body.id,leaseToken:lease.token}));}
  };
+ const remarksContext={qa,run,ledger,catalogue,tableAcl,call,row,save,ok,denied,receipt,root};
  receipt.predecessor=await catalogue();record();
  if(!baseline){
   await run('013-readback-fails-before-install-and-unknown-predecessor-refused',async()=>{
@@ -80,7 +86,9 @@ try{
   });
   await run('existing-role-full-and-performance-read-parity',async()=>{for(const role of Object.keys(priorReads)){assert.deepEqual(stripped(ok(await call(role,'read'))),priorReads[role].full);assert.deepEqual(stripped(ok(await call(role,'sync',{versions:{}},'performance'))),priorReads[role].sync);assert(!('viewScope' in priorReads[role].full));assert(!('viewScope' in priorReads[role].sync));}});
  }
- if(process.argv.includes('--latest')&&!baseline){await qa.db.setup.query(readFileSync(join(root,'supabase/migrations/014_sync_efficiency.sql'),'utf8'));receipt.latestMigration=14;}
+ if(latest&&!baseline)await beforeRemarksPredecessor(remarksContext);
+ if((latest||remarksRed)&&!baseline){await qa.db.setup.query(readFileSync(join(root,'supabase/migrations/014_sync_efficiency.sql'),'utf8'));receipt.latestMigration=14;}
+ if(latest&&!baseline)await installRemarks(remarksContext);
  const credentialHash=sha256(opaque()),id='qa-management-viewer';
  // Original native RED: admin's real lease/CAS save rejected INVALID_PERSON through 012.
  await run('admin-creates-dedicated-readonly-account-with-existing-person-save',async()=>{
@@ -93,6 +101,10 @@ try{
   denied(await login(id,sha256(opaque())),'LOGIN_DENIED');denied(await login(id,''),'LOGIN_DENIED');
   const auth=ok(await login(id));assert.equal(auth.user.role,'management_viewer');qa.users.viewer={user:auth.user,sessionToken:auth.sessionToken,clientId:'qa-viewer-client'};
   const roster=ok(await rpc(qa.db,'roster',{gateToken:gate.gateToken}));assert(roster.some(p=>p.id===id&&p.hasPassword));assert(!JSON.stringify(roster).includes(credentialHash));
+ });
+ if(remarksHidden)await run('GM-R1-full-read-does-not-return-manual-fields',async()=>{
+  const a=await row('assessment','assessment-item-a');ok(await save('operator','assessment',{...a,remarks:'FORBIDDEN_MANUAL_MARKER\n  原文不變',remarksStatus:'fully_met'}));
+  const data=ok(await call('viewer','read'));const returned=data.assessments.find(x=>x.id===a.id);assert(!Object.hasOwn(returned,'remarks'),'GM full read returned assessment.remarks');assert(!Object.hasOwn(returned,'remarksStatus'),'GM full read returned assessment.remarksStatus');
  });
  await run('viewer-login-rejects-missing-stored-individual-password',async()=>{
   const before=await ledger();await qa.db.setup.query('begin');try{
@@ -118,7 +130,7 @@ try{
   ok(await save('operator','improvement',{...await row('improvement','action-hidden-tmsa'),plan:'HIDDEN_LIVE_ACTION changed'}));
   const hiddenOnly=ok(await call('viewer','sync',{versions:first.versions},'performance'));publicOnly(hiddenOnly);assert.deepEqual(hiddenOnly.versions,first.versions);assert.deepEqual(hiddenOnly.records,[]);assert.equal(hiddenOnly.snapshotToken,first.snapshotToken);
   const assessment=await row('assessment','assessment-item-a');ok(await save('operator','assessment',{...assessment,selfAssessment:bi('CURRENT_SELF_ASSESSMENT'),remarks:'MANUAL_REMARKS\n retained',remarksStatus:'partial_improvable'}));
-  const delta=ok(await call('viewer','sync',{versions:first.versions},'performance'));publicOnly(delta);assert.equal(delta.records.length,1);assert.equal(delta.records[0].kind,'assessment');assert.equal(delta.records[0].body.remarks,'MANUAL_REMARKS\n retained');assert.notEqual(delta.snapshotToken,first.snapshotToken);
+  const delta=ok(await call('viewer','sync',{versions:first.versions},'performance'));publicOnly(delta);assert.equal(delta.records.length,1);assert.equal(delta.records[0].kind,'assessment');if(!remarksHidden)assert.equal(delta.records[0].body.remarks,'MANUAL_REMARKS\n retained');assert.notEqual(delta.snapshotToken,first.snapshotToken);
   const forged=ok(await call('viewer','sync',{versions:{...delta.versions,'improvement:action-hidden-tmsa':0}},'performance'));publicOnly(forged);assert.deepEqual(forged.records,[]);assert.deepEqual(forged.versions,delta.versions);
  });
  for(const framework of ['TMSA','DRYBMS'])await run(`viewer-inspection-detail-exact-${framework}`,async()=>{const original=await row('inspection','history-'+framework);const d=ok(await call('viewer','inspection_detail',{id:original.id,version:original.version},'performance'));assert.deepEqual(d.inspection,original);assert(JSON.stringify(d).includes('FROZEN_RAW_SOURCE'));assert(!JSON.stringify(d).includes('HIDDEN_LIVE_ACTION'));denied(await call('viewer','inspection_detail',{id:original.id,version:original.version-1},'performance'),'STALE_DETAIL');});
@@ -137,7 +149,7 @@ try{
   ok(await save('admin','person',{...await row('person',id),departmentId:'management'}));assert.equal((await row('person',id)).departmentId,'management');
  });
  const exportPlans=[{name:'tmsa-xlsx',kind:'framework',format:'xlsx',ids:['chapter-TMSA'],frameworkId:'TMSA'},{name:'dry-pdf',kind:'framework',format:'pdf',ids:['item-dry'],frameworkId:'DRYBMS'},{name:'remarks-xlsx',kind:'framework',format:'xlsx',ids:['item-a'],frameworkId:'TMSA',filters:{reportVariant:'remarks'}},{name:'remarks-pdf',kind:'framework',format:'pdf',ids:['item-a'],frameworkId:'TMSA',filters:{reportVariant:'remarks'}},{name:'overview',kind:'overview',format:'pdf',ids:['TMSA'],frameworkId:'TMSA'},{name:'inspection',kind:'inspection',format:'pdf',ids:['history-TMSA'],frameworkId:'TMSA'}];
- for(const route of ['ordinary','performance'])for(const plan of exportPlans)await run(`viewer-selected-export-${route}-${plan.name}`,async()=>{
+ for(const route of ['ordinary','performance'])for(const plan of exportPlans.filter(p=>!remarksHidden||!p.name.startsWith('remarks')))await run(`viewer-selected-export-${route}-${plan.name}`,async()=>{
   const {name,...payload}=plan;const state=ok(await call('viewer',route==='performance'?'sync':'read',route==='performance'?{versions:{}}:{},route));const operationId=randomUUID();
   const data=ok(await call('viewer','export_authorize',{...payload,filters:payload.filters||{},snapshotToken:state.snapshotToken,operationId},route));publicOnly(data);assert.equal(data.snapshotToken,state.snapshotToken);
   const stored=(await qa.db.setup.query("select snapshot,request from compliance_private.exports where actor_id=$1 and request->>'operationId'=$2",[id,operationId])).rows;assert.equal(stored.length,1);assert.deepEqual(stored[0].snapshot,data);assert.deepEqual(stored[0].request.ids,plan.ids);
@@ -149,7 +161,7 @@ try{
   const s=ok(await call('viewer','sync',{versions:{}},'performance'));const payload={kind:'framework',format:'pdf',ids:['item-a'],frameworkId:'TMSA',filters:{},snapshotToken:s.snapshotToken,operationId:randomUUID()};const data=ok(await call('viewer','export_authorize',payload,'performance'));
   const beforeSnapshot=(await qa.db.setup.query("select snapshot from compliance_private.exports where request->>'operationId'=$1",[payload.operationId])).rows[0].snapshot;
   ok(await save('operator','assessment',{...await row('assessment','assessment-item-a'),remarks:'NEW_REMARK_AFTER_EXPORT'}));const before=await ledger();denied(await call('viewer','export_authorize',{...payload,operationId:randomUUID()},'performance'),'SNAPSHOT_STALE');assert.deepEqual(await ledger(),before);
-  assert.deepEqual((await qa.db.setup.query("select snapshot from compliance_private.exports where request->>'operationId'=$1",[payload.operationId])).rows[0].snapshot,beforeSnapshot);assert.equal(data.assessments[0].remarks,'MANUAL_REMARKS\n retained');
+  assert.deepEqual((await qa.db.setup.query("select snapshot from compliance_private.exports where request->>'operationId'=$1",[payload.operationId])).rows[0].snapshot,beforeSnapshot);if(!remarksHidden)assert.equal(data.assessments[0].remarks,'MANUAL_REMARKS\n retained');else noManual(data);
  });
  for(const kind of ['framework','chapter','item','assessment','improvement','inspection','person','dryScore','settings'])await run(`viewer-denied-${kind}-lease-and-save-zero-write`,async()=>{
   const body=(await qa.db.setup.query('select body from compliance_private.records where kind=$1 order by id limit 1',[kind])).rows[0].body,before=await ledger();for(const action of ['claim','renew','release'])denied(await call('viewer',action,{kind,id:body.id,intent:'update',leaseToken:opaque()}));
@@ -169,13 +181,14 @@ try{
   const target=ok(await call('admin','target_claim',{frameworkId:'TMSA'},'performance'));try{ok(await call('admin','target_save',{frameworkId:'TMSA',targets:{'chapter-TMSA':2},expectedVersion:(await row('framework','TMSA')).version,leaseToken:target.token,operationId:randomUUID()},'performance'));}finally{ok(await call('admin','release',{kind:'framework',id:'TMSA',leaseToken:target.token}));}
   const restart=ok(await call('admin','restart_updates',{frameworkId:'TMSA',operationId:randomUUID()},'performance'));assert(restart.changedCount>0);assert.equal((await row('assessment','assessment-item-b')).reviewed,false);
  });
+ if(latest&&!baseline)await verifyRemarks(remarksContext);
  await run('viewer-role-change-and-disable-invalidate-all-old-read-sessions',async()=>{
   ok(await save('admin','person',{...await row('person',id),role:'operator'}));denied(await call('viewer','read'),'SESSION_INVALID');denied(await call('viewer','sync',{versions:{}},'performance'),'SESSION_INVALID');const changed=ok(await login(id));assert.equal(changed.user.role,'operator');const opActor={sessionToken:changed.sessionToken,clientId:'qa-viewer-client'};assert(!('viewScope' in ok(await call(opActor,'read'))));
   ok(await save('owner','person',{...await row('person',id),role:'management_viewer'}));denied(await call(opActor,'read'),'SESSION_INVALID');const restored=ok(await login(id));qa.users.viewer={user:restored.user,sessionToken:restored.sessionToken,clientId:'qa-viewer-client'};publicOnly(ok(await call('viewer','read')));
   ok(await save('admin','person',{...await row('person',id),active:false},'archive'));denied(await call('viewer','read'),'SESSION_INVALID');denied(await call('viewer','sync',{versions:{}},'performance'),'SESSION_INVALID');denied(await login(id),'LOGIN_DENIED');ok(await save('admin','person',{...await row('person',id),active:true},'activate'));const fresh=ok(await login(id));qa.users.viewer={user:fresh.user,sessionToken:fresh.sessionToken,clientId:'qa-viewer-client'};publicOnly(ok(await call('viewer','read')));
  });
  await run('viewer-logout-works-and-invalidates-session',async()=>{ok(await call('viewer','logout'));denied(await call('viewer','current_user'),'SESSION_INVALID');denied(await call('viewer','read'),'SESSION_INVALID');});
- await run('013-independent-readonly-catalog-and-acl-readback',async()=>{const before=await ledger();const latest=process.argv.includes('--latest'),key=latest?'sync_efficiency_readback':'management_viewer_readback';const results=await qa.db.setup.query(readFileSync(join(root,latest?'supabase/sync-efficiency-readback.sql':'supabase/management-viewer-readback.sql'),'utf8'));receipt.readback=results.flatMap(r=>r.rows||[]).find(r=>r[key])?.[key];assert.equal(receipt.readback?.status,latest?'PASS_SYNC_EFFICIENCY_INSTALL_ONLY':'PASS_MANAGEMENT_VIEWER_INSTALL_ONLY');assert.deepEqual(await ledger(),before);});
+ await run('013-independent-readonly-catalog-and-acl-readback',async()=>{const before=await ledger();if(latest){receipt.readback=await remarksReadback(remarksContext);}else{const key='management_viewer_readback';const results=await qa.db.setup.query(readFileSync(join(root,'supabase/management-viewer-readback.sql'),'utf8'));receipt.readback=results.flatMap(r=>r.rows||[]).find(r=>r[key])?.[key];assert.equal(receipt.readback?.status,'PASS_MANAGEMENT_VIEWER_INSTALL_ONLY');}assert.deepEqual(await ledger(),before);});
  await run('013-repeat-refused-without-data-or-catalog-change',async()=>{const before=await ledger(),catalog=await catalogue();let error;try{await qa.db.setup.query(readFileSync(join(root,'supabase/migrations/013_management_viewer.sql'),'utf8'));}catch(e){error=e;}finally{await qa.db.setup.query('rollback');}assert.equal(error?.message,'MANAGEMENT_VIEWER_ALREADY_INSTALLED_VERIFY_READBACK');assert.deepEqual(await ledger(),before);assert.deepEqual(await catalogue(),catalog);});
  receipt.finalLedger=await ledger();receipt.result='PASS';
 }catch(e){receipt.result='FAIL';receipt.failure={case:current,message:e.message,code:e.code};process.exitCode=1;}
