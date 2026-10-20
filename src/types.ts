@@ -1,6 +1,6 @@
 export type Language = 'zh' | 'en';
 export type FrameworkId = 'TMSA' | 'DRYBMS';
-export type Role = 'owner' | 'admin' | 'operator' | 'vessel';
+export type Role = 'owner' | 'admin' | 'operator' | 'vessel' | 'management_viewer';
 export type Page = 'overview' | 'TMSA' | 'DRYBMS' | 'improvements' | 'inspections' | 'reports' | 'management';
 export interface BiText { en:string; zh:string }
 export interface BaseEntity { id:string; version:number; createdAt:string; updatedAt:string; updatedBy:string }
@@ -21,18 +21,18 @@ export interface Person extends BaseEntity { username:string; name:string; depar
 export interface RosterPerson extends Person { departmentName?:BiText }
 export interface Department { id:string; name:BiText; active:boolean }
 export type Capability = 'editAssessments'|'createImprovements'|'updateImprovements'|'closeImprovements'|'manageInspections'|'exportReports'|'enterManagement'|'manageUsers'|'manageFrameworks'|'viewAuditLogs'|'manageRolePermissions'|'manageSystemSettings';
-export type RolePermissions = Record<Role,Record<Capability,boolean>>;
+export type RolePermissions = Record<Exclude<Role,'management_viewer'>,Record<Capability,boolean>>;
 export interface SystemSettings extends BaseEntity { departments:Department[]; rolePermissions:RolePermissions; siteGateConfigured:boolean }
 export interface DryScore extends BaseEntity { chapterId:string; levels:[number|null,number|null,number|null,number|null]; note:string }
 export interface AuditLog { id:string; at:string; actorId:string; actorName:string; action:string; kind:string; entityId:string; itemCodes:string[]; summary:string; before?:unknown; after?:unknown; operationId:string }
-export interface PlatformState { frameworks:Framework[]; chapters:Chapter[]; items:StandardItem[]; assessments:Assessment[]; improvements:Improvement[]; inspections:Inspection[]; people:Person[]; settings:SystemSettings; dryScores:DryScore[]; auditLogs:AuditLog[]; cycles:unknown[]; provenance:unknown[]; serverTime:string; snapshotToken:string }
+export interface PlatformState { viewScope?:'management_viewer'; frameworks:Framework[]; chapters:Chapter[]; items:StandardItem[]; assessments:Assessment[]; improvements:Improvement[]; inspections:Inspection[]; people:Person[]; settings:SystemSettings; dryScores:DryScore[]; auditLogs:AuditLog[]; cycles:unknown[]; provenance:unknown[]; serverTime:string; snapshotToken:string }
 /** Exact frozen fields consumed by the shared scoring core; never a full snapshot. */
 export type ScoreItem = Pick<StandardItem,'id'|'chapterId'|'code'|'level'|'active'|'sourceGap'|'sourceGapResolved'>;
 export type ScoreChapter = Pick<Chapter,'id'|'frameworkId'|'active'|'order'>;
 export interface FrozenInspectionScoring {frameworkId:FrameworkId;snapshot:{chapters:ScoreChapter[];items:ScoreItem[]};results:Pick<InspectionResult,'itemId'|'response'|'conformity'|'reviewed'>[];dryLevels?:Inspection['dryLevels'];includeTmsaChapter14?:boolean}
 export interface ReadonlyInspectionSummary extends Pick<Inspection,'id'|'version'|'createdAt'|'updatedAt'|'updatedBy'|'frameworkId'|'title'|'organization'|'date'|'type'|'status'|'supersedesId'|'imported'> {readonly detail:'summary';readonly findingClassifications?:Record<string,Finding['classification']>;readonly scoring:FrozenInspectionScoring;readonly counts:{chapters:number;items:number;results:number;findings:number}}
 /** Live data has explicit summary coverage, not empty pretend-complete metadata. */
-export interface LiveView extends Omit<PlatformState,'inspections'|'cycles'|'provenance'> {inspections:(ReadonlyInspectionSummary|Inspection)[];controlSummary:{cycles:number;provenance:number};historyMode:'readonly-summary-v1'}
+export interface LiveView extends Omit<PlatformState,'inspections'|'cycles'|'provenance'> {inspections:(ReadonlyInspectionSummary|Inspection)[];controlSummary:{cycles:number;provenance:number}|Record<string,never>;historyMode:'readonly-summary-v1'}
 export type FullHydratedInspection = Inspection;
 export type BrowseState = PlatformState|LiveView;
 export interface SeedBundle { schemaVersion:1; frameworks:Framework[];chapters:Chapter[];items:StandardItem[];assessments:Assessment[];improvements:Improvement[];inspections:Inspection[];dryScores:DryScore[];cycles:unknown[];provenance:unknown[];sourceManifest:unknown[];importNote:BiText }

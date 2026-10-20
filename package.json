@@ -42,6 +42,8 @@
     "qa:inspection-layout-gap": "node --experimental-strip-types scripts/verify-inspection-layout-and-score-gap.mjs",
     "qa:inspection-history": "node scripts/verify-inspection-history-followup.mjs",
     "qa:shared-targets-regression": "node scripts/verify-native.mjs --shared-targets",
+    "qa:management-viewer": "node --experimental-strip-types scripts/verify-management-viewer.mjs",
+    "qa:management-viewer-ui": "node --experimental-strip-types scripts/verify-management-viewer-ui.mjs",
     "import:sources": "python3 scripts/import_sources.py"
   },
   "dependencies": {

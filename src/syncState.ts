@@ -17,12 +17,15 @@ export function mergeAcknowledgement<T extends BrowseState>(state:T,kind:RecordK
  const next=old?rows.map(x=>x.id===record.id?body:x):[...rows,body].sort((a,b)=>a.id.localeCompare(b.id));
  return {...state,[key]:next,snapshotToken:''};
 }
-export interface SyncEnvelope {user:PlatformState['people'][number];versions:Record<string,number>;records:{kind:RecordKind;body:BaseEntity}[];metadataToken?:string;cycles?:unknown[];provenance?:unknown[];historyMode?:'readonly-summary-v1';controlSummary?:LiveView['controlSummary'];auditLogs:PlatformState['auditLogs'];serverTime:string;snapshotToken:string;baseline:boolean}
+export interface SyncEnvelope {viewScope?:'management_viewer';user:PlatformState['people'][number];versions:Record<string,number>;records:{kind:RecordKind;body:BaseEntity}[];metadataToken?:string;cycles?:unknown[];provenance?:unknown[];historyMode?:'readonly-summary-v1';controlSummary?:LiveView['controlSummary'];auditLogs:PlatformState['auditLogs'];serverTime:string;snapshotToken:string;baseline:boolean}
 /** A complete version vector covers summaries too; a summary is never a full body. */
 export function mergeSync(state:BrowseState|null,envelope:SyncEnvelope):BrowseState{
  if(!state&&!envelope.baseline)throw Error('SYNC_BASELINE_REQUIRED');
  const thin=envelope.historyMode==='readonly-summary-v1';
- if(thin&&(!envelope.controlSummary||!Number.isInteger(envelope.controlSummary.cycles)||!Number.isInteger(envelope.controlSummary.provenance)))throw Error('SYNC_BASELINE_INCOMPLETE');
+ const restricted=envelope.viewScope==='management_viewer';
+ if(restricted!==(envelope.user.role==='management_viewer')||state&&state.viewScope!==envelope.viewScope)throw Error('SYNC_SCOPE_MISMATCH');
+ if(restricted&&(envelope.records.some(r=>r.kind==='improvement')||Object.keys(envelope.versions).some(k=>k.startsWith('improvement:'))||envelope.auditLogs.length||envelope.cycles?.length||envelope.provenance?.length||thin&&(!envelope.controlSummary||Object.keys(envelope.controlSummary).length)))throw Error('SYNC_SCOPE_INVALID');
+ if(thin&&!restricted&&(!envelope.controlSummary||!Number.isInteger(envelope.controlSummary.cycles)||!Number.isInteger(envelope.controlSummary.provenance)))throw Error('SYNC_BASELINE_INCOMPLETE');
  if(!state&&!thin&&(!Array.isArray(envelope.cycles)||!Array.isArray(envelope.provenance)))throw Error('SYNC_BASELINE_INCOMPLETE');
  if(state&&('historyMode' in state)!==thin)throw Error('SYNC_COVERAGE_MISMATCH');
  const empty={frameworks:[],chapters:[],items:[],assessments:[],improvements:[],inspections:[],people:[],dryScores:[],settings:null,auditLogs:[],serverTime:'',snapshotToken:''};
@@ -39,5 +42,5 @@ export function mergeSync(state:BrowseState|null,envelope:SyncEnvelope):BrowseSt
   for(const row of rows){const id=`${kind}:${row.id}`;if(cachedKeys.has(id)||envelope.versions[id]!==row.version)throw Error('SYNC_VECTOR_MISMATCH');cachedKeys.add(id);}
  }
  if(Object.keys(envelope.versions).some(id=>!cachedKeys.has(id)))throw Error('SYNC_VECTOR_MISMATCH');
- return {...next,...('historyMode' in next?{controlSummary:envelope.controlSummary!}:{cycles:envelope.cycles??next.cycles,provenance:envelope.provenance??next.provenance}),auditLogs:envelope.auditLogs,serverTime:envelope.serverTime,snapshotToken:envelope.snapshotToken};
+ return {...next,...(restricted?{viewScope:'management_viewer' as const}:{}),...('historyMode' in next?{controlSummary:envelope.controlSummary!}:{cycles:envelope.cycles??next.cycles,provenance:envelope.provenance??next.provenance}),auditLogs:envelope.auditLogs,serverTime:envelope.serverTime,snapshotToken:envelope.snapshotToken};
 }

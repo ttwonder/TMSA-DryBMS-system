@@ -7,7 +7,7 @@ import {authorizeReportSnapshot,buildFrameworkExcel,buildFrameworkPdf,buildRemar
 
 type ReportKind=ExportRequest['kind']|'remarks';
 export default function Reports(ctx:PageProps) {
-  const {state,lang,t}=ctx;
+  const {state,lang,t}=ctx;const restricted=state.viewScope==='management_viewer';
   const [kind,setKind]=useState<ReportKind>('framework');
   const [format,setFormat]=useState<ExportRequest['format']>('xlsx');
   const [frameworkId,setFrameworkId]=useState<FrameworkId>('TMSA');
@@ -28,7 +28,7 @@ export default function Reports(ctx:PageProps) {
   const remarksCount=state.assessments.filter(a=>hasItemRemarks(a)&&state.items.some(i=>i.id===a.itemId&&i.active&&i.frameworkId===frameworkId&&selectedChapters.includes(i.chapterId))).length;
   const changeKind=(value:ReportKind)=>{setKind(value);setError('');if(value!=='framework'&&value!=='remarks')setFormat('pdf');};
   const exportReport=async()=>{
-    if(busy||!allowed)return;
+    if(busy||!allowed||restricted&&kind==='improvements')return;
     const ids=kind==='improvements'?effectiveSelection:kind==='inspection'?(inspectionId?[inspectionId]:[]):kind==='overview'?overviewScope:selectedChapters;
     if(!ids.length){setError(t('請明選仍符合篩選的有效項目。空選不會輸出全部。','Select valid records still matching the filters. An empty selection never means all.'));return;}
     if(kind!=='remarks'&&filters.from&&filters.to&&filters.from>filters.to){setError(t('起始日期不可晚於結束日期。','The start date must not be after the end date.'));return;}
@@ -54,7 +54,7 @@ export default function Reports(ctx:PageProps) {
     {!allowed&&<div className="notice warning" role="status">{t('目前角色沒有報告輸出權限。','Your role does not permit report export.')}</div>}
     <section className="panel">
       <div className="toolbar">
-        <label><span>{t('報告種類','Report type')}</span><select aria-label={t('報告種類','Report type')} value={kind} disabled={busy} onChange={event=>changeKind(event.target.value as ReportKind)}><option value="framework">{t('框架完整自評','Full framework assessment')}</option><option value="remarks">{t('條目備註','Item remarks')}</option><option value="improvements">{t('明選改善項目','Selected improvements')}</option><option value="inspection">{t('凍結歷史檢查','Frozen inspection')}</option><option value="overview">{t('管控總覽','Management overview')}</option></select></label>
+        <label><span>{t('報告種類','Report type')}</span><select aria-label={t('報告種類','Report type')} value={kind} disabled={busy} onChange={event=>changeKind(event.target.value as ReportKind)}><option value="framework">{t('框架完整自評','Full framework assessment')}</option><option value="remarks">{t('條目備註','Item remarks')}</option>{!restricted&&<option value="improvements">{t('明選改善項目','Selected improvements')}</option>}<option value="inspection">{t('凍結歷史檢查','Frozen inspection')}</option><option value="overview">{t('管控總覽','Management overview')}</option></select></label>
         <label><span>{t('文件格式','File format')}</span><select aria-label={t('文件格式','File format')} disabled={busy||(kind!=='framework'&&kind!=='remarks')} value={format} onChange={event=>setFormat(event.target.value as ExportRequest['format'])}><option value="xlsx">Excel (.xlsx)</option><option value="pdf">PDF (.pdf)</option></select></label>
         {(kind==='framework'||kind==='overview'||kind==='remarks')&&<label><span>{t('框架','Framework')}</span><select aria-label={t('報告框架','Report framework')} value={frameworkId} disabled={busy} onChange={event=>{const fw=event.target.value as FrameworkId;setFrameworkId(fw);setChapterIds(state.chapters.filter(c=>c.active&&c.frameworkId===fw).map(c=>c.id));}}><option>TMSA</option><option>DRYBMS</option></select></label>}
         <button className="btn primary" disabled={!allowed||busy} onClick={()=>void exportReport()}>{busy?t('產生中…','Generating…'):t('生成並下載','Generate and download')}</button>
@@ -71,7 +71,7 @@ export default function Reports(ctx:PageProps) {
         {kind==='improvements'&&<><label><span>{t('狀態','Status')}</span><select aria-label={t('報告改善狀態','Report improvement status')} value={filters.status??''} onChange={event=>changeFilter('status',event.target.value)}><option value="">{t('全部','All')}</option><option value="open">{t('開啟','Open')}</option><option value="in_progress">{t('進行中','In progress')}</option><option value="closed">{t('結案','Closed')}</option></select></label><label><span>{t('急迫程度','Urgency')}</span><select aria-label={t('報告急迫程度','Report urgency')} value={filters.urgency??''} onChange={event=>changeFilter('urgency',event.target.value)}><option value="">{t('全部','All')}</option><option value="urgent">{t('緊急','Urgent')}</option><option value="high">{t('高','High')}</option><option value="medium">{t('中','Medium')}</option><option value="low">{t('低','Low')}</option></select></label></>}
       </div>}
       {kind==='improvements'&&<><p className="muted">{t('符合篩選','Matching')}: {visible.length} · {t('明選且仍有效','Selected and still valid')}: {effectiveSelection.length}. {t('未選取項目不輸出；全部進度保留。','Unselected records are excluded; all progress is retained.')}</p>{visible.length?<MultiSelect label={t('明選改善項目（搜尋後選取）','Select improvements after searching')} options={visible.map(row=>({id:row.id,label:`${row.title} · ${row.id.slice(0,12)} · ${row.percent}%`}))} selected={effectiveSelection} onChange={setSelectedIds}/>:<Empty>{t('沒有符合篩選條件的改善項目。','No improvements match the filters.')}</Empty>}</>}
-      {kind==='overview'&&<p className="muted">{t('納入完整分章','Complete chapters included')}: {overviewScope.length}. {t('部門、人員與日期只選定相關完整分章，不刪除章內 No；分章改善分佈可重疊，試算不混入本報告。','Department, person and date filters select related complete chapters without removing any No. Chapter issue counts may overlap; simulation is not included.')}</p>}
+      {kind==='overview'&&<p className="muted">{t('納入完整分章','Complete chapters included')}: {overviewScope.length}. {restricted?t('部門、人員與日期只選定相關完整分章，不刪除章內 No；試算不混入本報告。','Department, person and date filters select related complete chapters without removing any No. Simulation is not included.'):t('部門、人員與日期只選定相關完整分章，不刪除章內 No；分章改善分佈可重疊，試算不混入本報告。','Department, person and date filters select related complete chapters without removing any No. Chapter issue counts may overlap; simulation is not included.')}</p>}
       {error&&<div className="notice error" role="alert">{error}</div>}
     </section>
   </>;

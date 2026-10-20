@@ -42,11 +42,11 @@ test('mounted personnel list supplies a department filter with readable labels',
  assert.match(html,/aria-label="人員部門篩選"/);
  assert.match(html,/<option value="sd-office-dept-synthetic">測試部門<\/option>/);
 });
-test('mounted personnel role filter contains exactly the three office roles',()=>{
+test('mounted personnel role filter adds fixed management viewer to the three office roles, not vessel',()=>{
  const html=renderToStaticMarkup(createElement(Management,ctx()));
  const filter=html.match(/<select[^>]*aria-label="人員角色篩選"[^>]*>([\s\S]*?)<\/select>/)?.[1];
  assert.ok(filter,'the actual mounted list must contain its role filter');
- assert.deepEqual([...filter.matchAll(/<option value="([^"]*)"/g)].map(m=>m[1]),['','owner','admin','operator']);
+ assert.deepEqual([...filter.matchAll(/<option value="([^"]*)"/g)].map(m=>m[1]),['','owner','admin','operator','management_viewer']);
 });
 test('department selector retains known Chinese names in English mode without inventing translations',()=>{
  assert.deepEqual(departmentOptions(ctx('owner','en')),[{id:'sd-office-dept-synthetic',label:'測試部門'}]);
