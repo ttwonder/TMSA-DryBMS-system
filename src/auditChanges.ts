@@ -14,7 +14,7 @@ const actions: Record<string, Pair> = {
 const kinds: Record<string, Pair> = {framework:['體系設定','Framework'],chapter:['分章','Chapter'],item:['標準條目','Standard item'],assessment:['目前自評','Current assessment'],improvement:['待改善項目','Improvement'],inspection:['歷史檢查','Inspection'],person:['人員','Person'],dryScore:['DRYBMS 四級自評','DRYBMS maturity assessment'],settings:['系統設定','Settings'],export:['報表匯出','Report export'],import:['資料匯入','Data import'],workspace:['工作區','Workspace']};
 const fields: Record<string, Pair> = {
   reviewed:['已完成本次更新','Update complete'],response:['Y/N','Y/N'],conformity:['符合程度','Conformity'],executionStatus:['執行狀態','Implementation status'],percent:['完成百分比','Completion percentage'],status:['狀態','Status'],urgency:['急迫程度','Urgency'],
-  selfAssessment:['自評','Self assessment'],evidence:['執行佐證','Evidence'],content:['內容','Content'],title:['標題','Title'],plan:['改善計劃','Action plan'],targetDate:['目標日期','Target date'],departmentIds:['涉及部門','Departments'],departmentId:['部門','Department'],assigneeIds:['執行人','Assignees'],itemIds:['關聯 Item','Linked items'],itemId:['Item','Item'],
+  selfAssessment:['自評','Self assessment'],evidence:['執行佐證','Evidence'],content:['內容','Content'],title:['標題','Title'],plan:['改善計劃','Action plan'],proposedDate:['提出日期','Proposed date'],targetDate:['目標日期','Target date'],departmentIds:['涉及部門','Departments'],departmentId:['部門','Department'],assigneeIds:['執行人','Assignees'],itemIds:['關聯 Item','Linked items'],itemId:['Item','Item'],
   events:['進度紀錄','Progress history'],at:['時間','Time'],by:['記錄人','Recorded by'],closedAt:['結案時間','Closed at'],closedBy:['結案人','Closed by'],
   name:['名稱','Name'],username:['登入名稱','Username'],role:['角色','Role'],active:['啟用狀態','Active state'],departments:['部門名冊','Departments'],people:['人員筆數','People count'],rolePermissions:['角色權限','Role permissions'],siteGateConfigured:['進站密碼已設定','Site gate configured'],
   frameworkId:['體系','Framework'],chapterId:['分章','Chapter'],code:['代碼','Code'],level:['級別','Level'],order:['排序','Order'],kpi:['KPI','KPI'],guidance:['最佳實踐指引','Best-practice guidance'],description:['說明','Description'],aim:['目標','Aim'],priority:['重點','Priority'],scoring:['計分方式','Scoring method'],scoreTargets:['分章目標','Chapter targets'],includeTmsaChapter14:['納入 TMSA 第14章','Include TMSA chapter 14'],scopeLabel:['計分範圍','Scoring scope'],
@@ -32,7 +32,7 @@ const enums: Record<string, Record<string, Pair>> = {
   urgency:{urgent:['盡快','Urgent'],high:['高','High'],medium:['中','Medium'],low:['低','Low']},
   role:{owner:['Owner','Owner'],admin:['管理員','Administrator'],operator:['操作員','Operator'],vessel:['船端','Vessel']},
   classification:{finding:['缺失','Observation'],ofi:['建議改善','OFI'],positive:['正面觀察','Positive observation'],guidance:['指引','Guidance'],no_finding:['無缺失','No finding'],general:['一般觀察（非自動判No）','General observation (not automatically No)']},
-  source:{external:['外部檢查','External inspection'],non_external:['自行提出','Self-raised']},type:{formal:['正式','Formal'],informal:['非正式','Informal']},
+  source:{external:['外部檢查','External inspection'],non_external:['自行提出','Self-raised'],management_review:['管理審查會議','Management review meeting'],management_directive:['管理層指令','Management directive']},type:{formal:['正式','Formal'],informal:['非正式','Informal']},
 };
 const metadata = new Set(['id','version','createdAt','updatedAt','updatedBy']);
 // Same key-level exclusion as the server audit sanitizer; never expose nested credentials.

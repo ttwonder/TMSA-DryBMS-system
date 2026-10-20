@@ -1,0 +1,26 @@
+import type { Improvement, Language } from './types';
+
+export const COMPANY_IMPROVEMENT_SOURCES = ['management_review', 'management_directive'] as const;
+export const isCompanyImprovement = (source: Improvement['source']) => COMPANY_IMPROVEMENT_SOURCES.some(value => value === source);
+export function improvementSourceLabel(source: Improvement['source'], lang: Language): string {
+  const labels = { external: ['外部檢查', 'External inspection'], non_external: ['自行提出', 'Self-proposed'], management_review: ['管理審查會議', 'Management review meeting'], management_directive: ['管理層指令', 'Management directive'] };
+  return labels[source]?.[lang === 'zh' ? 0 : 1] ?? source;
+}
+/** Date-only business fact. No timestamp/inspection-date inference for saved rows. */
+export function validProposedDate(value: string): boolean {
+  if (value === '') return true;
+  if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value) || value.startsWith('0000')) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+/** Saved events only; real timestamps win, append order resolves ties/missing clocks. */
+export function latestImprovementEvent(record: Pick<Improvement, 'events'>) {
+  return record.events.reduce<Improvement['events'][number] | undefined>((latest, event) => {
+    if (!latest) return event;
+    const previous = Date.parse(latest.at), current = Date.parse(event.at);
+    return !Number.isFinite(previous) || Number.isFinite(current) && current >= previous ? event : latest;
+  }, undefined);
+}
+export function localToday(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}

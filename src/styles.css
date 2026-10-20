@@ -212,3 +212,11 @@
 .navigation-department-filter .multi-select>div{grid-template-columns:1fr;max-height:146px}
 .navigation-scroll>.empty-state{padding:12px 8px;font-size:14px}
 @media(max-width:620px){.chapter-navigation:has(.navigation-department-filter details[open]){max-height:none}}
+/* Authorized product lockup and compact tracking additions; original navigation retained. */
+.app-header{height:auto;min-height:64px}
+.brand>div{min-width:0}
+.brand .product-name{line-height:1.25;letter-spacing:0;overflow-wrap:anywhere}
+.improvement-origin{font-size:14px;color:var(--muted);margin:4px 0}
+.improvement-plan,.improvement-latest-progress{margin-top:5px;border-top:1px solid var(--border);padding-top:4px}
+.improvement-plan>small,.improvement-latest-progress>small{color:var(--muted)}
+.improvement-plan p,.improvement-latest-progress p{white-space:pre-wrap;overflow-wrap:anywhere}

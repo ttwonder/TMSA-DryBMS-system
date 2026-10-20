@@ -19,7 +19,7 @@ export async function startQaServer({seed=syntheticSeed(),port=0,evidenceDir=joi
     for(const file of ['002_import_timeout.sql','003_read_timeout.sql','004_office_directory.sql'])await db.setup.query(readFileSync(join(root,'supabase','migrations',file),'utf8'));
     if(performance)await db.setup.query(readFileSync(join(root,'supabase','migrations','005_performance.sql'),'utf8'));
     const users=await setupQaIdentities(db,{seed,handlesPath});
-    if(!Number.isInteger(latestMigration)||latestMigration<5||latestMigration>14||latestMigration>5&&!performance)throw Error('Invalid QA migration range');
+    if(!Number.isInteger(latestMigration)||latestMigration<5||latestMigration>16||latestMigration>5&&!performance)throw Error('Invalid QA migration range');
     for(const file of readdirSync(join(root,'supabase/migrations')).filter(f=>/^\d{3}_.*\.sql$/.test(f)&&Number(f.slice(0,3))>5&&Number(f.slice(0,3))<=latestMigration).sort())await db.setup.query(readFileSync(join(root,'supabase/migrations',file),'utf8'));
     pool=new pg.Pool({...db.connection,max:12,idleTimeoutMillis:10000});
     server=http.createServer(async(req,res)=>{

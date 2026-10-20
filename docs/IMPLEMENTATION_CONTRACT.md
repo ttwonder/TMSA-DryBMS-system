@@ -137,3 +137,31 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 - 續鎖20秒／lease75秒不延長；同token後續續鎖成功可恢復暫時續鎖錯誤，版本衝突不可被續鎖清掉。手動復鎖必須相同actor／config／session且baseVersion未變，否則留稿不覆寫。lost-ACK在記憶體以原operation／payload／lease重播；重整後以既有operation_status核對同session/client回執，沒有確認回執時保持待核對，不能換operation偷重送。關閉分頁／退出原session不保證可恢復，畫面如本機保稿失敗須保持開啟。
 - 改善主清單及FrameworkPage inline使用相同進度流程：百分比／狀態真實變更可留空文字並append事件，SQL stamps actor／time；單改可編輯metadata照實保存且不加空事件。文字空白且完全未改則不提交、不製造進度事件或敘述；100%仍不自動結案，舊事件不可改。
 - 新增008 migration只修改歷史validator及空進度事件防線，不改業務資料、RPC／角色／lease／CAS／歷史表；本機已演練，正式SQL由使用者依readback手動執行。
+
+## 最新FPMC追蹤/報告需求
+
+此節記錄最新已確認需求，優先於上文衝突的舊條文；第一批追蹤與第二批報告分開交付。使用者已確認：僅管理審查會議／管理層指令允許獨立追蹤、關聯條目選填；提出日期為可修改的獨立業務日期，新草稿預填本地當日，舊資料未填仍為未填。不得重新以檢查日期、建立時間或最近更新時間推算，也不新增日期基準選單。
+
+### 第一批：追蹤（已通過本機驗證與父流程核對，獨立本機交付；未部署）
+
+- 網站產品名稱逐字為 `FPMC Management System Assessment and Improvement Tracking System`／`公司系統級評估和改善平台`。原 FPMC logo／公司名、七頁導航順序、角色及密度保留；TMSA／DRYBMS框架名稱、歷史原文、檔名及協議key不改。頁首可上下排、HTML title同步；共用報告只作必要品牌／來源名稱更正，不在此批重排版面。
+- 同一 improvement 新增穩定來源 `management_review`／`management_directive`，沿用原 create／update 權限，無來源特權與新分類表。兩來源 itemIds 可空，可選實際Item；原 external／non_external 不因此放寬，既有匯入general例外不變。來源不可於保存後轉換；外部identity／去重／parent finding分類權威保留。公司來源不可偽帶外部關聯。
+- `proposedDate?: string` 是 date-only，非空須為合法 `YYYY-MM-DD`；允許未填／明確清空，不強制填寫，不回填。開啟／取消／修改其他欄位不得補日期。舊客戶端省略此欄保存時保留原值。
+- 主清單來源＋提出起迄日與既有條件全為AND，日期首尾包含；設提出日期範圍時未填資料不入選，不借用其他日期。既有最近更新日期（UTC）與來源檢查日期排序保持並分別命名。`filterImprovementList` 為共享selector，`improvementSourceLabel` 為共享標籤，供第二批報告中心接線。
+- 管審會執行計劃清單是 `filters.source === 'management_review'` 的快捷入口／標題，同資料同ID，保留其他條件，按提出日期新至舊排列；未填置後。無第八頁、無副本、無獨立boolean。無Item公司來源在all框架可見；指定框架／章節只依實際關聯。
+- 保留40筆分頁、跨頁明選；輸出範圍為當前授權及篩選集合交集，窄化後不輸出隱藏選取，零結果不fallback。沿既有授權快照PDF流程輸出精確集合。
+- 主清單每列顯示執行計劃與完整最新已保存進度（日期、更新人、狀態、全部內容）。選既有events真實時間最新者；同時間取後append者，不以record.updatedAt或最後一筆陣列冒充。無事件明示尚無進度，不造假事件；原十秒同步、失鎖留稿與拒絕舊草稿覆寫不變。
+- 改善正文／計劃在所有完整編輯與inline入口初次顯示用 `compactBlankLines` 投影，保留非空行、縮排及實際換行；原文字未碰時保存metadata仍保留原bytes。只把使用者真正編輯的欄位隨明確保存送出；不每次onChange重排，不破壞Enter／IME／游標，不批洗歷史，不改共用 `useRecordEditor` 或全站 `BilingualText` 預設。已保存events永不改；進度與詳情顯示亦整理空白行。
+- 新增 `016_fpmc_tracking.sql` 及獨立 `fpmc-tracking-readback.sql`；001–015與舊readback不改。016只對已知installed函式作guarded定義延伸，DDL-only，無業務回填，不能偽裝non_external繞過檢核。保留ACL／role、GM對改善及remarks的完整排除、append-only history、fenced lease／CAS／ACK／idempotency。本機原生PostgreSQL演練不等於正式Supabase安裝。
+
+### 第二批：報告（尚未實作，不列本批完成）
+
+1. 報告中心待改善項目加入一鍵全選符合篩選結果，並共用來源／提出日期selector；保留明選、窄化與零結果規則。
+2. 條目備註PDF：對應章節、Item、備註狀態、涉及部門、追蹤人員分配於前兩行；第三行全部為備註內容。補上實際該項目的涉及部門／追蹤人員，移除截圖標記的不需要資訊。
+3. 明選改善PDF：以表格六行排列。第一行急迫度、狀態、最新更新（日期）；第二行關聯編號、來源、分類、目標日期、結案時間；第三行涉及部門、執行人；第四行完整內容；第五行執行計劃；第六行全部進度。進度僅保留更新日期、更新人、狀態、內容。
+4. 可見報告移除快照時間／token／明選筆數說明、技術improvement UUID／v2、findingId／sourceKey／匯入file／rawItem／note等截圖紅框資訊；不得因此刪業務資料、業務來源、歷史或內部權威校驗。關聯編號須辨別業務值與技術ID，不自行造值。
+5. 所有匯出文件整理多餘空白行，保留非空行及原資料；PDF優先，Excel兼顧使用者篩選／排序，不強套PDF合併格造成不可篩選。
+
+### 新舊條文優先關係
+
+上文舊「改善僅展示去空行／編輯完全顯示原空行」若衝突，以本節的未觸碰保留原bytes＋初次顯示投影為準。舊報告四欄／metadata可見配置、快照／token可見說明與空行規則，將由本節第二批要求取代；本批尚未完成該版面。舊批次「不增加SQL」只描述該批，不限制本次已授權016；角色、歷史不可改、來源與並行保存權威等非衝突條文繼續有效。交付狀態及證據見 `docs/FPMC_TRACKING_DELIVERY.md` 與本機 `qa-evidence/fpmc-tracking/handback.json`。

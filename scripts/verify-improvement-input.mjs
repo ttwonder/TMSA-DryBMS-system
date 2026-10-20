@@ -9,7 +9,8 @@ import {chromium,expect} from '@playwright/test';
 import {startQaServer} from './qa-server.mjs';
 import {root,syntheticSeed} from './native-postgres.mjs';
 const red=process.argv.includes('--red');
-const out=join(root,'qa-evidence','improvement-input',`${red?'red':'green'}-${new Date().toISOString().replaceAll(':','-')}`);mkdirSync(out,{recursive:true});
+const evidenceRoot=process.argv.find(arg=>arg.startsWith('--evidence-root='))?.slice('--evidence-root='.length)||'qa-evidence/improvement-input';
+const out=join(root,evidenceRoot,`${red?'red':'green'}-${new Date().toISOString().replaceAll(':','-')}`);mkdirSync(out,{recursive:true});
 const receipt={layer:'Original UI + synthetic data + owned PostgreSQL; NOT hosted acceptance',cases:[],inputWindows:[],screenshots:[],errors:[],blockedExternal:0};
 const seed=syntheticSeed(),base=id=>({id,version:0,createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z',updatedBy:''});
 for(const frameworkId of ['TMSA','DRYBMS']){
@@ -23,8 +24,8 @@ let qa,vite,browser,page,current='setup',hold=false,hit=false,release,barrier=Pr
 const closed=port=>new Promise(resolve=>{const s=net.connect({host:'127.0.0.1',port});s.once('connect',()=>{s.destroy();resolve(false);});s.once('error',()=>resolve(true));});
 const run=async(id,fn)=>{current=id;await fn();receipt.cases.push({id,status:'PASS'});writeFileSync(join(out,'receipt.json'),JSON.stringify(receipt,null,2));};
 try{
- qa=await startQaServer({seed,evidenceDir:out,afterCommit:async({action,result})=>{if(action==='save'&&result.ok&&hold){hold=false;hit=true;await barrier;}return false;}});
- for(const file of ['006_restart_updates.sql','007_shared_targets.sql','008_inspection_history.sql'])await qa.db.setup.query(readFileSync(join(root,'supabase/migrations',file),'utf8'));
+ qa=await startQaServer({seed,evidenceDir:out,latestMigration:16,afterCommit:async({action,result})=>{if(action==='save'&&result.ok&&hold){hold=false;hit=true;await barrier;}return false;}});
+ // Use the final installed authority: new drafts now carry proposedDate (016).
  // Anonymous option-volume fixtures, not accounts used for login.
  for(let index=0;index<115;index++){
   const body={...base(`input-person-${index}`),version:1,username:`input-person-${index}`,name:`匿名人員 ${index}`,departmentId:'marine',role:'operator',active:true,hasPassword:false};

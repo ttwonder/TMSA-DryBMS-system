@@ -1,11 +1,14 @@
 import type { BrowseState, Improvement } from './types';
 import { filteredImprovements } from './domain.ts';
+import { validProposedDate } from './improvementTracking.ts';
 import type { Filters } from './domain';
 
 export const IMPROVEMENTS_PER_PAGE = 40;
 export interface ImprovementListFilters extends Filters {
   itemId?: string;
-  source?: '' | 'non_external' | `inspection:${string}`;
+  source?: '' | 'non_external' | 'management_review' | 'management_directive' | `inspection:${string}`;
+  proposedFrom?: string;
+  proposedTo?: string;
   // This is a display restriction, not a new persisted lifecycle status.
   unfinished?: boolean;
 }
@@ -18,13 +21,17 @@ export function withImprovementListView(filters: ImprovementListFilters, view: I
 }
 // Shared by the displayed result set AND the canonical export recheck. Never page before filtering.
 export function filterImprovementList(state: BrowseState, filters: ImprovementListFilters): Improvement[] {
-  return filteredImprovements(state, filters).filter(record =>
+  const rows = filteredImprovements(state, filters).filter(record =>
     (!filters.itemId || record.itemIds.includes(filters.itemId)) &&
     (!filters.unfinished || record.status !== 'closed') &&
-    (!filters.source || (filters.source === 'non_external'
-      ? record.source === 'non_external'
-      : filters.source.startsWith('inspection:') && record.source === 'external' && record.inspectionId === filters.source.slice('inspection:'.length)))
+    (!filters.source || (filters.source.startsWith('inspection:')
+      ? record.source === 'external' && record.inspectionId === filters.source.slice('inspection:'.length)
+      : record.source === filters.source)) &&
+    (!(filters.proposedFrom || filters.proposedTo) || !!record.proposedDate && validProposedDate(record.proposedDate) &&
+      (!filters.proposedFrom || record.proposedDate >= filters.proposedFrom) && (!filters.proposedTo || record.proposedDate <= filters.proposedTo))
   );
+  // The management-review register is the same cohort, ordered by its own date.
+  return filters.source === 'management_review' ? rows.sort((a,b) => (b.proposedDate ?? '').localeCompare(a.proposedDate ?? '')) : rows;
 }
 export function improvementPage<T>(rows: readonly T[], requestedPage: number) {
   const pages = Math.max(1, Math.ceil(rows.length / IMPROVEMENTS_PER_PAGE));

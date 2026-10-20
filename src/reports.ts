@@ -1,3 +1,5 @@
+import {PRODUCT_NAME_EN} from './branding.ts';
+import {improvementSourceLabel} from './improvementTracking.ts';
 import {hasItemRemarks,remarksStatusDefinition,remarksStatusLabel} from './itemRemarks.ts';
 import {findingClassificationLabel,improvementFindingClassification} from './findingClassification.ts';
 import type ExcelJS from 'exceljs';
@@ -238,7 +240,7 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
     sheet.headerFooter={...sheet.headerFooter,oddFooter:'&L'+frameworkId+'&C&P / &N'};
   }
   for(const sheet of [...book.worksheets])if(!selectedSheets.has(sheet.id))book.removeWorksheet(sheet.id);
-  book.creator='TMSA / DRYBMS Platform';book.lastModifiedBy='Authorized report snapshot';book.company='';
+  book.creator=PRODUCT_NAME_EN;book.lastModifiedBy='Authorized report snapshot';book.company='';
   return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
 }
 
@@ -266,7 +268,7 @@ export async function buildRemarksExcel(state:PlatformState,frameworkId:Framewor
   for(const r of [2,3])sheet.getCell(r,1).font={name:fontName,size};
   sheet.views=[{state:'frozen',ySplit:4}];sheet.autoFilter={from:'A4',to:`D${sheet.rowCount}`};
   sheet.pageSetup={paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,printTitlesRow:'1:4',printArea:`A1:D${sheet.rowCount}`};
-  sheet.headerFooter={oddFooter:`&L${frameworkId} · ${tr(lang,'條目備註','Item remarks')}&C&P / &N`};book.creator='TMSA / DRYBMS Platform';
+  sheet.headerFooter={oddFooter:`&L${frameworkId} · ${tr(lang,'條目備註','Item remarks')}&C&P / &N`};book.creator=PRODUCT_NAME_EN;
   return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
 }
 
@@ -306,7 +308,7 @@ class TextPdf {
     // Browser-only lazy assets; fontBytes-only Node callers never fetch relative URLs.
     const fallbackBytes=options.fallbackFontBytes??(typeof window!=='undefined'?await Promise.all(['ReportSupplement-Regular.ttf','ReportSymbols-Regular.ttf'].map(name=>assetBytes('fonts/'+name))):[]);
     const fallbacks=await Promise.all(fallbackBytes.map(bytes=>document.embedFont(bytes,{subset:true})));
-    document.setTitle(title);document.setAuthor('TMSA / DRYBMS Platform');document.setSubject(`Authorized immutable snapshot; selectable text; snapshotToken=${state.snapshotToken}`);
+    document.setTitle(title);document.setAuthor(PRODUCT_NAME_EN);document.setSubject(`Authorized immutable snapshot; selectable text; snapshotToken=${state.snapshotToken}`);
     return new TextPdf(document,font,fallbacks,title,lang,state.serverTime,options.onFieldLine);
   }
   private safe(text:string):string {
@@ -362,7 +364,7 @@ class TextPdf {
   }
   private newPage() {
     this.page=this.document.addPage([PAGE_WIDTH,PAGE_HEIGHT]);this.y=PAGE_HEIGHT-81;
-    this.draw(tr(this.lang,'TMSA / DRYBMS 報告 · 授權快照','TMSA / DRYBMS Report · Authorized snapshot'),MARGIN,PAGE_HEIGHT-37,PDF_AUX);
+    this.draw(tr(this.lang,'FPMC 報告 · 授權快照','FPMC Report · Authorized snapshot'),MARGIN,PAGE_HEIGHT-37,PDF_AUX);
     this.page.drawLine({start:{x:MARGIN,y:PAGE_HEIGHT-49},end:{x:PAGE_WIDTH-MARGIN,y:PAGE_HEIGHT-49},thickness:1,color:rgb(.65,.71,.77)});
   }
   paragraph(text:string,size=PDF_BODY) {
@@ -511,7 +513,7 @@ export async function buildRemarksPdf(state:PlatformState,frameworkId:FrameworkI
 }
 function improvementSource(state:PlatformState,row:Improvement,lang:Language) {
   const inspection=state.inspections.find(i=>i.id===row.inspectionId);
-  return [`${tr(lang,'來源類型','Source type')}: ${row.source==='external'?tr(lang,'外部檢查','External inspection'):tr(lang,'非外部 / 公司改善','Non-external / company improvement')}`,row.source==='external'?`${tr(lang,'分類','Classification')}: ${findingClassificationLabel(improvementFindingClassification(state,row),lang)}`:'',row.inspectionId?`${tr(lang,'檢查','Inspection')}: ${row.inspectionId} ${inspection?.title??''}`:'',row.findingId?`${tr(lang,'發現編號','Finding ID')}: ${row.findingId}`:'',row.sourceKey?`${tr(lang,'來源去重鍵','Source key')}: ${row.sourceKey}`:'',sourcesText(row.sources)].filter(Boolean).join('\n');
+  return [`${tr(lang,'來源類型','Source type')}: ${improvementSourceLabel(row.source,lang)}`,row.source==='external'?`${tr(lang,'分類','Classification')}: ${findingClassificationLabel(improvementFindingClassification(state,row),lang)}`:'',row.inspectionId?`${tr(lang,'檢查','Inspection')}: ${row.inspectionId} ${inspection?.title??''}`:'',row.findingId?`${tr(lang,'發現編號','Finding ID')}: ${row.findingId}`:'',row.sourceKey?`${tr(lang,'來源去重鍵','Source key')}: ${row.sourceKey}`:'',sourcesText(row.sources)].filter(Boolean).join('\n');
 }
 export async function buildImprovementsPdf(state:PlatformState,ids:string[],lang:Language,title?:string,options:ReportBuildOptions={}):Promise<Uint8Array> {
   const rows=selectedImprovementRows(state,ids),reportTitle=title??tr(lang,'明選改善項目報告','Explicitly selected improvements');
