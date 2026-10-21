@@ -66,3 +66,11 @@
 父流程已逐檔核對 20 個候選、209 個 production/test/config 輸入、956 個保護檔及 412 個證據檔的原始 SHA-256；核對各 run 的 unique case IDs、原始命令 log 與完整24項SQL readback。13/13入口的保存 IDs 與另一端讀回一致；351單測、91 mounted、34 native、10 guards、4管理版面、12輸入案例／24 typing windows、4真下載／6實體檔核對分層成立，不相加成虛構E2E總數。另抽看繁中管理桌面及英文390px指派區截圖。
 
 最後 aggregate 的前四個產品 gate 通過；其 diff-check 失敗為契約末尾多一空行，已由其後 integrity receipt閉合。父流程 path-limited staging 另發現新增 unit test 末尾空行，僅移除一個尾端 LF，並重跑351單測及 staged diff-check；產品 bytes 未改，不重跑無關UI／SQL。最終本機 commit／tree、精確 staged blobs 及文檔狀態追加由 `qa-evidence/person-department-heads/local-delivery-receipt.json` 記錄。
+
+## 018 手動貼上換行修正（獨立後續提交）
+
+- 正式操作回報 `PERSON_DEPARTMENT_HEADS_SEAM_MISMATCH`；本機原生 PostgreSQL 以原018重現完全相同訊息及 DO 第63行。原稿 LF 成功，改成 Windows CRLF 後多行搜尋文字不匹配；失敗後全部函式目錄及資料 tuple 保持原狀。這是安裝稿缺陷與測試漏項，不應要求使用者重裝舊版或放寬保護。
+- 最小修正僅讓 `e.needle`、`e.replacement` 與既有函式定義採相同 CRLF→LF 規則。全部前置版本、ACL、唯一匹配、OID／owner／settings、拒絕重裝及整筆交易保護原封不動；沒有新業務規則／資料修改，001–017及兩份獨立readback均未變。
+- 新 `node scripts/verify-person-department-heads-line-endings.mjs` 實測兩個被替換函式的來源 LF／CRLF × 提交SQL LF／CRLF 四種組合。修正前2 PASS／2 FAIL，修正後4／4 PASS；每組完整24項readback皆true、安裝後函式與原預期完全一致、OID／owner／ACL／settings及所有資料 tuple 不變。另重跑既有34項native功能／拒絕／rollback回歸，34／34通過。這是本機合成資料，不是正式安裝成功證據。
+- 原始重現、RED、GREEN與34項回歸保留在 `qa-evidence/person-department-heads/line-ending-repair-receipt.json` 所列路徑；該receipt記錄本次精確commit／tree與保留的報告未提交檔案。此SQL-only修正不重跑未改的前端整套驗證，也不將尚未驗完的報告候選混入commit。
+- 新交接應先唯讀確認失敗後仍是完整post017，再使用修正018，最後獨立核對018。已成功安裝018者只核對，不重裝。舊交接頁及失敗證據保留但不再用作執行指示；新頁須從本次immutable commit抽取且與native測試bytes一致。正式Run、CSV讀回、Push及部署仍分開，由使用者操作。

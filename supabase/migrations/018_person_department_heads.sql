@@ -65,6 +65,9 @@ begin
  ) x(signature,needle,replacement) loop
   select * into strict prior_p from pg_catalog.pg_proc where oid=to_regprocedure(e.signature);
   definition:=replace(pg_catalog.pg_get_functiondef(prior_p.oid),E'\r\n',E'\n');
+  -- Manual Windows copy/paste can make dollar-quoted seams CRLF too.
+  e.needle:=replace(e.needle,E'\r\n',E'\n');
+  e.replacement:=replace(e.replacement,E'\r\n',E'\n');
   if (length(definition)-length(replace(definition,e.needle,'')))/length(e.needle)<>1 then raise exception 'PERSON_DEPARTMENT_HEADS_SEAM_MISMATCH: %',e.signature;end if;
   execute replace(definition,e.needle,e.replacement);
   if not exists(select 1 from pg_catalog.pg_proc q where q.oid=prior_p.oid and q.proowner=prior_p.proowner and q.proacl is not distinct from prior_p.proacl
