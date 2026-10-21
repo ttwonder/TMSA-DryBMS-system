@@ -62,7 +62,7 @@ export function ImprovementTextarea({ value, onChange, rows, disabled }: { value
   const [touched, setTouched] = useState(false);
   return <textarea rows={rows} disabled={disabled} value={touched ? value : compactBlankLines(value)} onChange={event => { setTouched(true); onChange(event.target.value); }} />;
 }
-export type InlineImprovementTarget = { itemId: string; action: 'create' | 'progress' | 'full' | 'view'; improvementId?: string };
+export type InlineImprovementTarget = { itemId: string; action: 'create' | 'progress' | 'full' | 'close' | 'view'; improvementId?: string };
 export default function Improvements(ctx: PageProps & { focusId?: string; inlineTarget?: InlineImprovementTarget; onInlineClose?: () => void }) {
   const { t } = ctx;
   const [sourceInspection,setSourceInspection]=useState<Inspection|null>(null);
@@ -77,6 +77,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   const [selected, setSelected] = useState<string[]>([]);
   const [mode, setMode] = useState<'full' | 'progress' | 'close' | 'reopen'>('full');
   const [stagedId, setStagedId] = useState('');
+  const previousIncompletePercent = useRef(0);
   const [validation, setValidation] = useState('');
   const [exporting, setExporting] = useState(false);
   const [detailId, setDetailId] = useState('');
@@ -90,6 +91,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   const ids = effectiveSelection(selected, visible);
   const can = (cap: Parameters<typeof hasPermission>[2]) => hasPermission(state.settings.rolePermissions, ctx.user, cap);
   const draft = editor.draft;
+  const controlsLocked = !editor.canSave || editor.lost || editor.pendingUnknown;
   useEffect(()=>{
     const id=draft?.source==='external'?draft.inspectionId:undefined,summary=ctx.state.inspections.find(i=>i.id===id),g=++sourceGeneration.current,owner=sourceOwner.current;
     if(!summary){setSourceInspection(null);return;}
@@ -132,6 +134,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
       const eventId = crypto.randomUUID(); setStagedId(eventId);
       editor.setDraft(current => {
         if (!current) return current;
+        previousIncompletePercent.current = current.percent < 100 ? current.percent : 0;
         const status = nextMode === 'close' ? 'closed' : nextMode === 'reopen' ? 'open' : current.status;
         const event: ProgressEvent = { id: eventId, at: isoNow(), by: ctx.user.id, content: '', status, percent: nextMode === 'close' ? 100 : nextMode === 'reopen' ? 0 : current.percent };
         return { ...current, status, percent: event.percent, events: [...current.events, event], closedAt: status === 'closed' ? event.at : null, closedBy: status === 'closed' ? ctx.user.id : null };
@@ -160,7 +163,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
       const record = state.improvements.find(row => row.id === target.improvementId && row.itemIds.includes(target.itemId));
       if (!record) { setValidation(t('此條目的改善記錄已不可用。', 'The linked action is no longer available.')); return; }
       if (target.action === 'view') { setDetailId(record.id); return; }
-      if (!can('updateImprovements') || target.action === 'progress' && record.status === 'closed') {
+      if (!can(target.action === 'close' ? 'closeImprovements' : 'updateImprovements') || (target.action === 'progress' || target.action === 'close') && record.status === 'closed') {
         setValidation(t('此改善目前不可更新。', 'This action cannot currently be updated.')); return;
       }
       void start(record, target.action);
@@ -169,12 +172,21 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   }, [ctx.inlineTarget]);
 
   const updateStaged = (changes: Partial<ProgressEvent>) => {
+    if (controlsLocked) return;
+    if (changes.percent !== undefined && Number.isInteger(changes.percent) && changes.percent >= 0 && changes.percent < 100) previousIncompletePercent.current = changes.percent;
     editor.setDraft(current => {
       if (!current) return current;
       const events = current.events.map(event => event.id === stagedId ? { ...event, ...changes } : event);
       const event = events.find(row => row.id === stagedId);
       return { ...current, events, ...(event ? { status: event.status, percent: event.percent, closedAt: event.status === 'closed' ? event.at : null, closedBy: event.status === 'closed' ? event.by : null } : {}) };
     });
+  };
+  const switchProgressMode = (nextMode: 'full' | 'close') => {
+    if (mode !== 'progress' || controlsLocked || !can(nextMode === 'close' ? 'closeImprovements' : 'updateImprovements')) return;
+    // Keep the current lease, draft and staged event; start/open would discard them.
+    if (nextMode === 'close') updateStaged({ status: 'closed', percent: 100 });
+    setValidation('');
+    setMode(nextMode);
   };
   const submit = async () => {
     if (!draft) return;
@@ -259,6 +271,8 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
     {detail && !draft && <Modal title={t('改善詳情', 'Action detail')} wide onClose={() => { setDetailId(''); ctx.onInlineClose?.(); }}><BilingualText value={improvementTitle(detail.title)} /><BilingualText value={detail.content} compact /><p className="preserve-lines">{t('計劃', 'Plan')}: {compactBlankLines(detail.plan)}</p>{sourceDetails(detail)}{eventList(detail)}{ctx.inlineTarget && can('updateImprovements') && <button className="btn neutral" disabled={editor.busy} onClick={() => void start(detail)}>{t('完整編輯', 'Full edit')}</button>}</Modal>}
     {draft && <Modal title={mode === 'close' ? t('確認結案', 'Confirm close') : mode === 'reopen' ? t('確認重開', 'Confirm reopen') : mode === 'progress' ? t('更新進度', 'Update progress') : draft.version === 0 ? t('新增改善', 'New improvement') : t('編輯改善', 'Edit improvement')} wide onClose={discard}>
       <EditorNotice error={editor.error || validation} lost={editor.lost} />
+      {mode === 'progress' && <div className="page-actions improvement-update-actions">{can('updateImprovements') && <button className="btn neutral" disabled={controlsLocked} onClick={() => switchProgressMode('full')}>{t('完整編輯', 'Full edit')}</button>}{can('closeImprovements') && <button className="btn success" disabled={controlsLocked} onClick={() => switchProgressMode('close')}>{t('結案', 'Close')}</button>}</div>}
+      {mode === 'close' && <p className="notice">{t('結案會同時標記已經完成作業（100%）；按「確認保存」並獲伺服器確認後，才會同步更新清單。', 'Closing also marks work completed (100%). The lists update only after Confirm save is acknowledged by the server.')}</p>}
       {mode === 'full' ? <div className="form-grid">
         <label className="field">{t('標題（英文）', 'Title (English)')}<input value={improvementTitle(draft.title).en} onChange={event => changeTitle('en', event.target.value)} /></label><label className="field">{t('標題（繁中）', 'Title (Traditional Chinese)')}<input value={improvementTitle(draft.title).zh} onChange={event => changeTitle('zh', event.target.value)} /></label>
         <label className="field">{t('內容（英文）', 'Content (English)')}<ImprovementTextarea key={`${draft.id}:en`} rows={5} value={draft.content.en} onChange={en => patch({ content: { ...draft.content, en } })} /></label><label className="field">{t('內容（繁中）', 'Content (Traditional Chinese)')}<ImprovementTextarea key={`${draft.id}:zh`} rows={5} value={draft.content.zh} onChange={zh => patch({ content: { ...draft.content, zh } })} /></label>
@@ -271,7 +285,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
         {draft.source === 'external' && <><label className="field">{t('來源檢查', 'Source inspection')}<select disabled={draft.version > 0} value={draft.inspectionId || ''} onChange={event => patch({ inspectionId: event.target.value, findingId: undefined, sourceKey: undefined, sources: [] })}><option value="">{t('請選擇', 'Select')}</option>{state.inspections.map(row => <option key={row.id} value={row.id}>{row.date} · {row.title}</option>)}</select></label><label className="field">{t('來源發現', 'Source finding')}<select disabled={draft.version > 0} value={draft.findingId || ''} onChange={event => { const finding = (sourceInspection&&sourceInspection.id===draft.inspectionId&&state.inspections.some(i=>i.id===sourceInspection.id&&i.version===sourceInspection.version)?sourceInspection.findings:[]).find(row => row.id === event.target.value); patch({ findingId: finding?.id, sourceKey: finding ? `${draft.inspectionId}:${finding.id}` : undefined, sources: finding ? structuredClone(finding.sources) : [] }); }}><option value="">{t('請選擇', 'Select')}</option>{(sourceInspection&&sourceInspection.id===draft.inspectionId&&state.inspections.some(i=>i.id===sourceInspection.id&&i.version===sourceInspection.version)?sourceInspection.findings:[]).filter(row => isActionableFinding(row.classification)).map(row => <option key={row.id} value={row.id}>{bi(row.observation, ctx.lang)}</option>)}</select></label></>}
       </div> : <BilingualText value={improvementTitle(draft.title)} />}
       {mode === 'progress' ? <section className="progress-action-content" aria-label={t('完整改善內容', 'Full action content')}><BilingualText value={draft.content} compact/></section> : sourceDetails(draft)}
-      {stagedId && (() => { const event = draft.events.find(row => row.id === stagedId); if (!event) return null; const progressFields = <><label className="field"><span>{t('完成百分比', 'Completion percentage')}</span><input aria-label={t('完成百分比', 'Completion percentage')} type="number" min={0} max={100} disabled={mode === 'close' || editor.busy} value={event.percent} onChange={e => updateStaged({ percent: Number(e.target.value) })} /></label>{mode === 'progress' && <label className="field"><span>{t('執行狀態', 'Execution status')}</span><select aria-label={t('執行狀態', 'Execution status')} disabled={editor.busy} value={event.status} onChange={e => updateStaged({ status: e.target.value as ProgressEvent['status'] })}><option value="open">{t('待處理', 'Open')}</option><option value="in_progress">{t('進行中', 'In progress')}</option></select></label>}</>; return <div className={mode === 'progress' ? 'progress-editor-grid' : 'form-grid'}><label className="field progress-text">{t('本次新增進度（保存前可修改）', 'New progress (editable until saved)')}<ImprovementTextarea key={event.id} disabled={editor.busy} rows={mode === 'progress' ? 8 : 5} value={event.content} onChange={content => updateStaged({ content })} /></label>{mode === 'progress' ? <div className="progress-controls">{progressFields}<label className="field progress-urgency"><span>{t('急迫程度', 'Urgency')}</span><select aria-label={t('急迫程度', 'Urgency')} disabled={editor.busy} value={draft.urgency} onChange={e => patch({urgency:e.target.value as Improvement['urgency']})}>{(['urgent','high','medium','low'] as const).map(value=><option key={value} value={value}>{urgencyLabel(value)}</option>)}</select></label><MultiSelectDropdown label={t('涉及部門','Departments')} options={departmentOptions(ctx)} selected={draft.departmentIds} onChange={departmentIds=>patch({departmentIds})} disabled={!editor.canSave}/><MultiSelectDropdown label={t('執行跟進人','Assignees')} options={formPeople} selected={draft.assigneeIds} onChange={assigneeIds=>patch({assigneeIds})} disabled={!editor.canSave}/><DepartmentHeadsButton people={state.people} departmentIds={draft.departmentIds} selectedIds={draft.assigneeIds} onChange={changeAssignees} disabled={!editor.canSave || editor.lost || editor.pendingUnknown} lang={ctx.lang} /></div> : progressFields}</div>; })()}
+      {stagedId && (() => { const event = draft.events.find(row => row.id === stagedId); if (!event) return null; const progressFields = <>{mode !== 'reopen' && <label className="checkbox-field improvement-work-complete"><input type="checkbox" checked={event.percent === 100} disabled={mode === 'close' || controlsLocked} onChange={e => updateStaged({ percent: e.target.checked ? 100 : previousIncompletePercent.current })} />{t('已經完成作業', 'Work completed')}</label>}<label className="field"><span>{t('完成百分比', 'Completion percentage')}</span><input aria-label={t('完成百分比', 'Completion percentage')} type="number" min={0} max={100} disabled={mode === 'close' || editor.busy} value={event.percent} onChange={e => updateStaged({ percent: Number(e.target.value) })} /></label>{mode === 'progress' && <label className="field"><span>{t('執行狀態', 'Execution status')}</span><select aria-label={t('執行狀態', 'Execution status')} disabled={editor.busy} value={event.status} onChange={e => updateStaged({ status: e.target.value as ProgressEvent['status'] })}><option value="open">{t('待處理', 'Open')}</option><option value="in_progress">{t('進行中', 'In progress')}</option></select></label>}</>; return <div className={mode === 'progress' ? 'progress-editor-grid' : 'form-grid'}><label className="field progress-text">{t('本次新增進度（保存前可修改）', 'New progress (editable until saved)')}<ImprovementTextarea key={event.id} disabled={editor.busy} rows={mode === 'progress' ? 8 : 5} value={event.content} onChange={content => updateStaged({ content })} /></label>{mode === 'progress' ? <div className="progress-controls">{progressFields}<label className="field progress-urgency"><span>{t('急迫程度', 'Urgency')}</span><select aria-label={t('急迫程度', 'Urgency')} disabled={editor.busy} value={draft.urgency} onChange={e => patch({urgency:e.target.value as Improvement['urgency']})}>{(['urgent','high','medium','low'] as const).map(value=><option key={value} value={value}>{urgencyLabel(value)}</option>)}</select></label><MultiSelectDropdown label={t('涉及部門','Departments')} options={departmentOptions(ctx)} selected={draft.departmentIds} onChange={departmentIds=>patch({departmentIds})} disabled={!editor.canSave}/><MultiSelectDropdown label={t('執行跟進人','Assignees')} options={formPeople} selected={draft.assigneeIds} onChange={assigneeIds=>patch({assigneeIds})} disabled={!editor.canSave}/><DepartmentHeadsButton people={state.people} departmentIds={draft.departmentIds} selectedIds={draft.assigneeIds} onChange={changeAssignees} disabled={!editor.canSave || editor.lost || editor.pendingUnknown} lang={ctx.lang} /></div> : progressFields}</div>; })()}
       {eventList(draft)}
       <div className="page-actions"><button className="btn neutral" disabled={editor.busy} onClick={discard}>{t('取消／放棄草稿', 'Cancel / discard draft')}</button><button className={`btn ${mode === 'close' ? 'success' : 'primary'}`} disabled={!editor.canSave} onClick={() => void submit()}>{editor.busy ? t('保存中…', 'Saving…') : t('確認保存', 'Confirm save')}</button></div>
     </Modal>}

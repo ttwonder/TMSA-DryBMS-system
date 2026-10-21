@@ -16,6 +16,7 @@
     "qa:inspection-sections-bulk": "node --experimental-strip-types scripts/verify-inspection-sections-bulk.mjs",
     "qa:improvement-input": "node --experimental-strip-types scripts/verify-improvement-input.mjs",
     "qa:improvement-list": "node --experimental-strip-types scripts/verify-improvement-list.mjs",
+    "qa:improvement-update-actions": "node --experimental-strip-types scripts/verify-improvement-update-actions.mjs",
     "qa:improvement-density": "node --experimental-strip-types scripts/verify-improvement-density.mjs",
     "qa:inspection-input": "node --experimental-strip-types scripts/verify-inspection-input.mjs",
     "qa:finding-classification": "node --experimental-strip-types scripts/verify-finding-classification.mjs",
