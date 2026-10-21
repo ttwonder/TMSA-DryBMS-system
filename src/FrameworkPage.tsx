@@ -6,6 +6,7 @@ import type {Assessment,FrameworkId,PageProps,StandardItem,DryScore} from './typ
 import {assessmentFor,bi,chapterStatusOf,departmentsLabel,frameworkScore,hasPermission,isoNow,newBase,openIssuesFor,peopleLabel,statusOf} from './domain';
 import {BilingualText,departmentOptions,EditorNotice,Empty,MultiSelect,MultiSelectDropdown,Modal,PageHeading} from './ui';
 import {departmentAssigneeOptions} from './departmentAssignees';
+import { DepartmentHeadsButton } from './DepartmentHeadsButton';
 import {useRecordEditor} from './useRecordEditor';
 import {useFrameworkRestart} from './useFrameworkRestart';
 import Improvements,{improvementTitle,type InlineImprovementTarget} from './Improvements';
@@ -59,7 +60,7 @@ return <><PageHeading title={frameworkId==='TMSA'?t('TMSA 逐項核對','TMSA it
    <div className="guidance-column">
    <details className="requirement-block guidance-block" aria-label="Best-Practice Guidance" open><summary><h3>Best-Practice Guidance {frameworkId==='DRYBMS'?' / Suggested Objective Evidence':''}</h3></summary><BilingualText value={item.guidance} sentence/></details>
  <section className="item-responsibility" aria-label={t('條目責任分工','Item responsibilities')}>
-  {editor.draft?<fieldset disabled={!editor.canSave} className="responsibility-controls"><MultiSelect label={t('涉及部門','Departments')} options={departmentOptions(ctx)} selected={editor.draft.departmentIds} onChange={ids=>editor.setDraft(d=>d?{...d,departmentIds:ids}:d)}/><MultiSelectDropdown disabled={!editor.canSave} label={t('執行跟進人','Assignees')} options={departmentAssigneeOptions(state.people,editor.draft.departmentIds,editor.draft.assigneeIds,lang)} selected={editor.draft.assigneeIds} onChange={ids=>editor.setDraft(d=>d?{...d,assigneeIds:ids}:d)}/></fieldset>:<div className="responsibility-grid"><div><small>{t('涉及部門','Departments')}</small><b>{departmentsLabel(state,current?.departmentIds??item.departmentIds,lang)||'—'}</b></div><div><small>{t('執行跟進人','Assignees')}</small><b>{peopleLabel(state,current?.assigneeIds??[])||t('未指派','Unassigned')}</b></div></div>}
+  {editor.draft?<fieldset disabled={!editor.canSave} className="responsibility-controls"><MultiSelect label={t('涉及部門','Departments')} options={departmentOptions(ctx)} selected={editor.draft.departmentIds} onChange={ids=>editor.setDraft(d=>d?{...d,departmentIds:ids}:d)}/><MultiSelectDropdown disabled={!editor.canSave} label={t('執行跟進人','Assignees')} options={departmentAssigneeOptions(state.people,editor.draft.departmentIds,editor.draft.assigneeIds,lang)} selected={editor.draft.assigneeIds} onChange={ids=>editor.setDraft(d=>d?{...d,assigneeIds:ids}:d)}/><DepartmentHeadsButton people={state.people} departmentIds={editor.draft.departmentIds} selectedIds={editor.draft.assigneeIds} onChange={ids=>editor.setDraft(d=>d?{...d,assigneeIds:ids}:d)} disabled={!editor.canSave || editor.lost || editor.pendingUnknown} lang={lang}/></fieldset>:<div className="responsibility-grid"><div><small>{t('涉及部門','Departments')}</small><b>{departmentsLabel(state,current?.departmentIds??item.departmentIds,lang)||'—'}</b></div><div><small>{t('執行跟進人','Assignees')}</small><b>{peopleLabel(state,current?.assigneeIds??[])||t('未指派','Unassigned')}</b></div></div>}
  </section>
    {!restricted&&<section className="assessment-content-block item-remarks" aria-label={t('條目備註','Item remarks')}>
     <h3>{t('備註','Remarks')}</h3>

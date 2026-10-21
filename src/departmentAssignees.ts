@@ -1,8 +1,9 @@
 import type { Language, Person } from './types';
+import { personDepartmentIds } from './personDepartments.ts';
 
 /** Candidate projection only: callers keep the entire draft and save payload. */
 export function departmentAssigneeOptions(
-  people: readonly Pick<Person, 'id' | 'name' | 'departmentId' | 'active'>[],
+  people: readonly Pick<Person, 'id' | 'name' | 'departmentId' | 'departmentIds' | 'active'>[],
   departmentIds: readonly string[],
   selectedIds: readonly string[],
   lang: Language,
@@ -10,7 +11,7 @@ export function departmentAssigneeOptions(
   const departments = new Set(departmentIds);
   const roster = new Map<string, typeof people[number]>();
   for (const person of people) if (!roster.has(person.id)) roster.set(person.id, person);
-  const inScope = (person: typeof people[number]) => !departments.size || departments.has(person.departmentId);
+  const inScope = (person: typeof people[number]) => !departments.size || personDepartmentIds(person).some(id => departments.has(id));
   const options = new Map<string, { id: string; label: string }>();
   for (const person of roster.values()) {
     if (person.active && inScope(person)) options.set(person.id, { id: person.id, label: person.name });

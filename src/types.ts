@@ -16,9 +16,9 @@ export interface Improvement extends BaseEntity { title:string; content:BiText; 
 export interface InspectionResult { itemId:string; response:'yes'|'no'|null; conformity:'all'|'partial'|'none'; reviewed:boolean; observation:BiText; recommendation:BiText }
 export interface Finding { id:string; itemIds:string[]; classification:'finding'|'ofi'|'positive'|'guidance'|'no_finding'|'general'; observation:BiText; recommendation:BiText; sources:SourceLocator[]; warning?:string }
 export interface Inspection extends BaseEntity { frameworkId:FrameworkId; title:string; organization:string; date:string; type:'formal'|'informal'; status:'draft'|'final'; snapshot:{framework:Framework;chapters:Chapter[];items:StandardItem[];scoringVersion:string}; results:InspectionResult[]; findings:Finding[]; dryLevels?:Record<string,[number|null,number|null,number|null,number|null]>; supersedesId?:string; imported:boolean; scoreNote?:BiText; includeTmsaChapter14?:boolean }
-export interface Person extends BaseEntity { username:string; name:string; departmentId:string; role:Role; active:boolean; hasPassword:boolean }
+export interface Person extends BaseEntity { username:string; name:string; departmentId:string; departmentIds?:string[]; isDepartmentHead?:boolean; role:Role; active:boolean; hasPassword:boolean }
 /** Gate-authorized display enrichment; never persisted as a person record. */
-export interface RosterPerson extends Person { departmentName?:BiText }
+export interface RosterPerson extends Person { departmentName?:BiText; departmentNames?:Record<string,BiText> }
 export interface Department { id:string; name:BiText; active:boolean }
 export type Capability = 'editAssessments'|'createImprovements'|'updateImprovements'|'closeImprovements'|'manageInspections'|'exportReports'|'enterManagement'|'manageUsers'|'manageFrameworks'|'viewAuditLogs'|'manageRolePermissions'|'manageSystemSettings';
 export type RolePermissions = Record<Exclude<Role,'management_viewer'>,Record<Capability,boolean>>;

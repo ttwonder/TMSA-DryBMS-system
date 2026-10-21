@@ -170,3 +170,12 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 ### 新舊條文優先關係
 
 上文舊「改善僅展示去空行／編輯完全顯示原空行」若衝突，以本節的未觸碰保留原bytes＋初次顯示投影為準。舊報告四欄／metadata可見配置、快照／token可見說明與空行規則，已由本節第二批候選取代；完成證據以新handback為準。舊批次「不增加SQL」只描述該批，不限制已授權016及本批精確017 seam；角色、歷史不可改、來源與並行保存權威等非衝突條文繼續有效。第一批交付見 `docs/FPMC_TRACKING_DELIVERY.md`／`qa-evidence/fpmc-tracking/handback.json`；第二批見 `docs/FPMC_REPORTING_DELIVERY.md`／`qa-evidence/fpmc-reporting/resumed/handback.json`。根目錄原blocked handback不可覆寫；所有正式執行、Push及部署仍待父流程／使用者另行處理。
+
+## 最新追加：人員多部門與部門負責人
+
+- 原人員新增／編輯支援多選隸屬部門及單一「負責人」旗標，套用該人的全部所選部門；允許同部門多位負責人，不複製人員／帳號、不提升角色或權限。管理列表、搜尋／部門篩選與 gate 授權登入名冊均使用全部隸屬部門，同一人可於任一所屬部門以原帳號登入。
+- `departmentIds` 是新增多部門權威，原 `departmentId` 僅相容投影；舊資料缺陣列仍視為原單部門，缺 `isDepartmentHead` 視為false，不批次回填。舊客戶端省略新欄位保存須保留已存值；省略陣列卻以單部門有損更改已升級資料須拒絕要求新版。明確false與省略不同；原至少一個部門、參照／去重／boolean驗證與停用歷史關係保留仍由server執行，禁止刪除被任何一個隸屬部門引用的部門。
+- 所有原13個執行／跟進人指派入口增加「勾選部門負責人」／英文等義按鈕：只在明確按下時加入草稿所選部門的啟用負責人，stable ID聯集去重、重按冪等，保留所有既選。無部門／無匹配停用並提示，不回退全部或普通人員；一般候選的無部門＝全部啟用人員規則不變。換部門／名冊同步不自動選人，不增加查詢篩選或無指派欄位的結案／重開控制。
+- 新控制遵循readonly／busy／失鎖／pendingUnknown，僅原保存透過person或原業務lease／CAS／operation ACK提交；取消零業務寫入，既有範圍外／停用／缺名冊ID保留及手動移除。原ID、assignment、歷史、密碼／Owner保護、GM隔離、10秒同步及same-node/caret/IME不變。
+- 新增guarded018及獨立catalog-only readback，僅擴充已知post017 person validator／settings引用保護／roster安全名稱；保OID／owner／ACL、原函式鏈，零資料批改，不改001–017或舊readback。018安裝後舊readback的hash FAIL不構成重跑舊SQL的理由，正式版本未知先唯讀核對；正式Run及Push仍由使用者。
+- 此節明確擴充上文原候選篩選批次「不改名冊／SQL」界線，其餘原契約不變。報告僅做人員引用真下載回歸，不混入下一批Excel欄寬／段次欄及最終可下載但耗時過長的PDF修正。工程選擇與證據見 `docs/PERSON_DEPARTMENT_HEADS_DELIVERY.md` 與 `qa-evidence/person-department-heads/handback.json`。

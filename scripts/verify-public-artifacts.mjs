@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';import path from 'node:path';import JSZip from 'jszip';
-const root=path.resolve(import.meta.dirname,'..'),dist=path.join(root,'dist');
+const root=path.resolve(import.meta.dirname,'..'),dist=process.argv[2]?path.resolve(process.argv[2]):path.join(root,'dist');
 assert.ok(fs.existsSync(path.join(dist,'index.html')),'Build output exists');
 const all=[];function walk(dir){for(const ent of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,ent.name);if(ent.isDirectory())walk(p);else all.push(p);}}walk(dist);
 for(const p of all){assert.ok(!/(private-seed|qa-evidence|platform-seed|source-verification|bootstrap-config)/i.test(path.relative(dist,p)),'No private payload file in public build');assert.ok(!/^\.env/.test(path.basename(p)),'No env file in build');}
