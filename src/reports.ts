@@ -264,14 +264,17 @@ function operationalSheet(book:ExcelJS.Workbook,name:string,headers:string[],wid
  headers.forEach((_,i)=>{const cell=sheet.getCell(4,i+1);cell.font={name:fontName,size,bold:true,color:{argb:'FF193447'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE1EAF0'}};});
  return sheet;
 }
-// The document-local key and numeric part travel with every physical row after any sort.
+// Improvement registers retain their numeric Part column. Six-column remarks
+// instead carry an ordered [part/total] prefix inside a continued narrative.
 // Every short metadata value repeats; unusually long metadata gets ordered parts too.
-function operationalRows(sheet:ExcelJS.Worksheet,values:(string|Date|null|number)[],partColumn:number,narrativeColumns:number[],statusColumn?:number,status?:{background:string;color:string}){
+function operationalRows(sheet:ExcelJS.Worksheet,values:(string|Date|null|number)[],partColumn:number|null,narrativeColumns:number[],statusColumn?:number,status?:{background:string;color:string}){
  const size=14,fontName='Microsoft JhengHei';
- const chunks=values.map((v,i)=>typeof v==='string'?splitMeasured(compactBlankLines(v),(sheet.getColumn(i+1).width??20)*5.1-20,size,fontName,10):[v]);
+ const chunks=values.map((v,i)=>typeof v==='string'?splitMeasured(compactBlankLines(v),(sheet.getColumn(i+1).width??20)*5.1-20,size,fontName,partColumn===null?(narrativeColumns.includes(i+1)?9:17):10):[v]);
  const count=Math.max(...chunks.map(c=>c.length));
  for(let part=0;part<count;part++){
-  const cells=chunks.map((parts,i)=>parts.length===1?part&&narrativeColumns.includes(i+1)?'':parts[0]:parts[part]??'');cells[partColumn-1]=part+1;
+  const cells=chunks.map((parts,i)=>parts.length===1?part&&narrativeColumns.includes(i+1)?'':parts[0]:parts[part]??'');
+  if(partColumn!==null)cells[partColumn-1]=part+1;
+  else if(count>1)for(const column of narrativeColumns)cells[column-1]=`[${String(part+1).padStart(String(count).length,'0')}/${count}]\n${cells[column-1]}`;
   const row=sheet.addRow(cells);let height=32;
   cells.forEach((v,i)=>{const c=row.getCell(i+1);c.font={name:fontName,size,color:{argb:'FF193447'}};c.alignment={wrapText:true,vertical:'top',shrinkToFit:false};tableBorder(c);if(v instanceof Date)c.numFmt='yyyy-mm-dd';height=Math.max(height,splitMeasured(typeof v==='string'?v:'X',(sheet.getColumn(i+1).width??20)*5.1-20,size,fontName,1).length*size*1.6+18);});
   if(height>409.5)throw new Error('Operational continuation exceeds Excel row height');// Excel Sort moves values, not physical row heights. A common safe height keeps
@@ -288,8 +291,12 @@ function finishOperationalSheet(sheet:ExcelJS.Worksheet){
 export async function buildRemarksExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[]):Promise<Uint8Array> {
  const rows=selectedRemarkRows(state,frameworkId,chapterIds);if(!rows.length)throw noRemarks();
  const Excel=await loadExcel(),book=new Excel.Workbook();book.creator=PRODUCT_NAME_EN;
- const sheet=operationalSheet(book,tr(lang,'條目備註','Item remarks'),lang==='zh'?['對應章節','Item','備註狀態','涉及部門','追蹤人員','完整備註','段次']:['Chapter','Item','Remarks status','Departments','Follow-up people','Complete remarks','Part'],[42,20,42,40,44,100,9],tr(lang,'同 Item 續列保留全文與責任分工；篩選後按 Item、段次排序閱讀。狀態為獨立補充判斷。','Continuation rows retain complete remarks and assignments. After filtering, sort by Item and Part. Status is an independent supplementary assessment.'));
- for(const {chapter,item,assessment:a} of rows)operationalRows(sheet,[`${chapter.code} · ${bilingual(chapter.name)}`,item.code,remarksStatusLabel(a.remarksStatus,lang),departmentsLabel(state,a.departmentIds??item.departmentIds,lang)||'—',peopleLabel(state,a.assigneeIds??[])||'—',a.remarks??'',1],7,[6],3,remarksStatusDefinition(a.remarksStatus));
+ const sheet=operationalSheet(book,tr(lang,'條目備註','Item remarks'),lang==='zh'?['對應章節','Item','備註狀態','涉及部門','追蹤人員','完整備註']:['Chapter','Item','Remarks status','Departments','Follow-up people','Complete remarks'],[22,10,13,22,20,126],tr(lang,'同 Item 續列保留全文與責任分工；續文開頭 [序/總數] 為閱讀標籤。篩選後請整表依 Item、完整備註升冪排序；勿單獨排序一欄。狀態為獨立補充判斷。','Continuation rows retain complete remarks and assignments; [part/total] prefixes identify reading order. Sort the whole range by Item, then Complete remarks ascending; never sort one column alone. Status is an independent supplementary assessment.'));
+ for(const {chapter,item,assessment:a} of rows)operationalRows(sheet,[`${chapter.code} · ${bilingual(chapter.name)}`,item.code,remarksStatusLabel(a.remarksStatus,lang),departmentsLabel(state,a.departmentIds??item.departmentIds,lang)||'—',peopleLabel(state,a.assigneeIds??[])||'—',a.remarks??''],null,[6],3,remarksStatusDefinition(a.remarksStatus));
+ // Normal assignments repeat in full; exceptionally long labels continue in
+ // the same labelled Item group instead of exceeding Excel's height ceiling.
+ // Native Excel sorting does not carry heights, so all rows share the maximum.
+ const height=Math.max(...sheet.getRows(5,sheet.rowCount-4)!.map(row=>row.height??256));for(let r=5;r<=sheet.rowCount;r++)sheet.getRow(r).height=height;
  finishOperationalSheet(sheet);return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
 }
 export async function buildImprovementsExcel(state:PlatformState,ids:string[],lang:Language):Promise<Uint8Array>{
@@ -325,13 +332,23 @@ class TextPdf {
     const document=await library.PDFDocument.create();
     document.registerFontkit({create(bytes){
       const font=fontkit.create(bytes),layout=font.layout.bind(font);
+      // Width and PDF encoding both shape the same fallback runs. Reuse exact
+      // default-feature runs only, scoped to this embedded font/document. These
+      // pdf-lib consumers read glyphs; subset.includeGlyph does not mutate runs.
+      const layouts=new Map<string,ReturnType<typeof layout>>();let cachedCharacters=0;
       font.layout=(text,features)=>{
+        const cacheable=features===undefined&&text.length<=4096;
+        const cached=cacheable?layouts.get(text):undefined;if(cached)return cached;
         const result=layout(text,features);
         // fontkit hides soft hyphen as a space/.notdef. This isolated source glyph
         // needs its own Unicode identity and the same real advance in measure/draw.
         if(text==='\u00ad'){
           const glyph=font.glyphForCodePoint(0x00ad);
           result.glyphs=[glyph];result.positions=[{xAdvance:glyph.advanceWidth,yAdvance:0,xOffset:0,yOffset:0}];
+        }
+        if(cacheable){
+          while(layouts.size>=2048||cachedCharacters+text.length>131072){const oldest=layouts.keys().next().value!;cachedCharacters-=oldest.length;layouts.delete(oldest);}
+          layouts.set(text,result);cachedCharacters+=text.length;
         }
         return result;
       };

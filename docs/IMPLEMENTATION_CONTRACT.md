@@ -179,3 +179,12 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 - 新控制遵循readonly／busy／失鎖／pendingUnknown，僅原保存透過person或原業務lease／CAS／operation ACK提交；取消零業務寫入，既有範圍外／停用／缺名冊ID保留及手動移除。原ID、assignment、歷史、密碼／Owner保護、GM隔離、10秒同步及same-node/caret/IME不變。
 - 新增guarded018及獨立catalog-only readback，僅擴充已知post017 person validator／settings引用保護／roster安全名稱；保OID／owner／ACL、原函式鏈，零資料批改，不改001–017或舊readback。018安裝後舊readback的hash FAIL不構成重跑舊SQL的理由，正式版本未知先唯讀核對；正式Run及Push仍由使用者。
 - 此節明確擴充上文原候選篩選批次「不改名冊／SQL」界線，其餘原契約不變。報告僅做人員引用真下載回歸，不混入下一批Excel欄寬／段次欄及最終可下載但耗時過長的PDF修正。工程選擇與證據見 `docs/PERSON_DEPARTMENT_HEADS_DELIVERY.md` 與 `qa-evidence/person-department-heads/handback.json`。
+
+## 最新追加：條目備註六欄與 PDF 等待時間
+
+- 本節只覆蓋條目備註 XLSX 的舊「第七欄段次」要求：實際只保留對應章節、Item、備註狀態、涉及部門、追蹤人員、完整備註六欄，不是隱藏第七欄。欄寬依截圖相對比例，正文最寬，Item 最窄。改善／全部進度的文件序號與段次、正式框架樣板均不改。
+- 長文以同 Item 續列保留全文，完整備註前的小型 `[序/總數]` 標籤只供本文件閱讀順序，不是業務內容或永久 ID；通常責任欄完整重複，極長責任文字超過單列可讀上限時同組分段保留。整個六欄資料範圍可篩選、排序，恢復續文閱讀時須按 Item、完整備註升冪（有重複 Item 代碼時先辨別章節）；不能只排序單一欄，也不承諾任意排序後仍維持原始業務排序。凍結表頭、全六欄 AutoFilter、無合併資料列、全文及共同安全列高保留；共同列高會讓短文列留白。
+- PDF 症狀以使用者最新更正為準：最終成功下載但等待過久，正式正文／精確秒數未知。本機以原 App、真 ApiClient、owned native PostgreSQL 的授權快照及 8 項合成資料比較相同 production build 的冷／暖流程；正常與長文分開，不把下載成功當作速度驗收。
+- 只減少已測得的重複 fontkit shaping：保留原 per-document exact width cache，另在每份文件的每個嵌入字型內有界重用完全相同、預設 features 的 shaping 結果。不得採單字寬相加近似、不跨快照存業務資料、不延長 timeout、不改授權／GM／保存或字型資產。
+- 三邏輯行、15pt 正文／14pt 輔助、原換頁邊界、全文／字元／fallback／ToUnicode 都要以實際產檔及前後幾何比對確認。共享 TextPdf 僅做備註／框架／改善／歷史的有限代表性回歸；未變動 SQL／人員／保存層以基準 hash 保護，不重做已完成的人員批。
+- 本批接續最新已提交功能完成有限驗證後，建立獨立本機 commit，供使用者一起 Push。原暫停 handback 與所有失敗證據保留；最新交付見 `docs/REMARKS_EXPORT_FOLLOWUP_DELIVERY.md`、`qa-evidence/remarks-export-followup/resumed-e838b86/`。不得聲稱正式慢匯出的根因或正式加速已驗證，亦不代執行正式 SQL／Push／部署。

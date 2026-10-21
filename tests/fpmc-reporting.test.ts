@@ -14,8 +14,8 @@ test('report authorization rechecks shared source/proposal cohort on canonical d
 });
 test('remarks workbook includes authoritative assignments and full sortable continuations',async()=>{
  const state=reportingFixture(true),before=JSON.stringify(state),bytes=await reports.buildRemarksExcel(state,'TMSA','zh',['chapter-TMSA']);const book=new ExcelJS.Workbook();await book.xlsx.load(bytes as unknown as ExcelJS.Buffer);const sheet=book.worksheets[0];
- assert.deepEqual((sheet.getRow(4).values as string[]).slice(1),['對應章節','Item','備註狀態','涉及部門','追蹤人員','完整備註','段次']);
- let full='';sheet.eachRow(row=>{if(row.number<=4)return;assert.equal(row.getCell(2).text,'1.1.1');assert.equal(row.getCell(4).text,'海務 / 工務');assert.equal(row.getCell(5).text,'測試 Owner / 停用歷史姓名');full+=row.getCell(6).text;assert(row.height!<=409.5);});assert.equal(full,compactBlankLines(state.assessments[0].remarks!));assert.equal(JSON.stringify(state),before);
+ assert.deepEqual((sheet.getRow(4).values as string[]).slice(1),['對應章節','Item','備註狀態','涉及部門','追蹤人員','完整備註']);
+ let full='';sheet.eachRow(row=>{if(row.number<=4)return;assert.equal(row.getCell(2).text,'1.1.1');assert.equal(row.getCell(4).text,'海務 / 工務');assert.equal(row.getCell(5).text,'測試 Owner / 停用歷史姓名');full+=row.getCell(6).text.replace(/^\[\d+\/\d+\]\n/,'');assert(row.height!<=409.5);});assert.equal(full,compactBlankLines(state.assessments[0].remarks!));assert.equal(JSON.stringify(state),before);
 });
 test('remarks PDF full-width narrative instead of a narrow fourth column',async()=>{
  const state=reportingFixture(),lines:reports.ReportFieldLine[]=[];await reports.buildRemarksPdf(state,'TMSA','zh',['chapter-TMSA'],{fontBytes:new Uint8Array(readFileSync('public/fonts/NotoSansTC-Regular.ttf')),fallbackFontBytes:['ReportSupplement-Regular.ttf','ReportSymbols-Regular.ttf'].map(n=>new Uint8Array(readFileSync('public/fonts/'+n))),onFieldLine:l=>lines.push(l)});

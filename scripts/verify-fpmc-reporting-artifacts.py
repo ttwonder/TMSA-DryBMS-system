@@ -25,7 +25,10 @@ def pdf_check(entry,state):
    for line in b.get('lines',[]):
     t=''.join(s['text'] for s in line['spans'])
     if line['bbox'][1]<55 or line['bbox'][1]>page.rect.height-55:continue
-    if re.search(r' · (續頁|continued) \d*$',t) or re.fullmatch(r'(項目|Action) \d+ · (續頁|continued)',t):continue
+    if all(s['size']<14.99 for s in line['spans']) and (re.search(r' · (續頁|continued)(?: \d+)?$',t) or re.fullmatch(r'(項目|Action) \d+ · (續頁|continued)',t)):continue
+    # Operational remarks can continue in the middle of a source line. Exclude
+    # only their generated 14pt repeated heading, never 15pt narrative text.
+    if t in ('完整備註','Complete remarks') and all(s['size']<14.99 for s in line['spans']):continue
     text+=t+'\n'
   for trace in page.get_texttrace():
    for ch in trace['chars']:
@@ -112,10 +115,10 @@ def xlsx_check(entry,state):
     if isinstance(c.value,str):assert len(c.value)<=32767 and not re.search(r'\n\s*\n',c.value),('blank lines',c.coordinate)
     if c.value is not None:assert c.data_type!='f' or not operational
  if remarks:
-  sheet=book.worksheets[0];headers=[c.value for c in sheet[4]];assert headers==['對應章節','Item','備註狀態','涉及部門','追蹤人員','完整備註','段次']
+  sheet=book.worksheets[0];headers=[c.value for c in sheet[4]];assert headers==['對應章節','Item','備註狀態','涉及部門','追蹤人員','完整備註']
   for a in state['assessments']:
    if not a.get('remarks','').strip():continue
-   item=next(i for i in state['items'] if i['id']==a['itemId']);rows=[r for r in sheet.iter_rows(min_row=5,values_only=True) if r[1]==item['code']];rows.sort(key=lambda r:r[6]);assert ''.join(r[5] or '' for r in rows)==compact(a['remarks'])
+   item=next(i for i in state['items'] if i['id']==a['itemId']);rows=[r for r in sheet.iter_rows(min_row=5,values_only=True) if r[1]==item['code']];rows.sort(key=lambda r:r[5]);assert ''.join(re.sub(r'^\[\d+/\d+\]\n','',r[5] or '') for r in rows)==compact(a['remarks'])
    names=' / '.join(next((p['name'] for p in state['people'] if p['id']==id),id) for id in a['assigneeIds']) or '—';assert all(r[4]==names for r in rows)
  elif request['kind']=='improvements':
   sheet=book.worksheets[0];progress=book.worksheets[1];allrows=list(sheet.iter_rows(min_row=5,values_only=True));events=list(progress.iter_rows(min_row=5,values_only=True));assert len({r[0] for r in allrows})==len(request['ids'])
@@ -148,7 +151,7 @@ def native_worker(entry):
   for n in range(1,book.Worksheets.Count+1):
    sheet=book.Worksheets(n);r=int(sheet.UsedRange.Rows.Count);c=int(sheet.UsedRange.Columns.Count);sr={'name':sheet.Name,'rows':r,'columns':c}
    if operational and r>4:
-    c=16 if entry['request']['kind']=='improvements' and n==1 else 8 if entry['request']['kind']=='improvements' else 7
+    c=16 if entry['request']['kind']=='improvements' and n==1 else 8 if entry['request']['kind']=='improvements' else 6
     rng=sheet.Range(sheet.Cells(4,1),sheet.Cells(r,c));original=[tuple(sheet.Range(sheet.Cells(i,1),sheet.Cells(i,c)).Value2[0]) for i in range(5,r+1)];key=1 if entry['request']['kind']=='improvements' else 2;value=original[0][key-1]
     assert sheet.AutoFilterMode;assert sheet.AutoFilter.Range.Address==rng.Address
     rng.AutoFilter(Field=key,Criteria1=value);visible=[tuple(sheet.Range(sheet.Cells(i,1),sheet.Cells(i,c)).Value2[0]) for i in range(5,r+1) if not sheet.Rows(i).Hidden]
