@@ -28,6 +28,15 @@ export function appendImprovementEvent(record: Improvement, event: ProgressEvent
   if (!event.content.trim() && event.percent === record.percent && event.status === record.status) return record;
   return { ...record, status: event.status, percent: event.percent, events: [...record.events, event], closedAt: event.status === 'closed' ? event.at : null, closedBy: event.status === 'closed' ? event.by : null };
 }
+// Existing links already passed the server validator. The live compact source
+// owns classification; only unchanged/subset Item links can use that projection.
+// New/relinked actions and unlocated general themes still need the full finding.
+function savedExternalClassification(record: Improvement, state: BrowseState) {
+  const original = state.improvements.find(row => row.id === record.id);
+  if (record.source !== 'external' || record.version < 1 || !original || original.version !== record.version || original.source !== 'external' || original.inspectionId !== record.inspectionId || original.findingId !== record.findingId || original.sourceKey !== record.sourceKey || record.itemIds.some(id => !original.itemIds.includes(id))) return null;
+  const classification = improvementFindingClassification(state, record);
+  return classification === 'general' ? null : classification;
+}
 export function improvementValidation(record: Improvement, ctx: Pick<PageProps, 'state' | 't'>): string {
   const { state, t } = ctx;
   if (!record.title.trim() || !record.content.en.trim() && !record.content.zh.trim()) return t('請填寫標題及改善內容。', 'A title and improvement content are required.');
@@ -35,15 +44,17 @@ export function improvementValidation(record: Improvement, ctx: Pick<PageProps, 
   const inspection = record.source === 'external' ? state.inspections.find(row => row.id === record.inspectionId) : undefined;
   const finding = inspection && 'findings' in inspection ? inspection.findings.find(row => row.id === record.findingId) : undefined;
   const original = state.improvements.find(row => row.id === record.id);
+  const compactClassification = savedExternalClassification(record, state);
+  if (record.source === 'external' && !finding && !compactClassification) return t('來源發現資料尚未載入；草稿保留，請待來源讀取完成後再保存。', 'Source finding details are not loaded; retain the draft and wait for the source read before saving.');
   // Already-imported general themes deliberately have no guessed Item locator.
   // Permit their existing event stream, not creation of arbitrary unlocated cases.
   const importedGeneral = record.version > 0 && original?.source === 'external' && original.inspectionId === record.inspectionId && original.findingId === record.findingId && !original.itemIds.length && inspection?.imported === true && finding?.classification === 'general' && !finding.itemIds.length;
   if (!record.itemIds.length && !importedGeneral && !isCompanyImprovement(record.source)) return t('請選擇至少一個相關條目。', 'Select at least one related item.');
   if (record.source === 'external') {
-    if (!finding || !isActionableFinding(finding.classification) && !importedGeneral) return t('請選擇有效外部檢查及需追蹤的發現，正面觀察或指引不能作為缺失。', 'Select a valid external inspection and actionable finding, not a positive observation or guidance.');
-    if (!record.sourceKey || record.sourceKey !== `${inspection!.id}:${finding.id}`) return t('外部來源識別不完整。', 'The external source identity is incomplete.');
+    if (!isActionableFinding((finding?.classification ?? compactClassification)!) && !importedGeneral) return t('請選擇有效外部檢查及需追蹤的發現，正面觀察或指引不能作為缺失。', 'Select a valid external inspection and actionable finding, not a positive observation or guidance.');
+    if (!record.sourceKey || record.sourceKey !== `${inspection!.id}:${record.findingId}`) return t('外部來源識別不完整。', 'The external source identity is incomplete.');
     if (state.improvements.some(row => row.id !== record.id && (row.sourceKey === record.sourceKey || row.inspectionId === record.inspectionId && row.findingId === record.findingId))) return t('此發現已有改善記錄，請使用既有記錄。', 'This finding already has an improvement; use the existing record.');
-    if (record.itemIds.some(id => !finding.itemIds.includes(id))) return t('外部改善只能關聯此來源發現涉及的Item。', 'External actions can reference only items covered by this finding.');
+    if (finding && record.itemIds.some(id => !finding.itemIds.includes(id))) return t('外部改善只能關聯此來源發現涉及的Item。', 'External actions can reference only items covered by this finding.');
   }
   return '';
 }
@@ -66,6 +77,7 @@ export type InlineImprovementTarget = { itemId: string; action: 'create' | 'prog
 export default function Improvements(ctx: PageProps & { focusId?: string; inlineTarget?: InlineImprovementTarget; onInlineClose?: () => void }) {
   const { t } = ctx;
   const [sourceInspection,setSourceInspection]=useState<Inspection|null>(null);
+  const [sourceError,setSourceError]=useState('');
   const sourceGeneration=useRef(0),sourceOwner=useRef({api:ctx.api,session:ctx.api.sessionToken,actor:ctx.user.id});
   if(sourceOwner.current.api!==ctx.api||sourceOwner.current.session!==ctx.api.sessionToken||sourceOwner.current.actor!==ctx.user.id){sourceGeneration.current++;sourceOwner.current={api:ctx.api,session:ctx.api.sessionToken,actor:ctx.user.id};}
   const state=sourceInspection?withHydratedInspection(ctx.state,sourceInspection):ctx.state;
@@ -94,11 +106,12 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   const controlsLocked = !editor.canSave || editor.lost || editor.pendingUnknown;
   useEffect(()=>{
     const id=draft?.source==='external'?draft.inspectionId:undefined,summary=ctx.state.inspections.find(i=>i.id===id),g=++sourceGeneration.current,owner=sourceOwner.current;
-    if(!summary){setSourceInspection(null);return;}
+    setSourceError('');
+    if(!summary || mode !== 'full' && draft && savedExternalClassification(draft,ctx.state)){setSourceInspection(null);return;}
     const pending=ctx.api.hydrateInspection?ctx.api.hydrateInspection(summary):ctx.api.read().then(s=>s.inspections.find(i=>i.id===id));
-    void pending.then(full=>{if(g===sourceGeneration.current&&owner===sourceOwner.current&&ctx.api.sessionToken===owner.session&&full?.version===summary.version)setSourceInspection(full);}).catch(error=>{if(g===sourceGeneration.current)setValidation(error instanceof Error?error.message:String(error));});
+    void pending.then(full=>{if(g===sourceGeneration.current&&owner===sourceOwner.current&&ctx.api.sessionToken===owner.session&&full?.version===summary.version){setSourceInspection(full);setSourceError('');}}).catch(error=>{if(g===sourceGeneration.current&&owner===sourceOwner.current&&ctx.api.sessionToken===owner.session){const code=error instanceof Error?/^[A-Z][A-Z_0-9]{0,47}(?=:)/.exec(error.message)?.[0]:undefined;setSourceError(t('來源檢查讀取未完成；草稿保留。這是讀取提示，不是保存結果。','Source inspection read incomplete; the draft is retained. This is a read notice, not a save outcome.')+(code?` (${code})`:''));}});
     return()=>{sourceGeneration.current++;};
-  },[draft?.inspectionId,draft?.source,ctx.api,ctx.user.id,ctx.api.sessionToken,ctx.state.inspections]);
+  },[draft?.id,draft?.inspectionId,draft?.source,mode,ctx.api,ctx.user.id,ctx.api.sessionToken,ctx.state.inspections]);
   const detail = state.improvements.find(row => row.id === detailId);
   const statusLabel = (value: Improvement['status']) => value === 'closed' ? t('已結案', 'Closed') : value === 'in_progress' ? t('進行中', 'In progress') : t('待處理', 'Open');
   const urgencyLabel = (value: Improvement['urgency']) => ({ urgent: t('盡快', 'As soon as possible'), high: t('高', 'High'), medium: t('中', 'Medium'), low: t('低', 'Low') }[value]);
@@ -270,7 +283,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
     {ctx.inlineTarget && !draft && !detail && <Modal title={t('改善事項', 'Improvement action')} wide onClose={discard}><EditorNotice error={editor.error || validation} lost={editor.lost} />{!editor.error && !validation && <p>{t('正在準備編輯視窗…', 'Preparing the editor…')}</p>}</Modal>}
     {detail && !draft && <Modal title={t('改善詳情', 'Action detail')} wide onClose={() => { setDetailId(''); ctx.onInlineClose?.(); }}><BilingualText value={improvementTitle(detail.title)} /><BilingualText value={detail.content} compact /><p className="preserve-lines">{t('計劃', 'Plan')}: {compactBlankLines(detail.plan)}</p>{sourceDetails(detail)}{eventList(detail)}{ctx.inlineTarget && can('updateImprovements') && <button className="btn neutral" disabled={editor.busy} onClick={() => void start(detail)}>{t('完整編輯', 'Full edit')}</button>}</Modal>}
     {draft && <Modal title={mode === 'close' ? t('確認結案', 'Confirm close') : mode === 'reopen' ? t('確認重開', 'Confirm reopen') : mode === 'progress' ? t('更新進度', 'Update progress') : draft.version === 0 ? t('新增改善', 'New improvement') : t('編輯改善', 'Edit improvement')} wide onClose={discard}>
-      <EditorNotice error={editor.error || validation} lost={editor.lost} />
+      <EditorNotice error={editor.error || validation || sourceError} lost={editor.lost} />
       {mode === 'progress' && <div className="page-actions improvement-update-actions">{can('updateImprovements') && <button className="btn neutral" disabled={controlsLocked} onClick={() => switchProgressMode('full')}>{t('完整編輯', 'Full edit')}</button>}{can('closeImprovements') && <button className="btn success" disabled={controlsLocked} onClick={() => switchProgressMode('close')}>{t('結案', 'Close')}</button>}</div>}
       {mode === 'close' && <p className="notice">{t('結案會同時標記已經完成作業（100%）；按「確認保存」並獲伺服器確認後，才會同步更新清單。', 'Closing also marks work completed (100%). The lists update only after Confirm save is acknowledged by the server.')}</p>}
       {mode === 'full' ? <div className="form-grid">

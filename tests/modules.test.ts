@@ -58,6 +58,45 @@ const source = (name: string): string => {
   return existsSync(path) ? readFileSync(path, 'utf8') : '';
 };
 
+test('existing external progress validates against authoritative thin source classification without fetching the entire inspection', async () => {
+  const { inspectionSummary } = await import('../src/syncState.ts');
+  for (const classification of ['finding', 'ofi'] as const) {
+    const state = fixture(), inspection = { ...Inspections.createInspectionDraft(state, 'TMSA'), version: 1 };
+    inspection.findings = [finding(state, classification)];
+    const action = { ...Inspections.improvementFromFinding(inspection, inspection.findings[0]), version: 1 };
+    state.inspections = [inspection]; state.improvements = [action];
+    const thin = { ...context(state), state: { ...state, historyMode: 'readonly-summary-v1' as const, controlSummary: { cycles: 0, provenance: 0 }, inspections: [inspectionSummary(inspection)] } };
+    const before = JSON.stringify(thin.state);
+    assert.equal(Improvements.improvementValidation({ ...action, percent: 55, plan: 'Retained source; changed action plan' }, thin), '');
+    assert.equal(JSON.stringify(thin.state), before);
+  }
+});
+
+test('thin external validation remains source-owned and refuses missing, nonactionable, new or relinked cases', async () => {
+  const { inspectionSummary } = await import('../src/syncState.ts');
+  const state = fixture(), inspection = { ...Inspections.createInspectionDraft(state, 'TMSA'), version: 1 };
+  inspection.findings = [finding(state, 'finding')];
+  const action = { ...Inspections.improvementFromFinding(inspection, inspection.findings[0]), version: 1 };
+  state.inspections = [inspection]; state.improvements = [action];
+  const summary = inspectionSummary(inspection);
+  const thin = { ...context(state), state: { ...state, historyMode: 'readonly-summary-v1' as const, controlSummary: { cycles: 0, provenance: 0 }, inspections: [summary] } };
+  for (const classification of ['positive', 'guidance', 'no_finding'] as const) {
+    const invalid = { ...thin, state: { ...thin.state, inspections: [{ ...summary, findingClassifications: { [action.findingId!]: classification } }] } };
+    assert.match(Improvements.improvementValidation(action, invalid), /正面觀察或指引不能作為缺失/);
+  }
+  for (const map of [undefined, {}]) {
+    const missing = { ...thin, state: { ...thin.state, inspections: [{ ...summary, findingClassifications: map }] } };
+    assert.match(Improvements.improvementValidation(action, missing), /尚未載入/);
+  }
+  const otherItem = state.items.find(row => !action.itemIds.includes(row.id))!;
+  for (const candidate of [{ ...action, version: 0 }, { ...action, inspectionId: 'different-source' }, { ...action, findingId: 'different-finding' }, { ...action, sourceKey: 'different-key' }, { ...action, itemIds: [otherItem.id] }]) {
+    assert.notEqual(Improvements.improvementValidation(candidate, thin), '', JSON.stringify(candidate));
+  }
+  assert.notEqual(Improvements.improvementValidation(action, { ...thin, state: { ...thin.state, improvements: [{ ...action, version: 2 }] } }), '');
+  assert.match(Improvements.improvementValidation(action, { ...thin, state: { ...thin.state, improvements: [action, { ...action, id: 'duplicate' }] } }), /已有改善記錄/);
+  assert.notEqual(Improvements.improvementValidation({ ...action, itemIds: [otherItem.id] }, context(state)), '');
+});
+
 test('Observation and OFI both create linked actions without changing their source or grading', () => {
   for (const classification of ['finding', 'ofi'] as const) {
     const state=fixture(),inspection=Inspections.createInspectionDraft(state,'TMSA'),f=finding(state,classification);
