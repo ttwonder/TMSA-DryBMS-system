@@ -154,7 +154,7 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 - 改善正文／計劃在所有完整編輯與inline入口初次顯示用 `compactBlankLines` 投影，保留非空行、縮排及實際換行；原文字未碰時保存metadata仍保留原bytes。只把使用者真正編輯的欄位隨明確保存送出；不每次onChange重排，不破壞Enter／IME／游標，不批洗歷史，不改共用 `useRecordEditor` 或全站 `BilingualText` 預設。已保存events永不改；進度與詳情顯示亦整理空白行。
 - 新增 `016_fpmc_tracking.sql` 及獨立 `fpmc-tracking-readback.sql`；001–015與舊readback不改。016只對已知installed函式作guarded定義延伸，DDL-only，無業務回填，不能偽裝non_external繞過檢核。保留ACL／role、GM對改善及remarks的完整排除、append-only history、fenced lease／CAS／ACK／idempotency。本機原生PostgreSQL演練不等於正式Supabase安裝。
 
-### 第二批：報告（尚未實作，不列本批完成）
+### 第二批：報告（已通過本機驗證與父流程核對，獨立本機交付；未部署）
 
 1. 報告中心待改善項目加入一鍵全選符合篩選結果，並共用來源／提出日期selector；保留明選、窄化與零結果規則。
 2. 條目備註PDF：對應章節、Item、備註狀態、涉及部門、追蹤人員分配於前兩行；第三行全部為備註內容。補上實際該項目的涉及部門／追蹤人員，移除截圖標記的不需要資訊。
@@ -162,6 +162,11 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 4. 可見報告移除快照時間／token／明選筆數說明、技術improvement UUID／v2、findingId／sourceKey／匯入file／rawItem／note等截圖紅框資訊；不得因此刪業務資料、業務來源、歷史或內部權威校驗。關聯編號須辨別業務值與技術ID，不自行造值。
 5. 所有匯出文件整理多餘空白行，保留非空行及原資料；PDF優先，Excel兼顧使用者篩選／排序，不強套PDF合併格造成不可篩選。
 
+6. 報告中心沿原頁面及共享 selector 增加全選／取消全選、source／proposedFrom／proposedTo與改善XLSX；selected、visible及canonical snapshot各自核對，日期不fallback。備註的責任欄取當前保存的assessment assignment，停用歷史姓名仍可讀，不由改善或名冊推算。
+7. 備註PDF前三行為章節／Item／狀態、部門／人員、滿寬全文；改善PDF前三行是真正橫向metadata，第4–6行為滿寬內容／計劃／全部進度，長文可續頁，15pt正文／至少14pt輔助字不變。移除指定技術資訊只作用備註及明選改善的可見內容，不批洗raw、不移除凍結歷史追溯。
+8. Operational Excel採可篩選獨立欄、真日期、完整AutoFilter、凍結表頭及無合併資料區；文件序號／段次串接全文，全部進度另表。一致安全列高避免原生Excel排序後長文被短列裁切；框架自評維持原正式模板／欄位／公式／樣式及續列。
+9. 新增獨立 guarded `017_fpmc_reporting.sql` 與 `fpmc-reporting-readback.sql`，僅將已知post016 performance_dispatch的XLSX allowlist由framework擴為framework或improvements；其餘函式body、角色／grants／ACL、GM排除、明選scope、session、snapshot／audit及資料不變。未知前置／重裝／ACL drift原子拒絕，001–016及舊readback凍結。此為完成已要求Excel的本機工程接續，不是正式SQL授權；正式步驟須分別016核對後017核對，版本未知先唯讀確認，不盲重跑。
+
 ### 新舊條文優先關係
 
-上文舊「改善僅展示去空行／編輯完全顯示原空行」若衝突，以本節的未觸碰保留原bytes＋初次顯示投影為準。舊報告四欄／metadata可見配置、快照／token可見說明與空行規則，將由本節第二批要求取代；本批尚未完成該版面。舊批次「不增加SQL」只描述該批，不限制本次已授權016；角色、歷史不可改、來源與並行保存權威等非衝突條文繼續有效。交付狀態及證據見 `docs/FPMC_TRACKING_DELIVERY.md` 與本機 `qa-evidence/fpmc-tracking/handback.json`。
+上文舊「改善僅展示去空行／編輯完全顯示原空行」若衝突，以本節的未觸碰保留原bytes＋初次顯示投影為準。舊報告四欄／metadata可見配置、快照／token可見說明與空行規則，已由本節第二批候選取代；完成證據以新handback為準。舊批次「不增加SQL」只描述該批，不限制已授權016及本批精確017 seam；角色、歷史不可改、來源與並行保存權威等非衝突條文繼續有效。第一批交付見 `docs/FPMC_TRACKING_DELIVERY.md`／`qa-evidence/fpmc-tracking/handback.json`；第二批見 `docs/FPMC_REPORTING_DELIVERY.md`／`qa-evidence/fpmc-reporting/resumed/handback.json`。根目錄原blocked handback不可覆寫；所有正式執行、Push及部署仍待父流程／使用者另行處理。

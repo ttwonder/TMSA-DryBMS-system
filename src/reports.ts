@@ -1,5 +1,7 @@
 import {PRODUCT_NAME_EN} from './branding.ts';
 import {improvementSourceLabel} from './improvementTracking.ts';
+import {compactBlankLines} from './standardText.ts';
+import {filterImprovementList,type ImprovementListFilters} from './improvementList.ts';
 import {hasItemRemarks,remarksStatusDefinition,remarksStatusLabel} from './itemRemarks.ts';
 import {findingClassificationLabel,improvementFindingClassification} from './findingClassification.ts';
 import type ExcelJS from 'exceljs';
@@ -20,7 +22,7 @@ async function assetBytes(path:string):Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 const tr=(lang:Language,zh:string,en:string)=>lang==='zh'?zh:en;
-export const bilingual=(value:BiText|undefined)=>value?[value.en,value.zh].filter(x=>x!=='').join('\n'):'';
+export const bilingual=(value:BiText|undefined)=>value?compactBlankLines([value.en,value.zh].filter(x=>x!=='').join('\n')):'';
 export function sourceLabel(source:SourceLocator):string {
   return [source.source,source.file,source.sheet,source.cell,source.pages?.length?`p.${source.pages.join(',')}`:'',source.rawItem?`Item ${source.rawItem}`:'',source.note].filter(Boolean).join(' | ');
 }
@@ -42,10 +44,10 @@ export function selectedRemarkRows(state:BrowseState,frameworkId:FrameworkId,cha
     .flatMap(item=>{const assessment=assessmentFor(state,item.id);return assessment&&hasItemRemarks(assessment)?[{chapter,item,assessment}]:[];}));
 }
 const noRemarks=()=>new Error('No remarks in selected chapters / 所選章節沒有已填寫的備註');
-export function selectedImprovementRows(state:BrowseState,ids:string[],filters?:Filters):Improvement[] {
+export function selectedImprovementRows(state:BrowseState,ids:string[],filters?:ImprovementListFilters):Improvement[] {
   if(state.viewScope==='management_viewer')throw new Error('FORBIDDEN');
   if(!ids.length||unique(ids).length!==ids.length) throw new Error('Explicit nonempty improvement selection required / 請明選改善項目');
-  const eligible=filters?filteredImprovements(state,filters):state.improvements;
+  const eligible=filters?filterImprovementList(state,filters):state.improvements;
   const rows=ids.map(id=>eligible.find(row=>row.id===id));
   if(rows.some(row=>!row)) throw new Error('Selected improvement no longer matches authorized scope / 改善已不符合授權或篩選');
   return rows as Improvement[];
@@ -91,6 +93,7 @@ function splitMeasured(text:string,width:number,size:number,name:string,maxLines
   if(!text)return [''];
   const chunks:string[]=[];let chunk='',line='',lines=1;
   for(const char of Array.from(text)) {
+    if(chunk.length+char.length>30000){chunks.push(chunk);chunk='';line='';lines=1;}
     if(char==='\n') {
       if(lines>=maxLines){chunks.push(chunk+char);chunk='';line='';lines=1;continue;}
       chunk+=char;line='';lines++;continue;
@@ -105,8 +108,8 @@ function splitMeasured(text:string,width:number,size:number,name:string,maxLines
   return chunks.length?chunks:[''];
 }
 export function splitExcelBiText(value:BiText,width:number,size=11,name='Noto Sans TC',maxLines=16):{en:string;zh:string;text:string}[] {
-  const en=splitMeasured(value.en,width,size,name,Math.max(1,Math.floor((maxLines-1)/2)));
-  const zh=splitMeasured(value.zh,width,size,name,Math.max(1,Math.floor((maxLines-1)/2)));
+  const en=splitMeasured(compactBlankLines(value.en),width,size,name,Math.max(1,Math.floor((maxLines-1)/2)));
+    const zh=splitMeasured(compactBlankLines(value.zh),width,size,name,Math.max(1,Math.floor((maxLines-1)/2)));
   return Array.from({length:Math.max(en.length,zh.length)},(_,i)=>({en:en[i]??'',zh:zh[i]??'',text:[en[i]??'',zh[i]??''].filter(x=>x!=='').join('\n')}));
 }
 const clone=<T,>(value:T):T=>JSON.parse(JSON.stringify(value)) as T;
@@ -244,35 +247,64 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
   return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
 }
 
+// Operational registers use independent filterable columns, never merged data cells.
+const reportDate=(value:string|null|undefined)=>value?.slice(0,10)??'';
+const excelDate=(value:string|null|undefined):Date|null=>{const day=reportDate(value);return /^\d{4}-\d{2}-\d{2}$/.test(day)?new Date(day+'T00:00:00Z'):null;};
+const improvementStatus=(status:Improvement['status'],lang:Language)=>tr(lang,{open:'開啟',in_progress:'進行中',closed:'結案'}[status],{open:'Open',in_progress:'In progress',closed:'Closed'}[status]);
+const urgencyLabel=(row:Improvement,lang:Language)=>tr(lang,{urgent:'緊急',high:'高',medium:'中',low:'低'}[row.urgency],row.urgency);
+function relatedCodes(state:PlatformState,row:Improvement){return row.itemIds.map(id=>{const item=state.items.find(i=>i.id===id);return item?`${item.frameworkId} ${item.code}`:'—';}).join('\n')||'—';}
+function businessSource(state:PlatformState,row:Improvement,lang:Language){return [improvementSourceLabel(row.source,lang),row.source==='external'?state.inspections.find(i=>i.id===row.inspectionId)?.title:''].filter(Boolean).join('\n');}
+function fullImprovementContent(row:Improvement){const body=compactBlankLines(bilingual(row.content)),title=compactBlankLines(row.title);return title===body||title===compactBlankLines(row.content.en)||title===compactBlankLines(row.content.zh)?body:compactBlankLines(title+'\n'+body);}
+function operationalSheet(book:ExcelJS.Workbook,name:string,headers:string[],widths:number[],description:string){
+ const sheet=book.addWorksheet(name),size=14,fontName='Microsoft JhengHei';
+ widths.forEach((w,i)=>sheet.getColumn(i+1).width=w);
+ sheet.getCell('A1').value=name;sheet.getCell('A1').font={name:fontName,size:18,bold:true};sheet.getRow(1).height=30;
+ sheet.mergeCells(2,1,3,headers.length);sheet.getCell('A2').value=description;sheet.getCell('A2').font={name:fontName,size};sheet.getCell('A2').alignment={wrapText:true,vertical:'top'};sheet.getRow(2).height=28;sheet.getRow(3).height=28;
+ sheet.getRow(4).values=headers;sheet.getRow(4).height=46;
+ headers.forEach((_,i)=>{const cell=sheet.getCell(4,i+1);cell.font={name:fontName,size,bold:true,color:{argb:'FF193447'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE1EAF0'}};});
+ return sheet;
+}
+// The document-local key and numeric part travel with every physical row after any sort.
+// Every short metadata value repeats; unusually long metadata gets ordered parts too.
+function operationalRows(sheet:ExcelJS.Worksheet,values:(string|Date|null|number)[],partColumn:number,narrativeColumns:number[],statusColumn?:number,status?:{background:string;color:string}){
+ const size=14,fontName='Microsoft JhengHei';
+ const chunks=values.map((v,i)=>typeof v==='string'?splitMeasured(compactBlankLines(v),(sheet.getColumn(i+1).width??20)*5.1-20,size,fontName,10):[v]);
+ const count=Math.max(...chunks.map(c=>c.length));
+ for(let part=0;part<count;part++){
+  const cells=chunks.map((parts,i)=>parts.length===1?part&&narrativeColumns.includes(i+1)?'':parts[0]:parts[part]??'');cells[partColumn-1]=part+1;
+  const row=sheet.addRow(cells);let height=32;
+  cells.forEach((v,i)=>{const c=row.getCell(i+1);c.font={name:fontName,size,color:{argb:'FF193447'}};c.alignment={wrapText:true,vertical:'top',shrinkToFit:false};tableBorder(c);if(v instanceof Date)c.numFmt='yyyy-mm-dd';height=Math.max(height,splitMeasured(typeof v==='string'?v:'X',(sheet.getColumn(i+1).width??20)*5.1-20,size,fontName,1).length*size*1.6+18);});
+  if(height>409.5)throw new Error('Operational continuation exceeds Excel row height');// Excel Sort moves values, not physical row heights. A common safe height keeps
+  // every ten-line continuation readable at any sorted position.
+  row.height=Math.max(256,height);
+  if(statusColumn&&status){const c=row.getCell(statusColumn);c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF'+status.background.slice(1)}};c.font={name:fontName,size,bold:true,color:{argb:'FF'+status.color.slice(1)}};}
+ }
+}
+function finishOperationalSheet(sheet:ExcelJS.Worksheet){
+ for(let c=1;c<=sheet.columnCount;c++){tableBorder(sheet.getCell(4,c));sheet.getCell(4,c).alignment={wrapText:true,vertical:'top'};}
+ sheet.views=[{state:'frozen',ySplit:4}];sheet.autoFilter={from:{row:4,column:1},to:{row:Math.max(4,sheet.rowCount),column:sheet.columnCount}};
+ sheet.pageSetup={paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,printTitlesRow:'4:4',printArea:`A1:${sheet.getColumn(sheet.columnCount).letter}${sheet.rowCount}`};sheet.headerFooter={oddFooter:'&LFPMC&C&P / &N'};
+}
 export async function buildRemarksExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[]):Promise<Uint8Array> {
-  const rows=selectedRemarkRows(state,frameworkId,chapterIds);if(!rows.length)throw noRemarks();
-  const Excel=await loadExcel(),book=new Excel.Workbook(),sheet=book.addWorksheet(tr(lang,'條目備註','Item remarks'));
-  const widths=[48,19,44,100],size=14,fontName='Microsoft JhengHei';
-  widths.forEach((width,index)=>sheet.getColumn(index+1).width=width);
-  sheet.mergeCells('A1:D1');sheet.getCell('A1').value=`${frameworkId} · ${tr(lang,'條目備註','Item remarks')}`;sheet.getCell('A1').font={name:fontName,size:18,bold:true};sheet.getRow(1).height=30;
-  sheet.mergeCells('A2:D2');sheet.getCell('A2').value=`${tr(lang,'已保存條目','Saved items')}: ${rows.length} · ${tr(lang,'伺服器快照','Server snapshot')}: ${state.serverTime}`;sheet.getRow(2).height=24;
-  sheet.mergeCells('A3:D3');sheet.getCell('A3').value=tr(lang,'備註狀態為獨立補充判斷，不改變原自評與計分；同 Item 續列保留全文。','Remarks status is independent of assessment/scoring. Continuation rows retain the complete text.');sheet.getRow(3).height=25;
-  const headers=lang==='zh'?['對應章節','Item','備註狀態','備註內容']:['Chapter','Item','Remarks status','Remarks'];sheet.getRow(4).values=headers;sheet.getRow(4).height=26;
-  for(let c=1;c<=4;c++){const cell=sheet.getCell(4,c);cell.font={name:fontName,size,bold:true,color:{argb:'FF193447'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE1EAF0'}};}
-  for(const {chapter,item,assessment} of rows){
-    const values=[`${chapter.code} · ${bilingual(chapter.name)}`,item.code,remarksStatusLabel(assessment.remarksStatus,lang),assessment.remarks??''];
-    const chunks=values.map((text,c)=>splitMeasured(text,widths[c]*5.1-16,size,fontName,14));
-    for(let part=0;part<Math.max(...chunks.map(c=>c.length));part++){
-      const texts=chunks.map((parts,c)=>parts[part]??(c<3&&parts.length===1?values[c]:''));const row=sheet.addRow(texts);
-      row.height=Math.max(26,Math.max(...texts.map((text,c)=>splitMeasured(text,widths[c]*5.1-16,size,fontName,1).length))*size*1.6+16);
-      for(let c=1;c<=4;c++)row.getCell(c).font={name:fontName,size,color:{argb:'FF193447'}};
-      const style=remarksStatusDefinition(assessment.remarksStatus);if(style){row.getCell(3).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF'+style.background.slice(1)}};row.getCell(3).font={name:fontName,size,bold:true,color:{argb:'FF'+style.color.slice(1)}};}
-    }
-  }
-  for(let r=4;r<=sheet.rowCount;r++)for(let c=1;c<=4;c++){const cell=sheet.getCell(r,c);tableBorder(cell);cell.alignment={wrapText:true,vertical:'top'};}
-  for(const r of [2,3])sheet.getCell(r,1).font={name:fontName,size};
-  sheet.views=[{state:'frozen',ySplit:4}];sheet.autoFilter={from:'A4',to:`D${sheet.rowCount}`};
-  sheet.pageSetup={paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,printTitlesRow:'1:4',printArea:`A1:D${sheet.rowCount}`};
-  sheet.headerFooter={oddFooter:`&L${frameworkId} · ${tr(lang,'條目備註','Item remarks')}&C&P / &N`};book.creator=PRODUCT_NAME_EN;
-  return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
+ const rows=selectedRemarkRows(state,frameworkId,chapterIds);if(!rows.length)throw noRemarks();
+ const Excel=await loadExcel(),book=new Excel.Workbook();book.creator=PRODUCT_NAME_EN;
+ const sheet=operationalSheet(book,tr(lang,'條目備註','Item remarks'),lang==='zh'?['對應章節','Item','備註狀態','涉及部門','追蹤人員','完整備註','段次']:['Chapter','Item','Remarks status','Departments','Follow-up people','Complete remarks','Part'],[42,20,42,40,44,100,9],tr(lang,'同 Item 續列保留全文與責任分工；篩選後按 Item、段次排序閱讀。狀態為獨立補充判斷。','Continuation rows retain complete remarks and assignments. After filtering, sort by Item and Part. Status is an independent supplementary assessment.'));
+ for(const {chapter,item,assessment:a} of rows)operationalRows(sheet,[`${chapter.code} · ${bilingual(chapter.name)}`,item.code,remarksStatusLabel(a.remarksStatus,lang),departmentsLabel(state,a.departmentIds??item.departmentIds,lang)||'—',peopleLabel(state,a.assigneeIds??[])||'—',a.remarks??'',1],7,[6],3,remarksStatusDefinition(a.remarksStatus));
+ finishOperationalSheet(sheet);return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
+}
+export async function buildImprovementsExcel(state:PlatformState,ids:string[],lang:Language):Promise<Uint8Array>{
+ const rows=selectedImprovementRows(state,ids),Excel=await loadExcel(),book=new Excel.Workbook();book.creator=PRODUCT_NAME_EN;
+ const description=tr(lang,'文件序號僅供本文件對應，非永久業務編號；同筆全文及計劃分段續列，短欄位重複。按文件序號、段次閱讀；全部進度見進度工作表，按文件序號、事件次序、段次閱讀。','Document numbers link this workbook only, not persistent business IDs. Complete content/plans use continuation rows with repeated short metadata. Read in document number/part order. All events are on Progress; read in document/event/part order.');
+ const sheet=operationalSheet(book,tr(lang,'改善項目','Improvements'),lang==='zh'?['文件序號','標題','提出日期','來源','分類','關聯編號','涉及部門','執行人','急迫度','狀態','最新更新','目標日期','結案日期','完整內容','執行計劃','段次']:['Document no.','Title','Proposed date','Source','Classification','Related codes','Departments','Assignees','Urgency','Status','Updated','Target date','Closed date','Complete content','Plan','Part'],[12,45,18,48,28,30,40,44,14,20,18,18,18,100,85,9],description);
+ const progress=operationalSheet(book,tr(lang,'全部進度','Progress'),lang==='zh'?['文件序號','標題','事件次序','更新日期','更新人','狀態','內容','段次']:['Document no.','Title','Event order','Update date','Updated by','Status','Content','Part'],[12,45,12,18,44,20,100,9],description);
+ rows.forEach((row,i)=>{operationalRows(sheet,[i+1,row.title,excelDate(row.proposedDate),businessSource(state,row,lang),row.source==='external'?findingClassificationLabel(improvementFindingClassification(state,row),lang):'—',relatedCodes(state,row),departmentsLabel(state,row.departmentIds,lang)||'—',peopleLabel(state,row.assigneeIds)||'—',urgencyLabel(row,lang),improvementStatus(row.status,lang),excelDate(row.updatedAt),excelDate(row.targetDate),excelDate(row.closedAt),fullImprovementContent(row),row.plan,1],16,[14,15]);
+  row.events.forEach((event,n)=>operationalRows(progress,[i+1,row.title,n+1,excelDate(event.at),peopleLabel(state,[event.by])||'—',improvementStatus(event.status,lang),event.content,1],8,[7]));
+ });
+ finishOperationalSheet(sheet);finishOperationalSheet(progress);return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
 }
 
 interface PdfRow {key:string;cells:string[];warning?:boolean}
+interface PdfGroupRow {headers:string[];cells:string[];ratios?:number[];statusColumn?:number;status?:{background:string;color:string};entries?:{headers:string[];cells:string[];ratios:number[]}[]}
 const PDF_BODY=15,PDF_AUX=14,PDF_LEADING=23,PDF_PAD=8;
 const PAGE_WIDTH=1190.55,PAGE_HEIGHT=841.89,MARGIN=34,BOTTOM=64;
 class TextPdf {
@@ -285,8 +317,9 @@ class TextPdf {
   private readonly glyphWidths=new Map<string,number>();
   private blockIndex=0;
   private readonly onFieldLine:ReportBuildOptions['onFieldLine'];
-  private constructor(document:PDFDocument,font:PDFFont,fallbacks:PDFFont[],title:string,lang:Language,stamp:string,onFieldLine:ReportBuildOptions['onFieldLine']){this.document=document;this.font=font;this.title=title;this.lang=lang;this.stamp=stamp;this.glyphs=new Set(font.getCharacterSet());this.fallbacks=fallbacks.map(font=>({font,glyphs:new Set(font.getCharacterSet())}));this.onFieldLine=onFieldLine;this.newPage();}
-  static async create(title:string,lang:Language,state:PlatformState,options:ReportBuildOptions) {
+  private readonly operational:boolean;
+  private constructor(document:PDFDocument,font:PDFFont,fallbacks:PDFFont[],title:string,lang:Language,stamp:string,onFieldLine:ReportBuildOptions['onFieldLine'],operational=false){this.operational=operational;this.document=document;this.font=font;this.title=title;this.lang=lang;this.stamp=stamp;this.glyphs=new Set(font.getCharacterSet());this.fallbacks=fallbacks.map(font=>({font,glyphs:new Set(font.getCharacterSet())}));this.onFieldLine=onFieldLine;this.newPage();}
+  static async create(title:string,lang:Language,state:PlatformState,options:ReportBuildOptions,operational=false) {
     const [library,{default:fontkit}]=await Promise.all([import('pdf-lib'),import('@pdf-lib/fontkit')]);
     rgb=library.rgb;
     const document=await library.PDFDocument.create();
@@ -309,10 +342,10 @@ class TextPdf {
     const fallbackBytes=options.fallbackFontBytes??(typeof window!=='undefined'?await Promise.all(['ReportSupplement-Regular.ttf','ReportSymbols-Regular.ttf'].map(name=>assetBytes('fonts/'+name))):[]);
     const fallbacks=await Promise.all(fallbackBytes.map(bytes=>document.embedFont(bytes,{subset:true})));
     document.setTitle(title);document.setAuthor(PRODUCT_NAME_EN);document.setSubject(`Authorized immutable snapshot; selectable text; snapshotToken=${state.snapshotToken}`);
-    return new TextPdf(document,font,fallbacks,title,lang,state.serverTime,options.onFieldLine);
+    return new TextPdf(document,font,fallbacks,title,lang,state.serverTime,options.onFieldLine,operational);
   }
   private safe(text:string):string {
-    const value=text.replace(/\r\n?/g,'\n').replace(/\t/g,'    ').replace(/[\u0095\u0099\u009C]/g,'•');
+    const value=text.replace(new RegExp(String.fromCharCode(13)+'\\n?','g'),'\n').replace(/\t/g,'    ').replace(/[\u0095\u0099\u009C]/g,'•');
     for(const char of value)if(char!=='\n')this.actualFont(char.codePointAt(0)!);
     return value;
   }
@@ -337,7 +370,7 @@ class TextPdf {
   }
   private wrap(text:string,width:number,size=PDF_BODY):string[] {
     const result:string[]=[];
-    for(const paragraph of this.safe(text).split('\n')) {
+    for(const paragraph of this.safe(compactBlankLines(text)).split('\n')) {
       const chars=Array.from(paragraph);
       for(const char of new Set(chars)){const key=`${size}:${char}`;let advance=this.glyphWidths.get(key);if(advance===undefined){advance=this.textWidth(char,size);this.glyphWidths.set(key,advance);}if(advance>width)throw new Error('PDF column cannot fit one glyph');}
       if(!chars.length){result.push('');continue;}
@@ -364,7 +397,7 @@ class TextPdf {
   }
   private newPage() {
     this.page=this.document.addPage([PAGE_WIDTH,PAGE_HEIGHT]);this.y=PAGE_HEIGHT-81;
-    this.draw(tr(this.lang,'FPMC 報告 · 授權快照','FPMC Report · Authorized snapshot'),MARGIN,PAGE_HEIGHT-37,PDF_AUX);
+    this.draw(this.operational?'FPMC':tr(this.lang,'FPMC 報告 · 授權快照','FPMC Report · Authorized snapshot'),MARGIN,PAGE_HEIGHT-37,PDF_AUX);
     this.page.drawLine({start:{x:MARGIN,y:PAGE_HEIGHT-49},end:{x:PAGE_WIDTH-MARGIN,y:PAGE_HEIGHT-49},thickness:1,color:rgb(.65,.71,.77)});
   }
   paragraph(text:string,size=PDF_BODY) {
@@ -433,38 +466,41 @@ class TextPdf {
     }
     this.y-=8;
   }
-  remarksTable(headers:string[],rows:{cells:string[];status?:{background:string;color:string}}[]) {
-    const widths=[.22,.10,.21,.47].map(r=>(PAGE_WIDTH-MARGIN*2)*r),block=this.blockIndex++;
+  groupedTable(key:string,rows:PdfGroupRow[],prefix:string) {
+    const block=this.blockIndex++,width=PAGE_WIDTH-MARGIN*2;
     const color=(hex:string)=>rgb(...(hex.slice(1).match(/../g)!.map(v=>parseInt(v,16)/255) as [number,number,number]));
-    const header=()=>{let x=MARGIN;for(let c=0;c<headers.length;c++){this.page.drawRectangle({x,y:this.y-30,width:widths[c],height:30,color:rgb(.88,.92,.95),borderWidth:.55,borderColor:rgb(.48,.56,.63)});this.draw(headers[c],x+PDF_PAD,this.y-PDF_AUX-6,PDF_AUX);x+=widths[c];}this.y-=30;};
-    const nextPage=()=>{this.newPage();header();};
-    if(this.y-100<BOTTOM)this.newPage();header();
-    for(const [index,row] of rows.entries()){
-      const lines=row.cells.map((text,c)=>this.wrap(text,widths[c]-PDF_PAD*2)),count=Math.max(...lines.map(l=>l.length));
-      const height=count*PDF_LEADING+PDF_PAD*2;
-      if(height<=PAGE_HEIGHT-81-30-BOTTOM&&this.y-height<BOTTOM)nextPage();
-      let offset=0;
-      while(offset<count){
-        if(this.y-PDF_LEADING-PDF_PAD*2<BOTTOM)nextPage();
-        const take=Math.min(count-offset,Math.floor((this.y-BOTTOM-PDF_PAD*2)/PDF_LEADING)),h=take*PDF_LEADING+PDF_PAD*2;let x=MARGIN;
-        for(let c=0;c<headers.length;c++){
-          const style=c===2?row.status:undefined;
-          this.page.drawRectangle({x,y:this.y-h,width:widths[c],height:h,color:style?color(style.background):rgb(1,1,1),borderWidth:.55,borderColor:rgb(.68,.73,.77)});
-          // Repeat short identifiers/status on continuation pages, never truncate a long cell.
-          const part=offset>=lines[c].length&&c<3&&lines[c].length<=take?lines[c]:lines[c].slice(offset,offset+take);
-          for(const [n,line] of part.entries()){const y=this.y-PDF_PAD-PDF_BODY-n*PDF_LEADING;this.draw(line,x+PDF_PAD,y,PDF_BODY,style?color(style.color):rgb(.12,.17,.22));this.onFieldLine?.({fieldId:`remarks:${block}:${index}:${c}`,page:this.document.getPageCount()-1,x:x+PDF_PAD,baseline:PAGE_HEIGHT-y,width:widths[c]-PDF_PAD*2,size:PDF_BODY});}
-          x+=widths[c];
+    const continuation=()=>{this.newPage();this.paragraph(`${key} · ${tr(this.lang,'續頁','continued')}`,PDF_AUX);};
+    if(this.y-110<BOTTOM)this.newPage();
+    for(const [rowIndex,logical] of rows.entries()){
+      const entries=logical.entries??[logical];
+      for(const [entryIndex,row] of entries.entries()){
+        const ratios=row.ratios??row.cells.map(()=>1),total=ratios.reduce((a,b)=>a+b,0),widths=ratios.map(r=>width*r/total);
+        const heads=row.headers.map((t,c)=>this.wrap(t,widths[c]-PDF_PAD*2,PDF_AUX));
+        const headerHeight=Math.max(...heads.map(h=>h.length))*20+8;
+        const lines=row.cells.map((t,c)=>this.wrap(t||'—',widths[c]-PDF_PAD*2));
+        const count=Math.max(...lines.map(l=>l.length));let offset=0;
+        while(offset<count){
+          if(this.y-headerHeight-PDF_LEADING-PDF_PAD*2<BOTTOM)continuation();
+          const available=Math.floor((this.y-BOTTOM-headerHeight-PDF_PAD*2)/PDF_LEADING);
+          const take=Math.min(count-offset,available),height=headerHeight+take*PDF_LEADING+PDF_PAD*2;let x=MARGIN;
+          for(let c=0;c<widths.length;c++){
+            const style=c===logical.statusColumn?logical.status:undefined;
+            this.page.drawRectangle({x,y:this.y-height,width:widths[c],height,color:style?color(style.background):rgb(1,1,1),borderWidth:.6,borderColor:rgb(.55,.63,.7)});
+            heads[c].forEach((h,n)=>this.draw(h,x+PDF_PAD,this.y-PDF_AUX-4-n*20,PDF_AUX));
+            lines[c].slice(offset,offset+take).forEach((line,n)=>{const baseline=this.y-headerHeight-PDF_PAD-PDF_BODY-n*PDF_LEADING;this.draw(line,x+PDF_PAD,baseline,PDF_BODY,style?color(style.color):rgb(.12,.17,.22));this.onFieldLine?.({fieldId:`${prefix}:${block}:${rowIndex}:${entryIndex}:${c}`,page:this.document.getPageCount()-1,x:x+PDF_PAD,baseline:PAGE_HEIGHT-baseline,width:widths[c]-PDF_PAD*2,size:PDF_BODY});});
+            x+=widths[c];
+          }
+          this.y-=height;offset+=take;if(offset<count)continuation();
         }
-        this.y-=h;offset+=take;
       }
     }
-    this.y-=8;
+    this.y-=14;
   }
   async finish():Promise<Uint8Array> {
     const pages=this.document.getPages();
     for(const [index,page] of pages.entries()) {
       page.drawLine({start:{x:MARGIN,y:48},end:{x:PAGE_WIDTH-MARGIN,y:48},thickness:.7,color:rgb(.65,.71,.77)});
-      const label=`${tr(this.lang,'快照','Snapshot')}: ${this.stamp}     ${tr(this.lang,'頁','Page')} ${index+1} / ${pages.length}`;
+      const label=`${this.operational?'':tr(this.lang,'快照','Snapshot')+': '+this.stamp+'     '}${tr(this.lang,'頁','Page')} ${index+1} / ${pages.length}`;
       page.drawText(this.safe(label),{x:MARGIN,y:25,font:this.font,size:PDF_AUX,color:rgb(.25,.32,.38)});
     }
     return this.document.save({useObjectStreams:true});
@@ -504,27 +540,26 @@ export async function buildFrameworkPdf(state:PlatformState,frameworkId:Framewor
   return pdf.finish();
 }
 export async function buildRemarksPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
-  const rows=selectedRemarkRows(state,frameworkId,chapterIds);if(!rows.length)throw noRemarks();
-  const title=`${frameworkId} · ${tr(lang,'條目備註','Item remarks')}`;
-  const pdf=await TextPdf.create(title,lang,state,options);snapshotIntro(pdf,state,lang,title);
-  pdf.paragraph(`${tr(lang,'已保存條目','Saved items')}: ${rows.length}. ${tr(lang,'僅收錄有手動備註文字的啟用條目；備註狀態不改變原自評或計分。','Only active items with manual remarks text are included. Remarks status does not change assessment or scoring.')}`,PDF_AUX);
-  pdf.remarksTable(lang==='zh'?['對應章節','Item','備註狀態','備註內容']:['Chapter','Item','Remarks status','Remarks'],rows.map(({chapter,item,assessment})=>({cells:[`${chapter.code} · ${bilingual(chapter.name)}`,item.code,remarksStatusLabel(assessment.remarksStatus,lang),assessment.remarks??''],status:remarksStatusDefinition(assessment.remarksStatus)})));
-  return pdf.finish();
-}
-function improvementSource(state:PlatformState,row:Improvement,lang:Language) {
-  const inspection=state.inspections.find(i=>i.id===row.inspectionId);
-  return [`${tr(lang,'來源類型','Source type')}: ${improvementSourceLabel(row.source,lang)}`,row.source==='external'?`${tr(lang,'分類','Classification')}: ${findingClassificationLabel(improvementFindingClassification(state,row),lang)}`:'',row.inspectionId?`${tr(lang,'檢查','Inspection')}: ${row.inspectionId} ${inspection?.title??''}`:'',row.findingId?`${tr(lang,'發現編號','Finding ID')}: ${row.findingId}`:'',row.sourceKey?`${tr(lang,'來源去重鍵','Source key')}: ${row.sourceKey}`:'',sourcesText(row.sources)].filter(Boolean).join('\n');
+ const rows=selectedRemarkRows(state,frameworkId,chapterIds);if(!rows.length)throw noRemarks();
+ const title=`${frameworkId} · ${tr(lang,'條目備註','Item remarks')}`,pdf=await TextPdf.create(title,lang,state,options,true);pdf.heading(title);
+ for(const {chapter,item,assessment:a} of rows)pdf.groupedTable(`${frameworkId} ${item.code}`,[
+  {headers:lang==='zh'?['對應章節','Item','備註狀態']:['Chapter','Item','Remarks status'],cells:[`${chapter.code} · ${bilingual(chapter.name)}`,item.code,remarksStatusLabel(a.remarksStatus,lang)],ratios:[4,2,4],statusColumn:2,status:remarksStatusDefinition(a.remarksStatus)},
+  {headers:lang==='zh'?['涉及部門','追蹤人員']:['Departments','Follow-up people'],cells:[departmentsLabel(state,a.departmentIds??item.departmentIds,lang)||'—',peopleLabel(state,a.assigneeIds??[])||'—']},
+  {headers:[tr(lang,'完整備註','Complete remarks')],cells:[a.remarks??'']}
+ ],'remarks');
+ return pdf.finish();
 }
 export async function buildImprovementsPdf(state:PlatformState,ids:string[],lang:Language,title?:string,options:ReportBuildOptions={}):Promise<Uint8Array> {
-  const rows=selectedImprovementRows(state,ids),reportTitle=title??tr(lang,'明選改善項目報告','Explicitly selected improvements');
-  const pdf=await TextPdf.create(reportTitle,lang,state,options);snapshotIntro(pdf,state,lang,reportTitle);
-  pdf.paragraph(`${tr(lang,'明選筆數','Explicit selection')}: ${rows.length}. ${tr(lang,'只含本次明選的授權有效項目；進度事件全部保留。','Only explicitly selected, authorized records; every progress event is retained.')}`,PDF_AUX);
-  const headers=lang==='zh'?['識別 / 狀態 / 來源','關聯項目 / 負責人','事項 / 完整內容','執行計劃 / 期限','全部進度紀錄']:['Identity / Status / Source','Items / Responsible parties','Title / Full content','Plan / Target','All progress events'];
-  pdf.table(headers,[19,16,28,17,25],rows.map(row=>({key:row.id.slice(0,12),cells:[`${row.id}\nv${row.version}\n${tr(lang,'急迫','Urgency')}: ${tr(lang,{urgent:'緊急',high:'高',medium:'中',low:'低'}[row.urgency],row.urgency)}\n${tr(lang,'狀態','Status')}: ${tr(lang,{open:'開啟',in_progress:'進行中',closed:'結案'}[row.status],row.status)} | ${row.percent}%\n${tr(lang,'最近更新','Updated')}: ${row.updatedAt}\n${improvementSource(state,row,lang)}\n${tr(lang,'結案時間 / 執行人','Closed at / by')}: ${row.closedAt??'—'} / ${row.closedBy?peopleLabel(state,[row.closedBy]):'—'}`,
-    `${tr(lang,'關聯編號','Related codes')}:\n${row.itemIds.map(id=>`${state.items.find(i=>i.id===id)?.code??id} [${id}]`).join('\n')}\n${tr(lang,'部門','Departments')}:\n${departmentsLabel(state,row.departmentIds,lang)}\n${tr(lang,'執行人','Assignees')}:\n${peopleLabel(state,row.assigneeIds)}`,
-    `${row.title}\n\n${bilingual(row.content)}`,`${tr(lang,'目標日期','Target date')}: ${row.targetDate||'—'}\n${row.plan}`,
-    row.events.map((event,index)=>`#${index+1} ${event.id}\n${event.at} | ${peopleLabel(state,[event.by])}\n${tr(lang,'狀態','Status')}: ${tr(lang,{open:'開啟',in_progress:'進行中',closed:'結案'}[event.status],event.status)} | ${event.percent}%\n${event.content}`).join('\n\n')||tr(lang,'尚無進度事件','No progress events')]})));
-  return pdf.finish();
+ const rows=selectedImprovementRows(state,ids),reportTitle=title??tr(lang,'明選改善項目報告','Explicitly selected improvements'),pdf=await TextPdf.create(reportTitle,lang,state,options,true);pdf.heading(reportTitle);
+ rows.forEach((row,index)=>pdf.groupedTable(`${tr(lang,'項目','Action')} ${index+1}`,[
+  {headers:lang==='zh'?['急迫度','狀態','最新更新']:['Urgency','Status','Updated'],cells:[urgencyLabel(row,lang),improvementStatus(row.status,lang),reportDate(row.updatedAt)||'—']},
+  {headers:lang==='zh'?['關聯編號','來源','分類','目標日期','結案時間']:['Related codes','Source','Classification','Target date','Closed date'],cells:[relatedCodes(state,row),businessSource(state,row,lang),row.source==='external'?findingClassificationLabel(improvementFindingClassification(state,row),lang):'—',reportDate(row.targetDate)||'—',reportDate(row.closedAt)||'—'],ratios:[2,3,1.8,1.6,1.6]},
+  {headers:lang==='zh'?['涉及部門','執行人']:['Departments','Assignees'],cells:[departmentsLabel(state,row.departmentIds,lang)||'—',peopleLabel(state,row.assigneeIds)||'—']},
+  {headers:[tr(lang,'完整內容','Complete content')],cells:[fullImprovementContent(row)]},
+  {headers:[tr(lang,'執行計劃','Plan')],cells:[row.plan||'—']},
+  row.events.length?{headers:[],cells:[],entries:row.events.map(event=>({headers:lang==='zh'?['全部進度 · 更新日期','更新人','狀態','內容']:['All progress · Date','Updated by','Status','Content'],cells:[reportDate(event.at)||'—',peopleLabel(state,[event.by])||'—',improvementStatus(event.status,lang),event.content||'—'],ratios:[1.7,2,1.5,6]}))}:{headers:[tr(lang,'全部進度','All progress')],cells:[tr(lang,'尚無進度事件','No progress events')]}
+ ],'improvements'));
+ return pdf.finish();
 }
 
 export function inspectionCoverage(inspection:Inspection) {
@@ -613,13 +648,13 @@ export async function downloadOverviewPdf(state:PlatformState,frameworkId:Framew
 /** Convenience gate only: the RPC remains the security authority. */
 export async function authorizeReportSnapshot(ctx:PageProps,request:Omit<ExportRequest,'snapshotToken'>):Promise<PlatformState> {
   if(!hasPermission(ctx.state.settings.rolePermissions,ctx.user,'exportReports'))throw new Error(ctx.t('沒有報告輸出權限','Report export is not permitted'));
-  if(request.kind==='improvements')selectedImprovementRows(ctx.state,request.ids,request.filters as Filters|undefined);
+  if(request.kind==='improvements')selectedImprovementRows(ctx.state,request.ids,request.filters as ImprovementListFilters|undefined);
   else if(request.kind==='inspection'){if(request.ids.length!==1||!ctx.state.inspections.some(i=>i.id===request.ids[0]))throw new Error(ctx.t('請選取有效檢查','Choose a valid inspection'));}
   else {if(!request.frameworkId)throw new Error('Framework ID required');selectedChapters(ctx.state,request.frameworkId,request.ids);}
-  if(request.format==='xlsx'&&request.kind!=='framework')throw new Error('XLSX supports framework reports only');
+  if(request.format==='xlsx'&&request.kind!=='framework'&&request.kind!=='improvements')throw new Error('XLSX supports framework and improvement reports only');
   const canonical=await ctx.api.authorizeExport({...request,snapshotToken:ctx.state.snapshotToken});
   if(!canonical?.snapshotToken||!canonical.serverTime)throw new Error(ctx.t('伺服器未提供有效報告快照','Server did not return a valid report snapshot'));
-  if(request.kind==='improvements')selectedImprovementRows(canonical,request.ids,request.filters as Filters|undefined);
+  if(request.kind==='improvements')selectedImprovementRows(canonical,request.ids,request.filters as ImprovementListFilters|undefined);
   else if(request.kind==='inspection'){if(!canonical.inspections.some(i=>i.id===request.ids[0]))throw new Error('Inspection absent from authorized snapshot');}
   else selectedChapters(canonical,request.frameworkId!,request.ids);
   return canonical;
