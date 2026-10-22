@@ -58,6 +58,27 @@ const source = (name: string): string => {
   return existsSync(path) ? readFileSync(path, 'utf8') : '';
 };
 
+test('milestones: original progress event helper rejects a competing manual percentage and preserves achieved facts on reopen', () => {
+  const state=fixture(),inspection=Inspections.createInspectionDraft(state,'TMSA'),base={...Inspections.improvementFromFinding(inspection,finding(state)),milestones:[{id:'stage-a',goal:'Review procedure',plannedDate:'2026-11-10',achievedDate:''}],percent:0};
+  assert.throws(()=>Improvements.appendImprovementEvent(base,{id:'m-close',at:'2026-10-23T01:00:00Z',by:'owner',content:'Attempted close',status:'closed',percent:100}),/MILESTONE/);
+  const done={...base,status:'closed' as const,percent:100,milestones:[{...base.milestones[0],achievedDate:'2026-11-11'}]};
+  assert.throws(()=>Improvements.appendImprovementEvent(done,{id:'m-reopen-zero',at:'2026-10-23T01:00:00Z',by:'owner',content:'Reopen',status:'open',percent:0}),/MILESTONE/);
+  const reopened=Improvements.appendImprovementEvent(done,{id:'m-reopen',at:'2026-10-23T01:00:00Z',by:'owner',content:'Reopen',status:'open',percent:100});
+  assert.equal(reopened.percent,100);assert.deepEqual(reopened.milestones,done.milestones);
+});
+test('milestones: original overview renders achieved-stage progress, not a competing cached percentage',async()=>{
+  const state=fixture(),inspection=Inspections.createInspectionDraft(state,'TMSA');state.improvements=[{...Inspections.improvementFromFinding(inspection,finding(state)),status:'in_progress',percent:87,milestones:[{id:'a',goal:'Done',plannedDate:'2026-11-10',achievedDate:'2026-11-10'},{id:'b',goal:'Pending',plannedDate:'2026-11-20',achievedDate:''}]}];
+  const {default:Overview}=await import('../src/Overview.tsx');const html=renderToStaticMarkup(createElement(Overview,context(state)));assert.match(html,/50%/);assert.doesNotMatch(html,/87%/);
+});
+
+test('milestones: original save validation refuses closing an unfinished stage instead of manufacturing 100%', () => {
+  const state=fixture(),inspection=Inspections.createInspectionDraft(state,'TMSA');
+  const action={...Inspections.improvementFromFinding(inspection,finding(state)),source:'company_safety_meeting' as const,inspectionId:undefined,findingId:undefined,sourceKey:undefined,sources:[],itemIds:[],status:'closed' as const,percent:100,milestones:[{id:'stage-a',goal:'Review procedure',plannedDate:'2026-11-10',achievedDate:''}]};
+  assert.notEqual(Improvements.improvementValidation(action,context(state)),'','An unfinished milestone must block close');
+  const {milestones,...legacy}=action;
+  assert.equal(Improvements.improvementValidation(legacy,context(state)),'','Legacy manual close must retain its existing validation');
+});
+
 test('hierarchical links: chapter-only self-proposed actions validate without expanding items', () => {
   const state=fixture(),inspection=Inspections.createInspectionDraft(state,'TMSA');
   const action={...Inspections.improvementFromFinding(inspection,finding(state)),source:'non_external' as const,inspectionId:undefined,findingId:undefined,sourceKey:undefined,sources:[],itemIds:[],chapterIds:[state.chapters[0].id,state.chapters.find(c=>c.frameworkId==='DRYBMS')!.id]};

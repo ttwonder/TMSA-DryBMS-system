@@ -14,6 +14,8 @@ const EMPTY_REFERENCE_IDS: string[] = [];
 import { useRecordEditor } from './useRecordEditor';
 import { withHydratedInspection } from './syncState';
 import { STANDALONE_IMPROVEMENT_SOURCES, isStandaloneImprovement, improvementSourceLabel, localToday, validProposedDate, latestImprovementEvent } from './improvementTracking';
+import { checkpointMilestones, improvementPercent, milestoneHistoryIssue, milestoneRecordIssue, milestoneSummary } from './improvementMilestones';
+import { MilestoneEditor, MilestoneView, milestoneErrorText } from './ImprovementMilestones.tsx';
 import {findingClassificationLabel, improvementFindingClassification, isActionableFinding} from './findingClassification';
 
 // The persisted title remains a string; a newline separates EN and ZH.
@@ -29,6 +31,7 @@ export function effectiveSelection(selected: string[], visible: Improvement[]): 
 export function appendImprovementEvent(record: Improvement, event: ProgressEvent): Improvement {
   if (!Number.isInteger(event.percent) || event.percent < 0 || event.percent > 100) throw new Error('INVALID_PERCENT');
   if (record.events.some(old => old.id === event.id)) throw new Error('DUPLICATE_EVENT');
+  if (record.milestones?.length && (event.percent !== improvementPercent(record) || event.status === 'closed' && event.percent !== 100)) throw new Error('INVALID_MILESTONE_PROGRESS');
   if (isRichTextEmpty(event.content) && event.percent === record.percent && event.status === record.status) return record;
   return { ...record, status: event.status, percent: event.percent, events: [...record.events, event], closedAt: event.status === 'closed' ? event.at : null, closedBy: event.status === 'closed' ? event.by : null };
 }
@@ -45,6 +48,8 @@ export function improvementValidation(record: Improvement, ctx: Pick<PageProps, 
   const { state, t } = ctx;
   if (isRichTextEmpty(record.title) || isRichTextEmpty(record.content.en) && isRichTextEmpty(record.content.zh)) return t('請填寫標題及改善內容。', 'A title and improvement content are required.');
   if (record.proposedDate !== undefined && !validProposedDate(record.proposedDate)) return t('提出日期須為有效日期。', 'Proposed date must be a valid date.');
+  const milestoneIssue = milestoneRecordIssue(record);
+  if (milestoneIssue) return milestoneIssue === 'MILESTONES_INCOMPLETE' ? t('尚有未達成階段，不能結案。', 'Complete all milestones before closing.') : t('請核對階段目標、有效日期及自動完成率。', 'Check milestone goals, valid dates and calculated completion.');
   const chapterIds = record.chapterIds === undefined ? [] : record.chapterIds;
   if (!Array.isArray(chapterIds) || chapterIds.some(id => typeof id !== 'string' || !state.chapters.some(chapter => chapter.id === id)) || new Set(chapterIds).size !== chapterIds.length) return t('關聯章節不正確，請重新核對。', 'Check the related chapters.');
   const inspection = record.source === 'external' ? state.inspections.find(row => row.id === record.inspectionId) : undefined;
@@ -98,6 +103,8 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   const previousIncompletePercent = useRef(0);
   const [validation, setValidation] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [milestoneActionPending, setMilestoneActionPending] = useState(false);
+  const milestoneSubmission = useRef<{record:Improvement;intent:SaveIntent}|null>(null);
   const [detailId, setDetailId] = useState('');
   const handledFocus = useRef('');
   const visible = useMemo(() => filterImprovementList(state, filters), [state, filters]);
@@ -110,6 +117,10 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   const can = (cap: Parameters<typeof hasPermission>[2]) => hasPermission(state.settings.rolePermissions, ctx.user, cap);
   const draft = editor.draft;
   const controlsLocked = !editor.canSave || editor.lost || editor.pendingUnknown;
+  const milestoneBase = editor.getBase();
+  const milestoneChanges = !!draft && !!milestoneBase && (JSON.stringify(draft.milestones ?? []) !== JSON.stringify(milestoneBase.milestones ?? []) || JSON.stringify(draft.milestoneEvents ?? []) !== JSON.stringify(milestoneBase.milestoneEvents ?? []));
+  const milestoneIncomplete = !!draft?.milestones?.length && improvementPercent(draft) !== 100;
+  const setMilestoneDraft = (value: Improvement) => editor.setDraft({...value, events:value.events.map(event=>event.id===stagedId?{...event,percent:improvementPercent(value)}:event)});
   useEffect(()=>{
     const id=draft?.source==='external'?draft.inspectionId:undefined,summary=ctx.state.inspections.find(i=>i.id===id),g=++sourceGeneration.current,owner=sourceOwner.current;
     setSourceError('');
@@ -138,7 +149,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   const changeDepartments = useCallback((departmentIds: string[]) => patch({ departmentIds }), [patch]);
   const changeAssignees = useCallback((assigneeIds: string[]) => patch({ assigneeIds }), [patch]);
   const changeTitle = (lang: 'en' | 'zh', value: string) => { if (draft) { const parts = improvementTitle(draft.title); parts[lang] = value; patch({ title: `${parts.en}\n${parts.zh}` }); } };
-  const discard = () => { if (editor.busy) return; if (!editor.isDirty || window.confirm(t('放棄此草稿？取消不會保存。', 'Discard this draft? Cancel does not save.'))) void editor.cancel().then(() => ctx.onInlineClose?.()); };
+  const discard = () => { if (editor.busy) return; if (!editor.isDirty && !milestoneActionPending || window.confirm(t('放棄此草稿？取消不會保存。', 'Discard this draft? Cancel does not save.'))) void editor.cancel().then(() => ctx.onInlineClose?.()); };
 
   useEffect(() => {
     if (ctx.inlineTarget) return;
@@ -153,7 +164,9 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   }, [ctx.focusId, ctx.inlineTarget, state.improvements, state.items]);
 
   const start = async (record: Improvement, nextMode: typeof mode = 'full') => {
-    setValidation(''); setMode(nextMode); setStagedId('');
+    setValidation('');
+    if (nextMode === 'close' && record.milestones?.length && improvementPercent(record) !== 100) { setValidation(t('尚有未達成階段，不能結案。', 'Complete all milestones before closing.')); return; }
+    setMode(nextMode); setStagedId(''); setMilestoneActionPending(false); milestoneSubmission.current=null;
     if (!await editor.open(record, nextMode === 'close' ? 'close' : nextMode === 'reopen' ? 'reopen' : 'update')) return;
     if (nextMode !== 'full') {
       const eventId = crypto.randomUUID(); setStagedId(eventId);
@@ -161,7 +174,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
         if (!current) return current;
         previousIncompletePercent.current = current.percent < 100 ? current.percent : 0;
         const status = nextMode === 'close' ? 'closed' : nextMode === 'reopen' ? 'open' : current.status;
-        const event: ProgressEvent = { id: eventId, at: isoNow(), by: ctx.user.id, content: '', status, percent: nextMode === 'close' ? 100 : nextMode === 'reopen' ? 0 : current.percent };
+        const event: ProgressEvent = { id: eventId, at: isoNow(), by: ctx.user.id, content: '', status, percent: current.milestones?.length ? improvementPercent(current) : nextMode === 'close' ? 100 : nextMode === 'reopen' ? 0 : current.percent };
         return { ...current, status, percent: event.percent, events: [...current.events, event], closedAt: status === 'closed' ? event.at : null, closedBy: status === 'closed' ? ctx.user.id : null };
       });
     }
@@ -207,25 +220,43 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
     });
   };
   const switchProgressMode = (nextMode: 'full' | 'close') => {
-    if (mode !== 'progress' || controlsLocked || !can(nextMode === 'close' ? 'closeImprovements' : 'updateImprovements')) return;
+    if (mode !== 'progress' || controlsLocked || milestoneActionPending || !can(nextMode === 'close' ? 'closeImprovements' : 'updateImprovements')) return;
+    if (nextMode === 'close' && (milestoneIncomplete || milestoneChanges)) { setValidation(t('請先達成全部階段並確認保存，再結案。', 'Achieve all milestones and save the changes before closing.')); return; }
     // Keep the current lease, draft and staged event; start/open would discard them.
     if (nextMode === 'close') updateStaged({ status: 'closed', percent: 100 });
     setValidation('');
     setMode(nextMode);
   };
   const submit = async () => {
-    if (!draft) return;
-    const issue = improvementValidation(draft, {...ctx,state});
-    const event = draft.events.find(row => row.id === stagedId);
+    if (!draft || !editor.canSave || milestoneActionPending) return;
+    // A checkpoint allocates event IDs. Unknown ACK must replay the identical
+    // submitted body, not regenerate a plan event and therefore a new operation.
+    if(editor.pendingUnknown && milestoneSubmission.current) {
+      const pending=milestoneSubmission.current;
+      if(await editor.save(pending.intent,{record:pending.record}))ctx.onInlineClose?.();
+      return;
+    }
+    const original=editor.getBase(); if(!original)return;
+    let prepared:Improvement;
+    try { prepared=checkpointMilestones(original,{...draft,percent:improvementPercent(draft)},()=>({id:crypto.randomUUID(),at:isoNow(),by:ctx.user.id})); }
+    catch(error) { setValidation(milestoneErrorText(error instanceof Error?error.message:'',ctx.lang)); return; }
+    const historyIssue=milestoneHistoryIssue(original,prepared);
+    if(historyIssue){setValidation(t('階段歷史不一致，草稿保留，請重新核對。','Milestone history is inconsistent; draft retained. Please review.'));return;}
+    const issue = improvementValidation(prepared, {...ctx,state});
+    const rawEvent = prepared.events.find(row => row.id === stagedId);
+    const event = rawEvent ? {...rawEvent,percent:improvementPercent(prepared)} : undefined;
     if (issue) { setValidation(issue); return; }
-    let submitted=draft;
+    if(original.version>0 && !original.milestones?.length && prepared.milestones?.length && !editor.pendingUnknown && !window.confirm(t(`將從手動進度 ${original.percent}% 切換為階段達成率 ${prepared.percent}%。確認保存？`,`Switch from manual progress ${original.percent}% to milestone completion ${prepared.percent}%? Confirm save?`)))return;
+    let submitted=prepared;
     if (event) {
-      const original=editor.getBase();if(!original)return;
-      try { submitted=appendImprovementEvent({ ...draft,status:original.status,percent:original.percent,closedAt:original.closedAt,closedBy:original.closedBy,events:draft.events.filter(row=>row.id!==stagedId) },event); }
+      try { submitted=appendImprovementEvent({ ...prepared,status:original.status,percent:original.percent,closedAt:original.closedAt,closedBy:original.closedBy,events:prepared.events.filter(row=>row.id!==stagedId) },event); }
+
       catch { setValidation(t('完成百分比須為0–100的整數。', 'Completion must be an integer between 0 and 100.')); return; }
       if(JSON.stringify(submitted)===JSON.stringify(original)){setValidation(t('沒有變更；未建立進度事件。','No changes; no progress event was created.'));return;}
     }
+    if(submitted.milestones?.length)submitted={...submitted,percent:improvementPercent(submitted)};
     const intent: SaveIntent = draft.version === 0 ? 'create' : mode === 'close' ? 'close' : mode === 'reopen' ? 'reopen' : 'update';
+    milestoneSubmission.current={intent,record:submitted};
     if (await editor.save(intent,{record:submitted})) ctx.onInlineClose?.();
   };
   const exportPdf = async () => {
@@ -283,25 +314,29 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
     </div>
     {filters.itemId && <div className="notice">{t('限定相關Item；新增改善將預填此Item', 'Filtered to related item; new actions prefill this item')}: {state.items.find(row => row.id === filters.itemId)?.code || filters.itemId} <button className="btn neutral" onClick={() => setFilters(old => ({ ...old, itemId: undefined }))}>{t('取消Item限定', 'Clear item scope')}</button></div>}
     <div className="list-selection-summary"><span>{t('符合篩選', 'Matching')}: {visible.length} · {t('已選', 'Selected')}: {ids.length}</span><button className="btn neutral small" onClick={() => setSelected([])}>{t('取消全部勾選', 'Clear selection')}</button><span className="list-hint">{t('清單顯示全文；點標題查看詳情', 'Full content shown; open the title for details')}</span></div>
-    <EditorNotice error={draft ? '' : editor.error} lost={editor.lost} />
+    <EditorNotice error={draft ? '' : editor.error || validation} lost={editor.lost} />
     <div ref={pageTop}>{pagination('top')}</div>
-    {!visible.length ? <Empty>{t('沒有符合篩選的改善記錄。', 'No matching improvement records.')}</Empty> : <div className="table-wrap"><table className="data-table improvement-table"><thead><tr><th>{t('選取', 'Select')}</th><th>{t('內容／關聯章節及Item', 'Action / related chapters and items')}</th><th>{t('跟進資訊／操作', 'Follow-up / actions')}</th></tr></thead><tbody>{paged.rows.map(record => <tr key={record.id}><td><input type="checkbox" aria-label={`${t('選取', 'Select')} ${richTextToPlainText(record.title)}`} checked={ids.includes(record.id)} onChange={event => { const checked = event.target.checked; setSelected(old => checked ? [...old, record.id] : old.filter(id => id !== record.id)); }} /></td><td><button className="text-button" onClick={() => setDetailId(record.id)}><BilingualText value={improvementTitle(record.title)} /></button><div className="improvement-content"><BilingualText value={record.content} compact /></div><div className="improvement-origin">{improvementSourceLabel(record.source, ctx.lang)} · {t('提出日期', 'Proposed date')}: {record.proposedDate || t('未填', 'Not entered')}</div>{classification(record)}<div className="improvement-plan"><small>{t('執行計劃', 'Action plan')}</small><p className="preserve-lines"><RichText value={record.plan||'—'} compact inline/></p></div>{latestProgress(record)}<div className="item-references">{chapterLinks(record)}{record.itemIds.map(id => <button key={id} className="btn neutral" onClick={() => { const item = state.items.find(row => row.id === id); if (item) ctx.navigate(item.frameworkId, id); }}>{openIssuesFor(state, id).length > 0 ? '⭐ ' : ''}{state.items.find(item => item.id === id)?.code || id}</button>)}</div></td><td className="improvement-metadata">
+    {!visible.length ? <Empty>{t('沒有符合篩選的改善記錄。', 'No matching improvement records.')}</Empty> : <div className="table-wrap"><table className="data-table improvement-table"><thead><tr><th>{t('選取', 'Select')}</th><th>{t('內容／關聯章節及Item', 'Action / related chapters and items')}</th><th>{t('跟進資訊／操作', 'Follow-up / actions')}</th></tr></thead><tbody>{paged.rows.map(record => <tr key={record.id}><td><input type="checkbox" aria-label={`${t('選取', 'Select')} ${richTextToPlainText(record.title)}`} checked={ids.includes(record.id)} onChange={event => { const checked = event.target.checked; setSelected(old => checked ? [...old, record.id] : old.filter(id => id !== record.id)); }} /></td><td><button className="text-button" onClick={() => setDetailId(record.id)}><BilingualText value={improvementTitle(record.title)} /></button><div className="improvement-content"><BilingualText value={record.content} compact /></div><div className="improvement-origin">{improvementSourceLabel(record.source, ctx.lang)} · {t('提出日期', 'Proposed date')}: {record.proposedDate || t('未填', 'Not entered')}</div>{classification(record)}<div className="improvement-plan"><small>{t('執行計劃', 'Action plan')}</small><p className="preserve-lines"><RichText value={record.plan||'—'} compact inline/></p></div>{record.milestones?.length ? <p className="milestone-list-summary">{milestoneSummary(record,ctx.lang)}</p> : null}{latestProgress(record)}<div className="item-references">{chapterLinks(record)}{record.itemIds.map(id => <button key={id} className="btn neutral" onClick={() => { const item = state.items.find(row => row.id === id); if (item) ctx.navigate(item.frameworkId, id); }}>{openIssuesFor(state, id).length > 0 ? '⭐ ' : ''}{state.items.find(item => item.id === id)?.code || id}</button>)}</div></td><td className="improvement-metadata">
       <div className="improvement-meta-group"><small>{t('部門／執行人', 'Departments / assignees')}</small><div>{departmentsLabel(state, record.departmentIds, ctx.lang)}{record.assigneeIds.length > 0 && <><br />{peopleLabel(state, record.assigneeIds)}</>}</div></div>
-      <div className="improvement-meta-group"><small>{t('狀態／急迫程度', 'Status / urgency')}</small><div className="improvement-status-line"><span className={`status-pill ${record.status}`}>{statusLabel(record.status)}</span><span className={`urgency ${record.urgency}`}>{urgencyLabel(record.urgency)}</span><span>{record.percent}%</span></div></div>
+      <div className="improvement-meta-group"><small>{t('狀態／急迫程度', 'Status / urgency')}</small><div className="improvement-status-line"><span className={`status-pill ${record.status}`}>{statusLabel(record.status)}</span><span className={`urgency ${record.urgency}`}>{urgencyLabel(record.urgency)}</span><span>{improvementPercent(record)}%</span></div></div>
       <div className="improvement-meta-group"><small>{t('目標／記錄更新', 'Target / record updated')}</small><div>{record.targetDate || '—'}<br /><small>{record.updatedAt}</small></div></div>
       <div className="improvement-meta-group"><small>{t('操作', 'Actions')}</small><div className="page-actions">{can('updateImprovements') && record.status !== 'closed' && <button className="btn primary" disabled={!!draft || editor.busy} onClick={() => void start(record, 'progress')}>{t('直接更新', 'Update progress')}</button>}{can('updateImprovements') && <button className="btn neutral" disabled={!!draft || editor.busy} onClick={() => void start(record)}>{t('完整編輯', 'Full edit')}</button>}{can('closeImprovements') && <button className={`btn ${record.status === 'closed' ? 'warning' : 'success'}`} disabled={!!draft || editor.busy} onClick={() => void start(record, record.status === 'closed' ? 'reopen' : 'close')}>{record.status === 'closed' ? t('重開', 'Reopen') : t('結案', 'Close')}</button>}</div></div>
     </td></tr>)}</tbody></table></div>}
     {visible.length > 0 && pagination('bottom')}
     </>}
     {ctx.inlineTarget && !draft && !detail && <Modal title={t('改善事項', 'Improvement action')} wide onClose={discard}><EditorNotice error={editor.error || validation} lost={editor.lost} />{!editor.error && !validation && <p>{t('正在準備編輯視窗…', 'Preparing the editor…')}</p>}</Modal>}
-    {detail && !draft && <Modal title={t('改善詳情', 'Action detail')} wide onClose={() => { setDetailId(''); ctx.onInlineClose?.(); }}><BilingualText value={improvementTitle(detail.title)} /><BilingualText value={detail.content} compact /><p className="preserve-lines">{t('計劃', 'Plan')}: <RichText value={detail.plan} compact inline/></p>{sourceDetails(detail)}{eventList(detail)}{ctx.inlineTarget && can('updateImprovements') && <button className="btn neutral" disabled={editor.busy} onClick={() => void start(detail)}>{t('完整編輯', 'Full edit')}</button>}</Modal>}
+    {detail && !draft && <Modal title={t('改善詳情', 'Action detail')} wide onClose={() => { setDetailId(''); ctx.onInlineClose?.(); }}><BilingualText value={improvementTitle(detail.title)} /><BilingualText value={detail.content} compact /><p className="preserve-lines">{t('計劃', 'Plan')}: <RichText value={detail.plan} compact inline/></p><MilestoneView record={detail} lang={ctx.lang} people={state.people}/>{sourceDetails(detail)}{eventList(detail)}{ctx.inlineTarget && can('updateImprovements') && <button className="btn neutral" disabled={editor.busy} onClick={() => void start(detail)}>{t('完整編輯', 'Full edit')}</button>}</Modal>}
     {draft && <Modal title={mode === 'close' ? t('確認結案', 'Confirm close') : mode === 'reopen' ? t('確認重開', 'Confirm reopen') : mode === 'progress' ? t('更新進度', 'Update progress') : draft.version === 0 ? t('新增改善', 'New improvement') : t('編輯改善', 'Edit improvement')} wide onClose={discard}>
       <EditorNotice error={editor.error || validation || sourceError} lost={editor.lost} />
-      {mode === 'progress' && <div className="page-actions improvement-update-actions">{can('updateImprovements') && <button className="btn neutral" disabled={controlsLocked} onClick={() => switchProgressMode('full')}>{t('完整編輯', 'Full edit')}</button>}{can('closeImprovements') && <button className="btn success" disabled={controlsLocked} onClick={() => switchProgressMode('close')}>{t('結案', 'Close')}</button>}</div>}
-      {mode === 'close' && <p className="notice">{t('結案會同時標記已經完成作業（100%）；按「確認保存」並獲伺服器確認後，才會同步更新清單。', 'Closing also marks work completed (100%). The lists update only after Confirm save is acknowledged by the server.')}</p>}
+      {mode === 'progress' && <div className="page-actions improvement-update-actions">{can('updateImprovements') && <button className="btn neutral" disabled={controlsLocked || milestoneActionPending} onClick={() => switchProgressMode('full')}>{t('完整編輯', 'Full edit')}</button>}{can('closeImprovements') && <button className="btn success" disabled={controlsLocked || milestoneActionPending || milestoneIncomplete || milestoneChanges} title={milestoneIncomplete || milestoneChanges ? t('請先達成全部階段並保存','Achieve and save all milestones first') : ''} onClick={() => switchProgressMode('close')}>{t('結案', 'Close')}</button>}</div>}
+      {mode === 'close' && <p className="notice">{draft.milestones?.length ? t('全部階段已達成；結案不改寫階段及實際日期，按「確認保存」才生效。','All milestones are achieved. Closing preserves stages and actual dates; Confirm save is required.') : t('結案會同時標記已經完成作業（100%）；按「確認保存」並獲伺服器確認後，才會同步更新清單。', 'Closing also marks work completed (100%). The lists update only after Confirm save is acknowledged by the server.')}</p>}
+      {mode === 'reopen' && !!draft.milestones?.length && <p className="notice">{t('重開保留所有已達成階段及日期；保存後需要時再撤銷達成或新增階段。','Reopening retains achieved milestones and dates. After saving, revoke achievements or add milestones if needed.')}</p>}
       {mode === 'full' ? <div className="form-grid">
-        <label className="field">{t('標題（英文）', 'Title (English)')}<RichTextEditor disabled={controlsLocked} singleLine lang={ctx.lang} value={improvementTitle(draft.title).en} onChange={value => changeTitle('en', value)} /></label><label className="field">{t('標題（繁中）', 'Title (Traditional Chinese)')}<RichTextEditor disabled={controlsLocked} singleLine lang={ctx.lang} value={improvementTitle(draft.title).zh} onChange={value => changeTitle('zh', value)} /></label>
-        <label className="field">{t('內容（英文）', 'Content (English)')}<ImprovementTextarea disabled={controlsLocked} lang={ctx.lang} key={`${draft.id}:en`} rows={5} value={draft.content.en} onChange={en => patch({ content: { ...draft.content, en } })} /></label><label className="field">{t('內容（繁中）', 'Content (Traditional Chinese)')}<ImprovementTextarea disabled={controlsLocked} lang={ctx.lang} key={`${draft.id}:zh`} rows={5} value={draft.content.zh} onChange={zh => patch({ content: { ...draft.content, zh } })} /></label>
+        <div className="improvement-narrative-fields">
+          <label className="field">{t('標題（英文）', 'Title (English)')}<RichTextEditor disabled={controlsLocked} singleLine lang={ctx.lang} value={improvementTitle(draft.title).en} onChange={value => changeTitle('en', value)} /></label><label className="field">{t('標題（繁中）', 'Title (Traditional Chinese)')}<RichTextEditor disabled={controlsLocked} singleLine lang={ctx.lang} value={improvementTitle(draft.title).zh} onChange={value => changeTitle('zh', value)} /></label>
+          <label className="field full-width">{t('內容（英文）', 'Content (English)')}<ImprovementTextarea disabled={controlsLocked} lang={ctx.lang} key={`${draft.id}:en`} rows={3} value={draft.content.en} onChange={en => patch({ content: { ...draft.content, en } })} /></label>
+          <label className="field full-width">{t('內容（繁中）', 'Content (Traditional Chinese)')}<ImprovementTextarea disabled={controlsLocked} lang={ctx.lang} key={`${draft.id}:zh`} rows={3} value={draft.content.zh} onChange={zh => patch({ content: { ...draft.content, zh } })} /></label>
+        </div>
         <ImprovementReferencePicker key={draft.id} {...pickerScope} chapterIds={draft.chapterIds ?? EMPTY_REFERENCE_IDS} itemIds={draft.itemIds} lang={ctx.lang} disabled={controlsLocked} onChange={changeReferences} />
         <ImprovementMultiSelect label={t('負責部門', 'Responsible departments')} options={formDepartments} selected={draft.departmentIds} onChange={changeDepartments} /><ImprovementMultiSelect label={t('執行人', 'Assignees')} options={formPeople} selected={draft.assigneeIds} onChange={changeAssignees} /><DepartmentHeadsButton people={state.people} departmentIds={draft.departmentIds} selectedIds={draft.assigneeIds} onChange={changeAssignees} disabled={!editor.canSave || editor.lost || editor.pendingUnknown} lang={ctx.lang} />
         <label className="field">{t('急迫程度', 'Urgency')}<select value={draft.urgency} onChange={event => patch({ urgency: event.target.value as Improvement['urgency'] })}>{(['urgent', 'high', 'medium', 'low'] as const).map(value => <option key={value} value={value}>{urgencyLabel(value)}</option>)}</select></label>
@@ -311,9 +346,10 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
         {draft.source === 'external' && <><label className="field">{t('來源檢查', 'Source inspection')}<select disabled={draft.version > 0} value={draft.inspectionId || ''} onChange={event => patch({ inspectionId: event.target.value, findingId: undefined, sourceKey: undefined, sources: [] })}><option value="">{t('請選擇', 'Select')}</option>{state.inspections.map(row => <option key={row.id} value={row.id}>{row.date} · {richTextToPlainText(row.title)}</option>)}</select></label><label className="field">{t('來源發現', 'Source finding')}<select disabled={draft.version > 0} value={draft.findingId || ''} onChange={event => { const finding = (sourceInspection&&sourceInspection.id===draft.inspectionId&&state.inspections.some(i=>i.id===sourceInspection.id&&i.version===sourceInspection.version)?sourceInspection.findings:[]).find(row => row.id === event.target.value); patch({ findingId: finding?.id, sourceKey: finding ? `${draft.inspectionId}:${finding.id}` : undefined, sources: finding ? structuredClone(finding.sources) : [] }); }}><option value="">{t('請選擇', 'Select')}</option>{(sourceInspection&&sourceInspection.id===draft.inspectionId&&state.inspections.some(i=>i.id===sourceInspection.id&&i.version===sourceInspection.version)?sourceInspection.findings:[]).filter(row => isActionableFinding(row.classification)).map(row => <option key={row.id} value={row.id}>{bi(row.observation, ctx.lang)}</option>)}</select></label></>}
       </div> : <BilingualText value={improvementTitle(draft.title)} />}
       {mode === 'progress' || mode === 'close' ? <section className="progress-action-content" aria-label={t('完整改善內容', 'Full action content')}><BilingualText value={draft.content} compact/></section> : sourceDetails(draft)}
-      {stagedId && (() => { const event = draft.events.find(row => row.id === stagedId); if (!event) return null; const progressFields = <>{mode !== 'reopen' && <label className="checkbox-field improvement-work-complete"><input type="checkbox" checked={event.percent === 100} disabled={mode === 'close' || controlsLocked} onChange={e => updateStaged({ percent: e.target.checked ? 100 : previousIncompletePercent.current })} />{t('已經完成作業', 'Work completed')}</label>}<label className="field"><span>{t('完成百分比', 'Completion percentage')}</span><input aria-label={t('完成百分比', 'Completion percentage')} type="number" min={0} max={100} disabled={mode === 'close' || editor.busy} value={event.percent} onChange={e => updateStaged({ percent: Number(e.target.value) })} /></label>{mode === 'progress' && <label className="field"><span>{t('執行狀態', 'Execution status')}</span><select aria-label={t('執行狀態', 'Execution status')} disabled={editor.busy} value={event.status} onChange={e => updateStaged({ status: e.target.value as ProgressEvent['status'] })}><option value="open">{t('待處理', 'Open')}</option><option value="in_progress">{t('進行中', 'In progress')}</option></select></label>}</>; return <div className={mode === 'progress' ? 'progress-editor-grid' : 'form-grid'}><label className="field progress-text">{t('本次新增進度（保存前可修改）', 'New progress (editable until saved)')}<ImprovementTextarea lang={ctx.lang} key={event.id} disabled={controlsLocked} rows={mode === 'progress' ? 8 : 5} value={event.content} onChange={content => updateStaged({ content })} /></label>{mode === 'progress' ? <div className="progress-controls">{progressFields}<label className="field progress-urgency"><span>{t('急迫程度', 'Urgency')}</span><select aria-label={t('急迫程度', 'Urgency')} disabled={editor.busy} value={draft.urgency} onChange={e => patch({urgency:e.target.value as Improvement['urgency']})}>{(['urgent','high','medium','low'] as const).map(value=><option key={value} value={value}>{urgencyLabel(value)}</option>)}</select></label><MultiSelectDropdown label={t('涉及部門','Departments')} options={departmentOptions(ctx)} selected={draft.departmentIds} onChange={departmentIds=>patch({departmentIds})} disabled={!editor.canSave}/><MultiSelectDropdown label={t('執行跟進人','Assignees')} options={formPeople} selected={draft.assigneeIds} onChange={assigneeIds=>patch({assigneeIds})} disabled={!editor.canSave}/><DepartmentHeadsButton people={state.people} departmentIds={draft.departmentIds} selectedIds={draft.assigneeIds} onChange={changeAssignees} disabled={!editor.canSave || editor.lost || editor.pendingUnknown} lang={ctx.lang} /></div> : progressFields}</div>; })()}
+      {milestoneBase && <MilestoneEditor key={draft.id} base={milestoneBase} draft={draft} onChange={setMilestoneDraft} lang={ctx.lang} actorId={ctx.user.id} disabled={controlsLocked} readOnly={mode==='close'||mode==='reopen'||milestoneBase.status==='closed'} people={state.people} onPendingChange={setMilestoneActionPending}/>}
+      {stagedId && (() => { const event = draft.events.find(row => row.id === stagedId); if (!event) return null; const progressFields = <>{draft.milestones?.length ? <div className="notice" aria-label={t('自動完成率','Automatic completion')}><strong>{milestoneSummary(draft,ctx.lang)}</strong><small className="milestone-hint">{t('依階段達成數自動計算，不另填百分比。','Calculated from achieved milestones; no separate manual percentage.')}</small></div> : <>{mode !== 'reopen' && <label className="checkbox-field improvement-work-complete"><input type="checkbox" checked={event.percent === 100} disabled={mode === 'close' || controlsLocked} onChange={e => updateStaged({ percent: e.target.checked ? 100 : previousIncompletePercent.current })} />{t('已經完成作業', 'Work completed')}</label>}<label className="field"><span>{t('完成百分比', 'Completion percentage')}</span><input aria-label={t('完成百分比', 'Completion percentage')} type="number" min={0} max={100} disabled={mode === 'close' || editor.busy} value={event.percent} onChange={e => updateStaged({ percent: Number(e.target.value) })} /></label></>}{mode === 'progress' && <label className="field"><span>{t('執行狀態', 'Execution status')}</span><select aria-label={t('執行狀態', 'Execution status')} disabled={editor.busy} value={event.status} onChange={e => updateStaged({ status: e.target.value as ProgressEvent['status'] })}><option value="open">{t('待處理', 'Open')}</option><option value="in_progress">{t('進行中', 'In progress')}</option></select></label>}</>; return <div className={mode === 'progress' ? 'progress-editor-grid' : 'form-grid'}><label className="field progress-text">{t('本次新增進度（保存前可修改）', 'New progress (editable until saved)')}<ImprovementTextarea lang={ctx.lang} key={event.id} disabled={controlsLocked} rows={mode === 'progress' ? 8 : 5} value={event.content} onChange={content => updateStaged({ content })} /></label>{mode === 'progress' ? <div className="progress-controls">{progressFields}<label className="field progress-urgency"><span>{t('急迫程度', 'Urgency')}</span><select aria-label={t('急迫程度', 'Urgency')} disabled={editor.busy} value={draft.urgency} onChange={e => patch({urgency:e.target.value as Improvement['urgency']})}>{(['urgent','high','medium','low'] as const).map(value=><option key={value} value={value}>{urgencyLabel(value)}</option>)}</select></label><MultiSelectDropdown label={t('涉及部門','Departments')} options={departmentOptions(ctx)} selected={draft.departmentIds} onChange={departmentIds=>patch({departmentIds})} disabled={!editor.canSave}/><MultiSelectDropdown label={t('執行跟進人','Assignees')} options={formPeople} selected={draft.assigneeIds} onChange={assigneeIds=>patch({assigneeIds})} disabled={!editor.canSave}/><DepartmentHeadsButton people={state.people} departmentIds={draft.departmentIds} selectedIds={draft.assigneeIds} onChange={changeAssignees} disabled={!editor.canSave || editor.lost || editor.pendingUnknown} lang={ctx.lang} /></div> : progressFields}</div>; })()}
       {eventList(draft)}
-      <div className="page-actions"><button className="btn neutral" disabled={editor.busy} onClick={discard}>{t('取消／放棄草稿', 'Cancel / discard draft')}</button><button className={`btn ${mode === 'close' ? 'success' : 'primary'}`} disabled={!editor.canSave} onClick={() => void submit()}>{editor.busy ? t('保存中…', 'Saving…') : t('確認保存', 'Confirm save')}</button></div>
+      <div className="page-actions"><button className="btn neutral" disabled={editor.busy} onClick={discard}>{t('取消／放棄草稿', 'Cancel / discard draft')}</button><button className={`btn ${mode === 'close' ? 'success' : 'primary'}`} disabled={!editor.canSave || milestoneActionPending} onClick={() => void submit()}>{editor.busy ? t('保存中…', 'Saving…') : t('確認保存', 'Confirm save')}</button></div>
     </Modal>}
   </>;
 }

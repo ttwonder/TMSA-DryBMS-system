@@ -1,3 +1,4 @@
+import { improvementPercent, milestoneEventText, milestoneProgress, milestoneSummary } from './improvementMilestones.ts';
 import {PRODUCT_NAME_EN} from './branding.ts';
 import {compactBlankLines} from './standardText.ts';
 import {improvementSourceLabel} from './improvementTracking.ts';
@@ -329,12 +330,26 @@ export async function buildRemarksExcel(state:PlatformState,frameworkId:Framewor
 export async function buildImprovementsExcel(state:PlatformState,ids:string[],lang:Language):Promise<Uint8Array>{
  const rows=selectedImprovementRows(state,ids),Excel=await loadExcel(),book=new Excel.Workbook();book.creator=PRODUCT_NAME_EN;
  const description=tr(lang,'文件序號僅供本文件對應，非永久業務編號；同筆全文及計劃分段續列，短欄位重複。按文件序號、段次閱讀；全部進度見進度工作表，按文件序號、事件次序、段次閱讀。','Document numbers link this workbook only, not persistent business IDs. Complete content/plans use continuation rows with repeated short metadata. Read in document number/part order. All events are on Progress; read in document/event/part order.');
- const sheet=operationalSheet(book,tr(lang,'改善項目','Improvements'),lang==='zh'?['文件序號','標題','提出日期','來源','分類','關聯編號','涉及部門','執行人','急迫度','狀態','最新更新','目標日期','結案日期','完整內容','執行計劃','段次']:['Document no.','Title','Proposed date','Source','Classification','Related codes','Departments','Assignees','Urgency','Status','Updated','Target date','Closed date','Complete content','Plan','Part'],[12,45,18,48,28,30,40,44,14,20,18,18,18,100,85,9],description);
+ const sheet=operationalSheet(book,tr(lang,'改善項目','Improvements'),lang==='zh'?['文件序號','標題','提出日期','來源','分類','關聯編號','涉及部門','執行人','急迫度','狀態','最新更新','目標日期','結案日期','完整內容','執行計劃','段次','完成率 (%)','已達成階段數','階段總數']:['Document no.','Title','Proposed date','Source','Classification','Related codes','Departments','Assignees','Urgency','Status','Updated','Target date','Closed date','Complete content','Plan','Part','Completion (%)','Achieved milestones','Total milestones'],[12,45,18,48,28,30,40,44,14,20,18,18,18,100,85,9,18,18,18],description);
  const progress=operationalSheet(book,tr(lang,'全部進度','Progress'),lang==='zh'?['文件序號','標題','事件次序','更新日期','更新人','狀態','內容','段次']:['Document no.','Title','Event order','Update date','Updated by','Status','Content','Part'],[12,45,12,18,44,20,100,9],description);
- rows.forEach((row,i)=>{operationalRows(sheet,[i+1,row.title,excelDate(row.proposedDate),businessSource(state,row,lang),row.source==='external'?findingClassificationLabel(improvementFindingClassification(state,row),lang):'—',relatedCodes(state,row,lang),departmentsLabel(state,row.departmentIds,lang)||'—',peopleLabel(state,row.assigneeIds)||'—',urgencyLabel(row,lang),improvementStatus(row.status,lang),excelDate(row.updatedAt),excelDate(row.targetDate),excelDate(row.closedAt),fullImprovementContent(row),row.plan,1],16,[14,15]);
+ rows.forEach((row,i)=>{operationalRows(sheet,[i+1,row.title,excelDate(row.proposedDate),businessSource(state,row,lang),row.source==='external'?findingClassificationLabel(improvementFindingClassification(state,row),lang):'—',relatedCodes(state,row,lang),departmentsLabel(state,row.departmentIds,lang)||'—',peopleLabel(state,row.assigneeIds)||'—',urgencyLabel(row,lang),improvementStatus(row.status,lang),excelDate(row.updatedAt),excelDate(row.targetDate),excelDate(row.closedAt),fullImprovementContent(row),row.plan,1,improvementPercent(row),row.milestones?.length?milestoneProgress(row).achieved:'',row.milestones?.length??''],16,[14,15]);
   row.events.forEach((event,n)=>operationalRows(progress,[i+1,row.title,n+1,excelDate(event.at),peopleLabel(state,[event.by])||'—',improvementStatus(event.status,lang),event.content,1],8,[7]));
  });
- finishOperationalSheet(sheet);finishOperationalSheet(progress);return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
+ finishOperationalSheet(sheet);finishOperationalSheet(progress);
+ if(rows.some(row=>row.milestones?.length || row.milestoneEvents?.length)) {
+  const stageDescription=tr(lang,'依文件序號、階段次序、段次閱讀；同筆續列保留完整目標。預期與實際日期各自獨立，請整表排序。','Read in document/milestone/part order; continuation rows retain complete goals. Planned and actual dates are independent. Sort the whole range.');
+  const stages=operationalSheet(book,tr(lang,'具體階段目標','Specific milestones'),lang==='zh'?['文件序號','標題','階段次序','完整階段目標','預期完成日期','達成狀態','實際達成日期','逾期達成','段次']:['Document no.','Title','Milestone order','Complete milestone goal','Planned completion date','Achievement','Actual achievement date','Achieved late','Part'],[12,45,14,110,20,18,20,18,9],stageDescription);
+  // Native Excel wraps the English date headings to three lines at 14pt.
+  if(lang==='en')stages.getRow(4).height=56;
+  const changeDescription=tr(lang,'依文件序號、事件次序、段次閱讀；保留目標、預期／實際日期的變更前後、延期／撤銷理由及移除紀錄。','Read in document/event/part order; includes before/after goals and dates, postponement/revocation reasons, and removed milestones.');
+  const changes=operationalSheet(book,tr(lang,'階段變更歷史','Milestone change history'),lang==='zh'?['文件序號','標題','事件次序','記錄時間（UTC）','更新人','完整變更及理由','段次']:['Document no.','Title','Event order','Recorded at (UTC)','Updated by','Complete change and reason','Part'],[12,45,14,34,44,110,9],changeDescription);
+  rows.forEach((row,index)=>{
+   (row.milestones??[]).forEach((stage,stageIndex)=>operationalRows(stages,[index+1,row.title,stageIndex+1,stage.goal,excelDate(stage.plannedDate),stage.achievedDate?tr(lang,'已達成','Achieved'):tr(lang,'未達成','Not achieved'),excelDate(stage.achievedDate),stage.achievedDate>stage.plannedDate?tr(lang,'是','Yes'):tr(lang,'否','No'),1],9,[4]));
+   (row.milestoneEvents??[]).forEach((event,eventIndex)=>operationalRows(changes,[index+1,row.title,eventIndex+1,event.at,peopleLabel(state,[event.by]),milestoneEventText(event,lang),1],7,[6]));
+  });
+  finishOperationalSheet(stages);finishOperationalSheet(changes);
+ }
+ return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
 }
 
 interface PdfRow {key:string;cells:string[];warning?:boolean}
@@ -652,6 +667,14 @@ export async function buildImprovementsPdf(state:PlatformState,ids:string[],lang
   {headers:lang==='zh'?['涉及部門','執行人']:['Departments','Assignees'],cells:[departmentsLabel(state,row.departmentIds,lang)||'—',peopleLabel(state,row.assigneeIds)||'—']},
   {headers:[tr(lang,'完整內容','Complete content')],cells:[fullImprovementContent(row)]},
   {headers:[tr(lang,'執行計劃','Plan')],cells:[row.plan||'—']},
+  ...(row.milestones?.length ? [
+   {headers:[tr(lang,'具體階段目標','Specific milestones')],cells:[milestoneSummary(row,lang)]},
+   {headers:[],cells:[],entries:row.milestones.flatMap((stage,stageIndex)=>[
+    {headers:[`${tr(lang,'階段','Milestone')} ${stageIndex+1} · ${tr(lang,'預期完成日期','Planned completion date')}`,tr(lang,'實際達成日期','Actual achievement date'),tr(lang,'達成狀態','Achievement')],cells:[stage.plannedDate,stage.achievedDate||'—',stage.achievedDate?stage.achievedDate>stage.plannedDate?tr(lang,'已達成（逾期）','Achieved (late)'):tr(lang,'已達成','Achieved'):tr(lang,'未達成','Not achieved')],ratios:[2,2,2]},
+    {headers:[tr(lang,'完整階段目標','Complete milestone goal')],cells:[stage.goal],ratios:[1]},
+   ])}
+  ]:[]),
+  ...(row.milestoneEvents?.length ? [{headers:[],cells:[],entries:row.milestoneEvents.map(event=>({headers:[`${tr(lang,'階段變更歷史','Milestone change history')} · ${reportDate(event.at)} · ${peopleLabel(state,[event.by])}`],cells:[milestoneEventText(event,lang)],ratios:[1]}))}]:[]),
   row.events.length?{headers:[],cells:[],entries:row.events.map(event=>({headers:lang==='zh'?['全部進度 · 更新日期','更新人','狀態','內容']:['All progress · Date','Updated by','Status','Content'],cells:[reportDate(event.at)||'—',peopleLabel(state,[event.by])||'—',improvementStatus(event.status,lang),event.content||'—'],ratios:[1.7,2,1.5,6]}))}:{headers:[tr(lang,'全部進度','All progress')],cells:[tr(lang,'尚無進度事件','No progress events')]}
  ],'improvements'));
  return pdf.finish();
@@ -722,7 +745,7 @@ export async function buildOverviewPdf(state:PlatformState,frameworkId:Framework
   if(last){const coverage=inspectionCoverage(last),previous=inspectionScore(last);pdf.paragraph(`${last.title}\n${last.id} | ${last.date} | ${last.organization}\n${tr(lang,'凍結方法','Frozen method')}: ${last.snapshot.scoringVersion}\n${tr(lang,'評定覆蓋','Assessed coverage')}: ${coverage.assessed}/${coverage.total}\n${tr(lang,'此份納入範圍得分','Score for this inspection’s included scope')}: ${previous.score===null?tr(lang,'未完整記分（非 0 分）','Not completely scored (not zero)'):previous.score.toFixed(2)+' / 4'}`);if(last.frameworkId==='TMSA')pdf.paragraph(tmsa14ReportScope(inspectionIncludesTmsa14(last),previous.totalChapters,lang),PDF_AUX);}else pdf.paragraph(tr(lang,'尚無已發布的檢查記錄；不得製造上次得分。','No published inspection; no invented previous score.'));
   if(!restricted){
   pdf.heading(tr(lang,'未結案事項與執行計劃','Open issues and execution plans'));
-  pdf.table(lang==='zh'?['編號 / 急迫 / 期限','事項 / 關聯','部門 / 執行人','完整計劃 / 最新進度']:['ID / Urgency / Target','Issue / Related items','Departments / Assignees','Full plan / Latest progress'],[16,32,19,38],issues.map(row=>({key:row.id.slice(0,12),cells:[`${row.id}\n${row.urgency} | ${row.targetDate||'—'}`,`${row.title}\n${bilingual(row.content)}\n${[...(row.chapterIds?.length?improvementReferenceLabels(improvementReferenceIndex(state),{itemIds:[],chapterIds:row.chapterIds},lang):[]),...row.itemIds.map(id=>state.items.find(i=>i.id===id)?.code??id)].join(', ')}`,`${departmentsLabel(state,row.departmentIds,lang)}\n${peopleLabel(state,row.assigneeIds)}`,`${row.plan}\n\n${row.events.at(-1)?.content??tr(lang,'尚無進度','No progress yet')}`]})));
+  pdf.table(lang==='zh'?['編號 / 急迫 / 期限','事項 / 關聯','部門 / 執行人','完整計劃 / 最新進度']:['ID / Urgency / Target','Issue / Related items','Departments / Assignees','Full plan / Latest progress'],[16,32,19,38],issues.map(row=>({key:row.id.slice(0,12),cells:[`${row.id}\n${row.urgency} | ${row.targetDate||'—'}`,`${row.title}\n${bilingual(row.content)}\n${[...(row.chapterIds?.length?improvementReferenceLabels(improvementReferenceIndex(state),{itemIds:[],chapterIds:row.chapterIds},lang):[]),...row.itemIds.map(id=>state.items.find(i=>i.id===id)?.code??id)].join(', ')}`,`${departmentsLabel(state,row.departmentIds,lang)}\n${peopleLabel(state,row.assigneeIds)}`,`${row.plan}\n\n${row.milestones?.length?milestoneSummary(row,lang)+'\n':''}${row.events.at(-1)?.content??tr(lang,'尚無進度','No progress yet')}`]})));
   }
   return pdf.finish();
 }

@@ -5,6 +5,7 @@ import './styles.css';
 import './richText.css';
 import './themes.css';
 import './improvementReferencePicker.css';
+import './improvementMilestones.css';
 import {applyDisplayTheme,loadDisplayTheme} from './displayTheme';
 // Apply the remembered screen palette before React's first render.
 applyDisplayTheme(loadDisplayTheme());
