@@ -16,8 +16,8 @@ export function chapterStatusOf(state:Pick<BrowseState,'items'|'assessments'>,ch
  const assessments=new Map(state.assessments.map(a=>[a.itemId,a]));
  const statuses=items.map(i=>statusOf(assessments.get(i.id),i));
  if(statuses.includes('purple'))return 'purple';
- if(statuses.includes('red'))return 'red';
- return statuses.includes('yellow')?'yellow':'green';
+ if(statuses.every(status=>status==='green'))return 'green';
+ return statuses.every(status=>status==='red')?'red':'yellow';
 }
 export function itemPass(a:Pick<Assessment,'reviewed'|'response'|'conformity'>|undefined,item:ScoreItem){return !!a?.reviewed&&a.response==='yes'&&a.conformity==='all'&&(!item.sourceGap||item.sourceGapResolved===true);}
 export const isTmsaChapter14=(frameworkId:FrameworkId,chapterId:string)=>frameworkId==='TMSA'&&chapterId==='TMSA:14';

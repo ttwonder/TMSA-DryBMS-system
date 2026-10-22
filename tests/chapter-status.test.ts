@@ -8,12 +8,29 @@ const assessment=(itemId:string,patch:Partial<Assessment>={}):Assessment=>({...b
 const fixture=()=>({items:[item('a'),item('b')],assessments:[assessment('a'),assessment('b')]});
 test('chapter green requires every active item updated and fully met',()=>assert.equal(chapterStatusOf(fixture(),'chapter-a'),'green'));
 test('updated partial compliance makes a chapter yellow',()=>{const s=fixture();Object.assign(s.assessments[1],{response:'no',conformity:'partial'});assert.equal(chapterStatusOf(s,'chapter-a'),'yellow');});
-test('updated noncompliance takes precedence over partial compliance',()=>{const s=fixture();Object.assign(s.assessments[0],{response:'no',conformity:'partial'});Object.assign(s.assessments[1],{response:'no',conformity:'none'});assert.equal(chapterStatusOf(s,'chapter-a'),'red');});
+test('updated partial and noncompliant items form a yellow chapter',()=>{const s=fixture();Object.assign(s.assessments[0],{response:'no',conformity:'partial'});Object.assign(s.assessments[1],{response:'no',conformity:'none'});assert.equal(chapterStatusOf(s,'chapter-a'),'yellow');});
 test('incomplete update takes precedence over updated noncompliance',()=>{const s=fixture();Object.assign(s.assessments[0],{response:'no',conformity:'none'});s.assessments[1].reviewed=false;assert.equal(chapterStatusOf(s,'chapter-a'),'purple');});
 test('missing assessment keeps chapter purple',()=>{const s=fixture();s.assessments.pop();assert.equal(chapterStatusOf(s,'chapter-a'),'purple');});
 test('unknown response keeps chapter purple even with reviewed flag',()=>{const s=fixture();s.assessments[1].response=null;assert.equal(chapterStatusOf(s,'chapter-a'),'purple');});
 test('empty or inactive-only chapter is not vacuously green',()=>{assert.equal(chapterStatusOf({items:[],assessments:[]},'chapter-a'),'purple');const s=fixture();s.items.forEach(i=>i.active=false);assert.equal(chapterStatusOf(s,'chapter-a'),'purple');});
 test('inactive and unrelated-framework items do not recolor a complete chapter',()=>{const s=fixture();s.items.push(item('inactive','chapter-a',{active:false}),item('unrelated','chapter-dry',{frameworkId:'DRYBMS'}));s.assessments.push(assessment('inactive',{reviewed:false}),assessment('unrelated',{response:'no',conformity:'none'}));assert.equal(chapterStatusOf(s,'chapter-a'),'green');});
-test('legacy Yes with unresolved source gap is not green',()=>{const s=fixture();s.items[1].sourceGap='QA gap';assert.equal(chapterStatusOf(s,'chapter-a'),'red');s.items[1].sourceGapResolved=true;assert.equal(chapterStatusOf(s,'chapter-a'),'green');});
+test('legacy Yes with unresolved source gap stays non-green and mixed with green yields yellow',()=>{const s=fixture();s.items[1].sourceGap='QA gap';assert.equal(chapterStatusOf(s,'chapter-a'),'yellow');s.items[1].sourceGapResolved=true;assert.equal(chapterStatusOf(s,'chapter-a'),'green');});
 test('DRYBMS chapter status is based on item statuses, independent of percentage grading',()=>{const s=fixture();s.items.forEach(i=>i.frameworkId='DRYBMS');assert.equal(chapterStatusOf(s,'chapter-a'),'green');Object.assign(s.assessments[1],{response:'no',conformity:'partial'});assert.equal(chapterStatusOf(s,'chapter-a'),'yellow');});
 test('chapter status projection does not mutate stored values',()=>{const s=fixture(),before=structuredClone(s);chapterStatusOf(s,'chapter-a');assert.deepEqual(s,before);});
+
+for(const frameworkId of ['TMSA','DRYBMS'] as const)for(const [members,expected] of [
+ [['green','red'],'yellow'],
+ [['yellow','red'],'yellow'],
+ [['green','yellow','red'],'yellow'],
+ [['green','red','red'],'yellow'],
+ [['yellow','red','red'],'yellow'],
+ [['red','red'],'red'],
+ [['yellow','yellow'],'yellow'],
+ [['green','yellow','red','purple'],'purple'],
+] as const)test(`${frameworkId}: ${members.join('+')} aggregates to ${expected}`,()=>{
+ const items=members.map((_,n)=>item(`member-${n}`,'chapter-a',{frameworkId,level:n+1}));
+ const assessments=members.map((color,n)=>assessment(items[n].id,{response:color==='green'?'yes':'no',conformity:color==='green'?'all':color==='yellow'?'partial':'none',reviewed:color!=='purple'}));
+ const state={items,assessments},before=structuredClone(state);
+ assert.equal(chapterStatusOf(state,'chapter-a'),expected);assert.deepEqual(state,before);
+ assert.equal(chapterStatusOf({items:[...items].reverse(),assessments:[...assessments].reverse()},'chapter-a'),expected);
+});
