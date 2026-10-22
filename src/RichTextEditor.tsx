@@ -91,7 +91,10 @@ export function RichTextEditor({value,onChange,rows=3,disabled=false,readOnly=fa
   const plain=richTextToPlainText(text).replace(/\r\n?/gu,'\n');
   command('insertText',singleLine?plain.replace(/\n/gu,' '):plain);
  };
+ // A surrounding <label> would forward content clicks to the first toolbar
+ // button (Black). Cancel that label activation, not native pointer selection.
  return <div ref={wrapper} className={`rich-editor${singleLine?' rich-editor-single':''}${disabled?' rich-editor-disabled':''} ${className}`} style={style}
+  onClick={event=>event.preventDefault()}
   onFocusCapture={()=>{pendingBlur.current=false;if(editable)setFocused(true);}}
   onBlurCapture={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node)){if(pointerActive.current)pendingBlur.current=true;else{setFocused(false);savedRange.current=null;}}}}>
   {focused&&editable&&<div className="rich-editor-toolbar" role="toolbar" aria-label={labels.toolbar} onMouseDown={event=>event.preventDefault()}>

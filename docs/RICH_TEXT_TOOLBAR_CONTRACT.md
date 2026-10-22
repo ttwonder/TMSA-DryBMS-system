@@ -4,6 +4,7 @@
 
 - A compact, single-row toolbar attached above the active content editor, reserving its own narrow space rather than covering text. Only the focused editor/wrapper shows it; toolbar focus remains internal. Never appear in read-only browsing or merely selecting read-only text.
 - Four text colors (black/red/blue/green), bold, ordered list, bullet list. Single-line content titles use colors/bold only. Selection changes that selection; collapsed caret changes subsequent typing. Enter continues lists, empty-item Enter exits, Shift+Enter breaks within an item.
+- After select-all, clicking editor text or its empty padding must collapse selection and position the native caret without changing text/style. Ordinary content clicks must not activate a surrounding label's first toolbar button; explicit toolbar clicks and keyboard activation must remain usable. Verify full selection, pointer-drag partial selection and subsequent typing through the original progress editor in all display modes, including native save/readback/reload.
 - Laptop/desktop with mouse or trackpad is required. Touch-only phones/tablets may hide the toolbar, but use the same format-preserving editor and renderer; no conversion to a lossy textarea. Device support is pointer-based, not a width-only laptop exclusion.
 - Preserve original navigation, density, labels, permissions, explicit Save/Cancel, record lease/CAS/operation-ACK, existing immutable history, frozen sources and existing metadata-only preservation rules. No autosave, no optimistic success, no automatic old-record conversion.
 

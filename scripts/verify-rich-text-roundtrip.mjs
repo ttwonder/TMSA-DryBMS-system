@@ -32,6 +32,9 @@ const format=async(field,value,color='紅色',list)=>{
 const cancelModal=async()=>{await modal().getByRole('button',{name:/^(取消|取消／放棄草稿|關閉)$/}).last().click();await expect(modal()).toHaveCount(0);};
 const saveModal=async()=>{await modal().getByRole('button',{name:'確認保存',exact:true}).click();await expect(modal()).toHaveCount(0);};
 const download=async(button,name)=>{const waiting=page.waitForEvent('download',{timeout:90000});await button.click();const d=await waiting,path=join(out,name);await d.saveAs(path);assert(statSync(path).size>1000);assert(!d.suggestedFilename().includes('\u001eRT1:'));receipt.downloads.push({path,size:statSync(path).size,sha256:createHash('sha256').update(readFileSync(path)).digest('hex')});};
+const inputPaths=['src/RichTextEditor.tsx','src/richText.ts','src/richText.css','src/themes.css','src/FrameworkPage.tsx','src/Improvements.tsx','src/useRecordEditor.ts','src/reports.ts','scripts/verify-rich-text-roundtrip.mjs'];
+const fingerprints=()=>Object.fromEntries(inputPaths.map(file=>[file,createHash('sha256').update(readFileSync(join(root,file))).digest('hex')]));receipt.inputsBefore=fingerprints();
+const pointerSnapshot=field=>field.evaluate(async root=>{const core=await import('/src/richText.ts'),raw=core.encodeRichText(core.editorElementToDocument(root)),s=getSelection();return{raw,runs:core.richTextRuns(raw),collapsed:s?.isCollapsed,selected:s?.toString(),focused:document.activeElement===root};});
 try{
  qa=await startQaServer({seed,evidenceDir:out,latestMigration:17,afterCommit:async({action,clientId})=>{if(action==='save'&&clientId===qa.users.owner.clientId&&holdSave){holdSave=false;saveHeld=true;await new Promise(resolve=>{releaseSave=resolve;});}return false;}});
  await qa.db.setup.query(readFileSync(join(root,'supabase/migrations/018_person_department_heads.sql'),'utf8'));
@@ -43,7 +46,41 @@ try{
   await ctx.addInitScript(({config,user})=>{localStorage.setItem('fpmc-compliance-config',JSON.stringify(config));localStorage.setItem('fpmc-compliance-language','zh');sessionStorage.setItem('fpmc-compliance-client-id',user.clientId);sessionStorage.setItem('fpmc-compliance-session',JSON.stringify({user:user.user,sessionToken:user.sessionToken}));},{config:qa.config,user:qa.users[role]});
   const p=await ctx.newPage();p.setDefaultTimeout(15000);p.on('pageerror',e=>receipt.errors.push(e.message));p.on('dialog',d=>d.accept());await p.goto(ui);await p.locator('.main-nav').waitFor();return p;
  };
- page=await open();await nav('TMSA');await page.getByRole('button',{name:'修改',exact:true}).click();
+ page=await open();
+ await nav('待改善項目');
+ const openProgress=async()=>{await page.locator('.improvement-table tbody tr').filter({hasText:'Original action TMSA'}).getByRole('button',{name:'直接更新',exact:true}).click();return text('本次新增進度（保存前可修改）');};
+ const pointerBefore=await ledger();
+ for(const mode of ['eye','normal','dark']){
+  await page.getByRole('combobox',{name:'顯示模式',exact:true}).selectOption(mode);const field=await openProgress();
+  for(const [label,color] of [['紅色','red'],['藍色','blue'],['綠色','green'],['黑色','black']])await run(`progress-${mode}-${color}-select-all-click-text-and-blank-no-recolor`,async()=>{
+   const plain='盡快按照其建議進行購買和配置';await field.fill(plain);await field.press('Control+a');await page.getByRole('toolbar').getByRole('button',{name:label,exact:true}).click();
+   const before=await pointerSnapshot(field);assert.deepEqual(before.runs,[{text:plain,color}]);
+   await page.evaluate(()=>{window.__pointerTrace=[];document.addEventListener('click',e=>window.__pointerTrace.push({tag:e.target.tagName,label:e.target.getAttribute?.('aria-label'),detail:e.detail,selected:getSelection()?.toString()}),{capture:true,signal:(window.__pointerAbort=new AbortController()).signal});});
+   await field.click({position:{x:40,y:15}});const after=await pointerSnapshot(field);receipt.lastPointer={case:current,before,after,trace:await page.evaluate(()=>{window.__pointerAbort.abort();return window.__pointerTrace;})};
+   assert.equal(after.collapsed,true,'Clicking progress text must collapse select-all');assert.equal(after.focused,true);assert.deepEqual(after.runs,before.runs,'Caret placement must not change progress color');
+   await field.press('Control+a');const box=await field.boundingBox();await field.click({position:{x:box.width-20,y:box.height-20}});const blank=await pointerSnapshot(field);assert.equal(blank.collapsed,true);assert.equal(blank.focused,true);assert.deepEqual(blank.runs,before.runs);
+   await field.click({position:{x:40,y:15}});assert.deepEqual((await pointerSnapshot(field)).runs,before.runs,'Clicking without a selection must not force black');
+   await field.press('Control+End');await page.keyboard.insertText('。');assert.deepEqual((await pointerSnapshot(field)).runs,[{text:plain+'。',color}]);assert.deepEqual(await ledger(),pointerBefore);
+  });
+  await run(`progress-${mode}-pointer-selection-cancel-zero-write`,async()=>{
+   await field.fill('Alpha beta gamma');await field.press('Control+a');await page.getByRole('toolbar').getByRole('button',{name:'紅色',exact:true}).click();
+   await field.click({position:{x:40,y:15}});assert.equal((await pointerSnapshot(field)).collapsed,true);
+   const points=await field.evaluate(root=>{const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),node=w.nextNode();return[2,6].map(offset=>{const r=document.createRange();r.setStart(node,offset);r.collapse(true);const b=r.getBoundingClientRect();return{x:b.x,y:b.y+b.height/2};});});
+   await page.mouse.move(points[0].x,points[0].y);await page.mouse.down();await page.mouse.move(points[1].x,points[1].y,{steps:6});await page.mouse.up();assert.equal(await page.evaluate(()=>getSelection()?.toString()),'pha ');
+   await page.getByRole('toolbar').getByRole('button',{name:'藍色',exact:true}).click();assert.deepEqual((await pointerSnapshot(field)).runs,[{text:'Al',color:'red'},{text:'pha ',color:'blue'},{text:'beta gamma',color:'red'}]);
+   await field.press('Control+a');await page.getByRole('toolbar').getByRole('button',{name:'綠色',exact:true}).click();assert.deepEqual((await pointerSnapshot(field)).runs,[{text:'Alpha beta gamma',color:'green'}]);
+   await image('progress-pointer-'+mode);await cancelModal();assert.deepEqual(await ledger(),pointerBefore);
+  });
+ }
+ await page.getByRole('combobox',{name:'顯示模式',exact:true}).selectOption('eye');
+ await run('progress-pointer-formatted-native-save-held-ACK-and-reload',async()=>{
+  const before=await record('improvement','rich-action-TMSA'),field=await openProgress();await field.fill('保存後仍保留顏色');await field.press('Control+a');await page.getByRole('toolbar').getByRole('button',{name:'綠色',exact:true}).click();const box=await field.boundingBox();await field.click({position:{x:box.width-20,y:box.height-20}});await page.keyboard.insertText('。');
+  const expected=await pointerSnapshot(field);assert.deepEqual(expected.runs,[{text:'保存後仍保留顏色。',color:'green'}]);holdSave=true;saveHeld=false;await modal().getByRole('button',{name:'確認保存',exact:true}).click();await expect.poll(()=>saveHeld).toBe(true);await expect(modal()).toBeVisible();await expect(field).toHaveAttribute('contenteditable','false');await expect(page.getByRole('toolbar')).toHaveCount(0);
+  const saved=await record('improvement','rich-action-TMSA');assert.equal(saved.events.at(-1).content,expected.raw);assert.deepEqual(saved.events.slice(0,-1),before.events);for(const key of Object.keys(before))if(!['events','version','updatedAt','updatedBy'].includes(key))assert.deepEqual(saved[key],before[key]);
+  releaseSave();releaseSave=null;await expect(modal()).toHaveCount(0);await page.reload();await page.locator('.main-nav').waitFor();await nav('待改善項目');await openProgress();await expect(text('本次新增進度（保存前可修改）')).toBeEmpty();await expect(modal().locator('.progress-history [data-rich-color="green"]')).toHaveText('保存後仍保留顏色。');await cancelModal();assert.deepEqual(await record('improvement','rich-action-TMSA'),saved);
+ });
+ await page.getByRole('combobox',{name:'顯示模式',exact:true}).selectOption('normal');
+ await nav('TMSA');await page.getByRole('button',{name:'修改',exact:true}).click();
  await run('focus-small-toolbar-no-overlap-and-cancel-zero-write',async()=>{const before=await ledger(),field=text('Self Assessment English');await field.focus();const a=await field.boundingBox(),b=await page.getByRole('toolbar').boundingBox();assert(b.height<=38);assert(b.y+b.height<=a.y+1);receipt.toolbar=b;await image('laptop-toolbar');await format(text('備註'),'Cancel marker');await page.evaluate(()=>{window.__clicks=[];for(const e of ['pointerdown','mousedown','blur','pointerup','mouseup','click'])document.addEventListener(e,x=>window.__clicks.push({type:e,target:x.target?.textContent?.slice(0,50),scrollY}),true);});await page.getByRole('button',{name:'取消編輯',exact:true}).click();receipt.cancelEvents=await page.evaluate(()=>window.__clicks);await expect(page.getByRole('button',{name:'修改',exact:true})).toBeVisible();assert.deepEqual(await ledger(),before);await expect(page.getByRole('toolbar')).toHaveCount(0);});
  for(const fw of ['TMSA','DRYBMS'])await run(fw+'-all-assessment-fields-native-save-reopen-peer',async()=>{
   await nav(fw);await page.getByRole('button',{name:'修改',exact:true}).click();
@@ -76,6 +113,6 @@ try{
 }catch(error){receipt.status='FAIL';receipt.failure={case:current,message:String(error.message).slice(0,2200)};if(page){const path=join(out,'failure.png');await page.screenshot({path,fullPage:true}).catch(()=>{});receipt.screenshots.push(path);}process.exitCode=1;
 }finally{
  releaseSave?.();const ports=[qa?.db.port,qa?.server.address()?.port,vite?.httpServer.address()?.port].filter(Boolean);await browser?.close();await vite?.close();await qa?.stop();receipt.portsClosed=await Promise.all(ports.map(isClosed));
- receipt.inputs=Object.fromEntries(['src/RichTextEditor.tsx','src/richText.ts','src/richText.css','src/FrameworkPage.tsx','src/Improvements.tsx','src/useRecordEditor.ts','src/reports.ts','scripts/verify-rich-text-roundtrip.mjs'].map(file=>[file,createHash('sha256').update(readFileSync(join(root,file))).digest('hex')]));
+ receipt.inputs=fingerprints();receipt.inputsUnchanged=JSON.stringify(receipt.inputsBefore)===JSON.stringify(receipt.inputs);if(!receipt.inputsUnchanged||receipt.portsClosed.some(closed=>!closed)){receipt.status='FAIL';process.exitCode=1;}
  writeFileSync(join(out,'receipt.json'),JSON.stringify(receipt,null,2));console.log(JSON.stringify({status:receipt.status,cases:receipt.cases.length,fields:receipt.fields.length,failure:receipt.failure,portsClosed:receipt.portsClosed,receipt:join(out,'receipt.json')}));
 }

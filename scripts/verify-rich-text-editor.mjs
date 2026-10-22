@@ -27,13 +27,13 @@ window.core=core;
 function Harness(){
  const [initial,setInitial]=useState('Alpha beta'),[generation,setGeneration]=useState(0);
  const [values,setValues]=useState({a:initial,b:'Second',title:'Title'}),[disabled,setDisabled]=useState(false);
- window.qaReset=(value='Alpha beta')=>{setInitial(value);setValues({a:value,b:'Second',title:'Title'});setGeneration(x=>x+1);window.changes=[];setDisabled(false);};
+ window.qaReset=(value='Alpha beta')=>{const next=window.qaResetSequence=(window.qaResetSequence||0)+1;setInitial(value);setValues({a:value,b:'Second',title:'Title'});setGeneration(next);window.changes=[];setDisabled(false);return next;};
  window.qaDisable=()=>setDisabled(true);
  window.qaExternal=value=>setValues(v=>({...v,a:value}));
  window.values=values;window.changes??=[];
  const edit=(name,value)=>{window.changes.push({name,value});setValues(v=>({...v,[name]:value}));};
  const Editor=${baseline?"({value,onChange,...props})=><textarea {...props} value={value} onChange={e=>onChange(e.target.value)}/>":'RichTextEditor'};
- return <main><h1>真實元件＋測試資料｜不連 production</h1><div className="pair" key={generation}>
+ return <main><h1>真實元件＋測試資料｜不連 production</h1><div className="pair" key={generation} data-qa-generation={generation}>
  <label className="field">Self Assessment English<Editor value={values.a} onChange={v=>edit('a',v)} aria-label="Self Assessment English" rows={3} disabled={disabled} /></label>
  <label className="field">第二欄<Editor value={values.b} onChange={v=>edit('b',v)} aria-label="Second editor" rows={3}/></label>
  <label className="field">標題<Editor value={values.title} onChange={v=>edit('title',v)} aria-label="Title" singleLine rows={1}/></label>
@@ -62,7 +62,8 @@ try{
  const a=page.getByRole('textbox',{name:'Self Assessment English',exact:true});
  await expect(a).toBeVisible();
  const run=async(id,fn)=>{await fn();receipt.cases.push({id,status:'PASS'});console.log('PASS',id);};
- const reset=async(value='Alpha beta')=>{await page.evaluate(v=>window.qaReset(v),value);await expect(a).toHaveText(value);};
+ const resetPage=async(p,value)=>{const generation=await p.evaluate(v=>window.qaReset(v),value);await expect(p.locator('.pair')).toHaveAttribute('data-qa-generation',String(generation));};
+ const reset=async(value='Alpha beta',plain=true)=>{await resetPage(page,value);if(plain)await expect(a).toHaveText(value);};
  const select=async(locator,start,end)=>locator.evaluate((root,[start,end])=>{root.focus();const walk=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let node,offset=0,sn,en,so,eo;while(node=walk.nextNode()){if(sn===undefined&&start<=offset+node.length){sn=node;so=start-offset;}if(end<=offset+node.length){en=node;eo=end-offset;break;}offset+=node.length;}const range=document.createRange();range.setStart(sn||root,so||0);range.setEnd(en||root,eo||0);const s=getSelection();s.removeAllRanges();s.addRange(range);document.dispatchEvent(new Event('selectionchange'));},[start,end]);
  const value=()=>page.evaluate(()=>({raw:window.values.a,doc:window.core.decodeRichText(window.values.a),runs:window.core.richTextRuns(window.values.a)}));
  await a.focus();
@@ -73,6 +74,22 @@ try{
   assert.equal(await a.getAttribute('aria-label'),'Self Assessment English');
   assert.equal(await page.locator('#plain-display').innerHTML(),'literal');
  });
+ await run('native-click-after-select-all-collapses-without-recoloring',async()=>{
+  await reset('Alpha beta');await a.focus();await a.press('Control+a');await page.getByRole('button',{name:'紅色',exact:true}).click();
+  const before=await value();await page.evaluate(()=>{window.qaClickTrace=[];document.addEventListener('click',e=>window.qaClickTrace.push({target:e.target.className,label:e.target.getAttribute?.('aria-label'),detail:e.detail,selected:getSelection()?.toString()}),true);});
+  await a.click({position:{x:35,y:15}});
+  receipt.nativeClick={trace:await page.evaluate(()=>window.qaClickTrace),before,after:await value(),selection:await page.evaluate(()=>({collapsed:getSelection()?.isCollapsed,text:getSelection()?.toString()}))};
+  assert.equal(receipt.nativeClick.selection.collapsed,true,'Clicking text must collapse select-all');
+  assert.deepEqual((await value()).runs,before.runs,'Caret positioning must not change formatting');
+  await a.press('Control+a');await a.click({position:{x:300,y:55}});assert.equal(await page.evaluate(()=>getSelection()?.isCollapsed),true);assert.deepEqual((await value()).runs,before.runs);
+ });
+ await run('native-plain-click-is-readonly-and-toolbar-keyboard-still-formats',async()=>{
+  await reset('Alpha beta');await a.click({position:{x:35,y:15}});await a.press('Control+a');await a.click({position:{x:300,y:55}});assert.equal(await page.evaluate(()=>window.changes.length),0);assert.equal((await value()).raw,'Alpha beta');
+  await a.press('Control+a');const blue=page.getByRole('button',{name:'藍色',exact:true});await blue.focus();await blue.press('Enter');assert.deepEqual((await value()).runs,[{text:'Alpha beta',color:'blue'}]);
+  const green=page.getByRole('button',{name:'綠色',exact:true});await green.focus();await green.press('Space');assert.deepEqual((await value()).runs,[{text:'Alpha beta',color:'green'}]);
+  const bold=page.getByRole('button',{name:'加粗',exact:true});await bold.focus();await bold.press('Space');assert.deepEqual((await value()).runs,[{text:'Alpha beta',color:'green',bold:true}]);
+ });
+ await reset('Alpha beta');await a.focus();
  await run('selection-red-bold-retains-selection',async()=>{
   await select(a,0,5);await page.getByRole('button',{name:'紅色',exact:true}).click();await page.getByRole('button',{name:'加粗',exact:true}).click();
   const result=await value();assert.deepEqual(result.runs,[{text:'Alpha',bold:true,color:'red'},{text:' beta'}]);
@@ -136,11 +153,11 @@ try{
   assert.equal((await value()).doc.text,'1. First\n2. Second');
   await page.keyboard.press('Shift+Enter');await page.keyboard.type('soft');assert.equal((await value()).doc.text,'1. First\n2. Second\nsoft');assert.equal((await value()).doc.lists.length,2);
   await page.keyboard.press('Enter');await page.keyboard.press('Enter');await page.keyboard.type('Outside');await expect(a.locator('ol > li')).toHaveCount(2);
-  const saved=(await value()).raw;await page.evaluate(v=>window.qaReset(v),saved);await expect(a.locator('ol > li')).toHaveCount(2);assert.match(await a.innerText(),/Outside$/);
+  const saved=(await value()).raw;await reset(saved,false);await expect(a.locator('ol > li')).toHaveCount(2);assert.match(await a.innerText(),/Outside$/);
  });
  await run('bullet-list-roundtrip',async()=>{
   await reset('Bullet');await select(a,0,6);await page.getByRole('button',{name:'項目符號',exact:true}).click();await page.keyboard.press('ArrowRight');await page.keyboard.press('End');await page.keyboard.press('Enter');await page.keyboard.type('Next');
-  assert.equal((await value()).doc.text,'• Bullet\n• Next');const saved=(await value()).raw;await page.evaluate(v=>window.qaReset(v),saved);await expect(a.locator('ul > li')).toHaveCount(2);
+  assert.equal((await value()).doc.text,'• Bullet\n• Next');const saved=(await value()).raw;await reset(saved,false);await expect(a.locator('ul > li')).toHaveCount(2);
  });
  await run('external-paste-is-plain-and-safe',async()=>{
   await reset('Paste:');await select(a,6,6);await a.evaluate(root=>{const data=new DataTransfer();data.setData('text/plain','<img src=x onerror=alert(1)>\nSafe');data.setData('text/html','<img src=x onerror=alert(1)><b>ATTACK</b>');root.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));});
@@ -163,7 +180,7 @@ try{
  for(const device of [{name:'phone',width:390,height:844},{name:'tablet',width:820,height:1180}]){
   await run(device.name+'-touch-preserves-styles-without-toolbar',async()=>{
    const mobile=await browser.browser().newContext({viewport:{width:device.width,height:device.height},isMobile:true,hasTouch:true});await mobile.route('**/*',r=>new URL(r.request().url()).origin===origin?r.continue():r.abort());
-   const p=await mobile.newPage();await p.goto(origin+'/qa.html');await p.getByRole('textbox',{name:'Self Assessment English',exact:true}).waitFor();await p.evaluate(v=>window.qaReset(v),styled);
+   const p=await mobile.newPage();await p.goto(origin+'/qa.html');await p.getByRole('textbox',{name:'Self Assessment English',exact:true}).waitFor();await resetPage(p,styled);
    const input=p.getByRole('textbox',{name:'Self Assessment English',exact:true});await input.tap();await expect(p.getByRole('toolbar')).toBeHidden();assert.equal(await input.locator('b').count(),1);assert.equal(await input.getAttribute('contenteditable'),'true');
    await p.keyboard.press('Control+End');await p.keyboard.type(' touch');assert.ok((await p.evaluate(()=>window.core.decodeRichText(window.values.a))).spans.some(s=>s.color==='red'));
    assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);const shot=path.join(evidence,device.name+'.png');await p.screenshot({path:shot,fullPage:true});receipt.screenshots.push(shot);await mobile.close();
