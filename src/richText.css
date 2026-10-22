@@ -1,0 +1,17 @@
+.rich-editor{display:flex;flex-direction:column;min-width:0;width:100%;border:1px solid var(--border,#c8d1d8);border-radius:4px;background:#fff;overflow:hidden;font-weight:400;color:#193447}
+.rich-editor:focus-within{border-color:var(--blue,#23688c);box-shadow:0 0 0 1px var(--blue,#23688c)}
+.rich-editor .rich-editor-input{box-sizing:border-box;width:100%;min-width:0;min-height:calc(var(--rich-rows,3) * 1.5em + 12px);padding:6px 8px;font:inherit;font-size:16px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;outline:none;cursor:text}
+.rich-editor-input:empty::before{content:attr(data-placeholder);color:#71838f;pointer-events:none}
+.rich-editor-input div,.rich-editor-input p{margin:0;padding:0}
+.rich-editor-input ol,.rich-editor-input ul{margin:0;padding-left:1.7em}
+.rich-editor-input li{margin:0;padding:0}
+.rich-editor-input b,.rich-editor-input strong{font-weight:700}
+.rich-editor .rich-editor-toolbar{display:none;align-items:center;align-self:flex-start;flex-wrap:nowrap;gap:2px;width:100%;box-sizing:border-box;padding:2px 5px;border-bottom:1px solid var(--border,#dce3e8);background:#f5f8fa;line-height:1}
+.rich-editor-toolbar>button{display:inline-flex;align-items:center;justify-content:center;flex:0 0 27px;width:27px;min-width:27px;min-height:25px;height:25px;margin:0;padding:1px 3px;border:1px solid transparent;border-radius:3px;background:transparent;color:#193447;font:14px/1 Arial,sans-serif;cursor:pointer}
+.rich-editor-toolbar>button:hover,.rich-editor-toolbar>button:focus-visible,.rich-editor-toolbar>button[aria-pressed=true]{background:#e3edf4;border-color:#8ba6b7;outline:none}
+.rich-editor-toolbar .rich-editor-color span{border-bottom:3px solid currentColor;font-weight:700;line-height:1.1}
+.rich-editor-disabled{background:#f0f3f5;color:#617584}
+.rich-editor-disabled .rich-editor-input{cursor:default}
+.rich-editor-single .rich-editor-input{white-space:pre-wrap}
+@media(any-pointer:fine){.rich-editor .rich-editor-toolbar{display:flex}}
+@media print{.rich-editor .rich-editor-toolbar{display:none!important}}

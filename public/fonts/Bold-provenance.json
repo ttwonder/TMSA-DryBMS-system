@@ -1,0 +1,53 @@
+{
+  "fonts": [
+    {
+      "file": "NotoSansTC-Bold.ttf",
+      "upstreamUrl": "https://raw.githubusercontent.com/notofonts/noto-cjk/165c01b46ea533872e002e0785ff17e44f6d97d8/Sans/Variable/TTF/NotoSansCJKtc-VF.ttf",
+      "upstreamCommit": "165c01b46ea533872e002e0785ff17e44f6d97d8",
+      "upstreamSha256": "6b40dd16cf1b73b5a7a0ed2472d641b60e3e85e87211abd20009f67d841425da",
+      "sha256": "8fd143a751871ad4cd93fed537cf65f507d4fe691ac6e63056b8fcc8220f3275",
+      "bytes": 19002424,
+      "weight": 700,
+      "unicodeGlyphs": 33638,
+      "license": "SIL OFL 1.1",
+      "existingLicenseFile": "OFL.txt",
+      "existingLicenseSha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2",
+      "fontTools": "4.60.1",
+      "transforms": [
+        "subset same Regular repertoire",
+        "instantiate real variable weight 700",
+        "rename family and mark Bold",
+        "glyf padding=4; verify every outline and loca offset"
+      ]
+    },
+    {
+      "file": "ReportSupplement-Bold.ttf",
+      "upstreamUrl": "https://raw.githubusercontent.com/google/fonts/66928797f271fed5ee428544e7229685e2d90127/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf",
+      "upstreamCommit": "66928797f271fed5ee428544e7229685e2d90127",
+      "upstreamSha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d",
+      "sha256": "7bb5733d764280194d2b77c3bdd01f9e7576e8efab367effff37f49e101aa31b",
+      "bytes": 2428,
+      "weight": 700,
+      "unicodeGlyphs": 4,
+      "license": "SIL OFL 1.1",
+      "existingLicenseFile": "ReportSupplement-Regular-OFL.txt",
+      "existingLicenseSha256": "e2e177a32561584d4fc13aaa3cd8e53758a12910f013fe9ca125419111722029",
+      "fontTools": "4.60.1",
+      "transforms": [
+        "subset same Regular repertoire",
+        "instantiate real variable weight 700",
+        "rename family and mark Bold",
+        "glyf padding=4; verify every outline and loca offset"
+      ]
+    }
+  ],
+  "protectedFilesUnchanged": {
+    "NotoSansTC-Regular.ttf": "1fb8c870b683c2a18bf0c0f593c766bfff99c588f4eb4325150a7fe3bdf1d8eb",
+    "OFL.txt": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2",
+    "provenance.json": "973ea65e318f098d56bb7e969ee9f4516781390adf3c8d83c1c2c95eef0ade40",
+    "ReportSupplement-Regular-OFL.txt": "e2e177a32561584d4fc13aaa3cd8e53758a12910f013fe9ca125419111722029",
+    "ReportSupplement-Regular.ttf": "feb54ebf82a179a2b8c87ec3fb6a884c48ca559302b944f420e5f05c0c9c9864",
+    "ReportSymbols-Regular-OFL.txt": "e87c2ed7ff174c637d55fa381939ebb96f43f0415ad94605a37589228f4cbf4f",
+    "ReportSymbols-Regular.ttf": "a372a291410cce4b7e4922426e9315cd78ddafba02536b3b74deec3bfb242912"
+  }
+}

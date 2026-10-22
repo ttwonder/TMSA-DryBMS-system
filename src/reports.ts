@@ -1,6 +1,7 @@
 import {PRODUCT_NAME_EN} from './branding.ts';
-import {improvementSourceLabel} from './improvementTracking.ts';
 import {compactBlankLines} from './standardText.ts';
+import {improvementSourceLabel} from './improvementTracking.ts';
+import {compactRichText,decodeRichText,isRichText,richTextRuns,richTextToPlainText,sliceRichText,RICH_COLORS} from './richText.ts';
 import {filterImprovementList,type ImprovementListFilters} from './improvementList.ts';
 import {hasItemRemarks,remarksStatusDefinition,remarksStatusLabel} from './itemRemarks.ts';
 import {findingClassificationLabel,improvementFindingClassification} from './findingClassification.ts';
@@ -14,7 +15,7 @@ import type { Assessment, BiText, Chapter, ExportRequest, FrameworkId, Improveme
 import { assessmentFor, currentIncludesTmsa14, inspectionIncludesTmsa14, departmentsLabel, filteredImprovements, frameworkScore, hasPermission, inspectionScore, openIssuesFor, peopleLabel, type Filters } from './domain.ts';
 
 export interface ReportFieldLine {fieldId:string;page:number;x:number;baseline:number;width:number;size:number}
-export interface ReportBuildOptions { templateBytes?:Uint8Array; fontBytes?:Uint8Array; fallbackFontBytes?:Uint8Array[]; onFieldLine?:(line:ReportFieldLine)=>void; }
+export interface ReportBuildOptions { templateBytes?:Uint8Array; fontBytes?:Uint8Array; fallbackFontBytes?:Uint8Array[]; boldFontBytes?:Uint8Array; boldFallbackFontBytes?:Uint8Array[]; onFieldLine?:(line:ReportFieldLine)=>void; }
 const assetUrl = (path:string) => `${(import.meta as ImportMeta & {env?:{BASE_URL?:string}}).env?.BASE_URL ?? '/'}${path}`;
 async function assetBytes(path:string):Promise<Uint8Array> {
   const response=await fetch(assetUrl(path));
@@ -22,7 +23,7 @@ async function assetBytes(path:string):Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 const tr=(lang:Language,zh:string,en:string)=>lang==='zh'?zh:en;
-export const bilingual=(value:BiText|undefined)=>value?compactBlankLines([value.en,value.zh].filter(x=>x!=='').join('\n')):'';
+export const bilingual=(value:BiText|undefined)=>value?compactRichText([value.en,value.zh].filter(x=>x!=='').join('\n')):'';
 export function sourceLabel(source:SourceLocator):string {
   return [source.source,source.file,source.sheet,source.cell,source.pages?.length?`p.${source.pages.join(',')}`:'',source.rawItem?`Item ${source.rawItem}`:'',source.note].filter(Boolean).join(' | ');
 }
@@ -82,15 +83,34 @@ function itemGuidance(item:StandardItem):BiText {
 
 // Font-aware browser measurement; conservative Unicode widths in headless QA.
 let excelMeasureContext:CanvasRenderingContext2D|null|undefined;
-function excelCharWidth(text:string,size:number,fontName:string):number {
+function excelCharWidth(text:string,size:number,fontName:string,bold=false):number {
   if(typeof document!=='undefined') {
     if(excelMeasureContext===undefined)excelMeasureContext=document.createElement('canvas').getContext('2d');
-    if(excelMeasureContext){excelMeasureContext.font=`${size*96/72}px "${fontName}"`;return excelMeasureContext.measureText(text).width*72/96;}
+    if(excelMeasureContext){excelMeasureContext.font=`${bold?'bold ':''}${size*96/72}px "${fontName}"`;return excelMeasureContext.measureText(text).width*72/96;}
   }
-  return Array.from(text).reduce((sum,c)=>sum+(/[\u2E80-\uFFFF]/u.test(c)?size:size*0.68),0);
+  return Array.from(text).reduce((sum,c)=>sum+(/[\u2E80-\uFFFF]/u.test(c)?size:size*(bold?0.75:0.68)),0);
 }
 function splitMeasured(text:string,width:number,size:number,name:string,maxLines:number):string[] {
   if(!text)return [''];
+  if(isRichText(text)){
+    const plain=richTextToPlainText(text),ranges=richTextRuns(text).map(run=>({...run,start:0,end:0}));let cursor=0;
+    for(const run of ranges){run.start=cursor;cursor+=run.text.length;run.end=cursor;}
+    const measure=(start:number,end:number)=>ranges.reduce((sum,run)=>sum+(run.end>start&&run.start<end?excelCharWidth(plain.slice(Math.max(start,run.start),Math.min(end,run.end)),size,name,run.bold):0),0);
+    const chunks:string[]=[];let start=0,lineStart=0,offset=0,lines=1;
+    for(const char of plain){
+      if(offset-start+char.length>30000){chunks.push(sliceRichText(text,start,offset));start=offset;lineStart=offset;lines=1;}
+      if(char==='\n'){
+        if(lines>=maxLines){chunks.push(sliceRichText(text,start,offset+1));start=offset+1;lines=1;}else lines++;
+        lineStart=offset+1;
+      }else if(offset>lineStart&&measure(lineStart,offset+char.length)>width){
+        if(lines>=maxLines){chunks.push(sliceRichText(text,start,offset));start=offset;lines=1;}else lines++;
+        lineStart=offset;
+      }
+      offset+=char.length;
+    }
+    if(offset>start)chunks.push(sliceRichText(text,start,offset));
+    return chunks.length?chunks:[''];
+  }
   const chunks:string[]=[];let chunk='',line='',lines=1;
   for(const char of Array.from(text)) {
     if(chunk.length+char.length>30000){chunks.push(chunk);chunk='';line='';lines=1;}
@@ -108,11 +128,15 @@ function splitMeasured(text:string,width:number,size:number,name:string,maxLines
   return chunks.length?chunks:[''];
 }
 export function splitExcelBiText(value:BiText,width:number,size=11,name='Noto Sans TC',maxLines=16):{en:string;zh:string;text:string}[] {
-  const en=splitMeasured(compactBlankLines(value.en),width,size,name,Math.max(1,Math.floor((maxLines-1)/2)));
-    const zh=splitMeasured(compactBlankLines(value.zh),width,size,name,Math.max(1,Math.floor((maxLines-1)/2)));
+  const en=splitMeasured(compactRichText(value.en),width,size,name,Math.max(1,Math.floor((maxLines-1)/2)));
+    const zh=splitMeasured(compactRichText(value.zh),width,size,name,Math.max(1,Math.floor((maxLines-1)/2)));
   return Array.from({length:Math.max(en.length,zh.length)},(_,i)=>({en:en[i]??'',zh:zh[i]??'',text:[en[i]??'',zh[i]??''].filter(x=>x!=='').join('\n')}));
 }
 const clone=<T,>(value:T):T=>JSON.parse(JSON.stringify(value)) as T;
+/** Apply inline runs after template/base fonts so size, family and other style survive. */
+function richCell(cell:ExcelJS.Cell,value:string){
+  cell.value=isRichText(value)?{richText:richTextRuns(value).map(run=>({text:run.text,font:{...cell.font,...(run.bold?{bold:true}:{}),...(run.color?{color:{argb:'FF'+RICH_COLORS[run.color].slice(1).toUpperCase()}}:{})}}))}:value;
+}
 const fallbackSide:Partial<ExcelJS.Border>={style:'thin',color:{argb:'FF8C99A6'}};
 function tableBorder(cell:ExcelJS.Cell) {
   const previous=cell.border??{};
@@ -193,7 +217,7 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
     for(const [column,min] of [[2,32],[3,48],[5,54],[6,36]] as const)sheet.getColumn(column).width=Math.max(sheet.getColumn(column).width??min,min);
     const labels=lang==='zh'?['Item','Key Performance Indicator\n關鍵績效指標','Best Practice Guidance\n最佳實務指引','Y/N',`${year} Self Assessment\n目前自評`,'Evidence\n佐證','PIC\n部門']:['Item','Key Performance Indicator','Best Practice Guidance','Y/N',`${year} Self Assessment`,'Evidence','PIC'];
     labels.forEach((value,i)=>{sheet!.getCell(header,i+1).value=value;});
-    sheet.getCell('A1').value=`${chapter.code} ${bilingual(chapter.name)}`;
+    richCell(sheet.getCell('A1'),`${chapter.code} ${bilingual(chapter.name)}`);
     sheet.getCell('A1').alignment={...sheet.getCell('A1').alignment,wrapText:true,vertical:'middle'};
     sheet.getRow(1).height=Math.max(sheet.getRow(1).height??24,48);
     // Omit the requested scoring-introduction block; retain the template's normal row height and coordinates.
@@ -215,11 +239,12 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
         let maxHeight=0;
         for(let column=1;column<=7;column++) {
           const cell=target.getCell(column);cell.style=clone(styles[column-1]);
-          cell.value=column===1?item.code:column===4?responseText(a):chunks[column-1][segment]?.text??'';
+          const value=column===1?item.code:column===4?responseText(a):chunks[column-1][segment]?.text??'';
           cell.alignment={...cell.alignment,vertical:'top',wrapText:true,shrinkToFit:false};
           cell.font={...cell.font,size:fontSize};tableBorder(cell);
+          richCell(cell,value);
           const pixelWidth=Math.max(12,(sheet.getColumn(column).width??10)*5.1-12);
-          const lineCount=splitMeasured(cell.text,pixelWidth,fontSize,cell.font.name??'Noto Sans TC',1).length;
+          const lineCount=splitMeasured(value,pixelWidth,fontSize,cell.font.name??'Noto Sans TC',1).length;
           maxHeight=Math.max(maxHeight,lineCount*fontSize*1.6+12);
         }
         if(count>1) {
@@ -254,7 +279,8 @@ const improvementStatus=(status:Improvement['status'],lang:Language)=>tr(lang,{o
 const urgencyLabel=(row:Improvement,lang:Language)=>tr(lang,{urgent:'緊急',high:'高',medium:'中',low:'低'}[row.urgency],row.urgency);
 function relatedCodes(state:PlatformState,row:Improvement){return row.itemIds.map(id=>{const item=state.items.find(i=>i.id===id);return item?`${item.frameworkId} ${item.code}`:'—';}).join('\n')||'—';}
 function businessSource(state:PlatformState,row:Improvement,lang:Language){return [improvementSourceLabel(row.source,lang),row.source==='external'?state.inspections.find(i=>i.id===row.inspectionId)?.title:''].filter(Boolean).join('\n');}
-function fullImprovementContent(row:Improvement){const body=compactBlankLines(bilingual(row.content)),title=compactBlankLines(row.title);return title===body||title===compactBlankLines(row.content.en)||title===compactBlankLines(row.content.zh)?body:compactBlankLines(title+'\n'+body);}
+// Deduplicate only identical text AND formatting; equal words can carry distinct author emphasis.
+function fullImprovementContent(row:Improvement){const body=bilingual(row.content),title=compactRichText(row.title);return [body,compactRichText(row.content.en),compactRichText(row.content.zh)].includes(title)?body:compactRichText(title+'\n'+body);}
 function operationalSheet(book:ExcelJS.Workbook,name:string,headers:string[],widths:number[],description:string){
  const sheet=book.addWorksheet(name),size=14,fontName='Microsoft JhengHei';
  widths.forEach((w,i)=>sheet.getColumn(i+1).width=w);
@@ -269,14 +295,14 @@ function operationalSheet(book:ExcelJS.Workbook,name:string,headers:string[],wid
 // Every short metadata value repeats; unusually long metadata gets ordered parts too.
 function operationalRows(sheet:ExcelJS.Worksheet,values:(string|Date|null|number)[],partColumn:number|null,narrativeColumns:number[],statusColumn?:number,status?:{background:string;color:string}){
  const size=14,fontName='Microsoft JhengHei';
- const chunks=values.map((v,i)=>typeof v==='string'?splitMeasured(compactBlankLines(v),(sheet.getColumn(i+1).width??20)*5.1-20,size,fontName,partColumn===null?(narrativeColumns.includes(i+1)?9:17):10):[v]);
+ const chunks=values.map((v,i)=>typeof v==='string'?splitMeasured(compactRichText(v),(sheet.getColumn(i+1).width??20)*5.1-20,size,fontName,partColumn===null?(narrativeColumns.includes(i+1)?9:17):10):[v]);
  const count=Math.max(...chunks.map(c=>c.length));
  for(let part=0;part<count;part++){
   const cells=chunks.map((parts,i)=>parts.length===1?part&&narrativeColumns.includes(i+1)?'':parts[0]:parts[part]??'');
   if(partColumn!==null)cells[partColumn-1]=part+1;
   else if(count>1)for(const column of narrativeColumns)cells[column-1]=`[${String(part+1).padStart(String(count).length,'0')}/${count}]\n${cells[column-1]}`;
   const row=sheet.addRow(cells);let height=32;
-  cells.forEach((v,i)=>{const c=row.getCell(i+1);c.font={name:fontName,size,color:{argb:'FF193447'}};c.alignment={wrapText:true,vertical:'top',shrinkToFit:false};tableBorder(c);if(v instanceof Date)c.numFmt='yyyy-mm-dd';height=Math.max(height,splitMeasured(typeof v==='string'?v:'X',(sheet.getColumn(i+1).width??20)*5.1-20,size,fontName,1).length*size*1.6+18);});
+  cells.forEach((v,i)=>{const c=row.getCell(i+1);c.font={name:fontName,size,color:{argb:'FF193447'}};if(typeof v==='string')richCell(c,v);c.alignment={wrapText:true,vertical:'top',shrinkToFit:false};tableBorder(c);if(v instanceof Date)c.numFmt='yyyy-mm-dd';height=Math.max(height,splitMeasured(typeof v==='string'?v:'X',(sheet.getColumn(i+1).width??20)*5.1-20,size,fontName,1).length*size*1.6+18);});
   if(height>409.5)throw new Error('Operational continuation exceeds Excel row height');// Excel Sort moves values, not physical row heights. A common safe height keeps
   // every ten-line continuation readable at any sorted position.
   row.height=Math.max(256,height);
@@ -311,6 +337,9 @@ export async function buildImprovementsExcel(state:PlatformState,ids:string[],la
 }
 
 interface PdfRow {key:string;cells:string[];warning?:boolean}
+interface PdfLine {text:string;indent:number}
+interface PdfRun {font:PDFFont;text:string;color?:keyof typeof RICH_COLORS}
+const hasBold=(value:unknown):boolean=>typeof value==='string'?richTextRuns(value).some(run=>run.bold):!!value&&typeof value==='object'&&Object.values(value).some(hasBold);
 interface PdfGroupRow {headers:string[];cells:string[];ratios?:number[];statusColumn?:number;status?:{background:string;color:string};entries?:{headers:string[];cells:string[];ratios:number[]}[]}
 const PDF_BODY=15,PDF_AUX=14,PDF_LEADING=23,PDF_PAD=8;
 const PAGE_WIDTH=1190.55,PAGE_HEIGHT=841.89,MARGIN=34,BOTTOM=64;
@@ -318,14 +347,15 @@ class TextPdf {
   readonly document:PDFDocument;readonly font:PDFFont;readonly title:string;readonly lang:Language;readonly stamp:string;
   private page!:PDFPage;private y=0;private readonly glyphs:Set<number>;
   private readonly fallbacks:{font:PDFFont;glyphs:Set<number>}[];
-  private readonly fontForCodepoint=new Map<number,PDFFont>();
+  private readonly boldFonts:{font:PDFFont;glyphs:Set<number>}[];
+  private readonly fontForCodepoint=new Map<string,PDFFont>();
   // Exact shaping results, bounded per document; no additive glyph approximation.
   private readonly measurements=new Map<string,number>();
   private readonly glyphWidths=new Map<string,number>();
   private blockIndex=0;
   private readonly onFieldLine:ReportBuildOptions['onFieldLine'];
   private readonly operational:boolean;
-  private constructor(document:PDFDocument,font:PDFFont,fallbacks:PDFFont[],title:string,lang:Language,stamp:string,onFieldLine:ReportBuildOptions['onFieldLine'],operational=false){this.operational=operational;this.document=document;this.font=font;this.title=title;this.lang=lang;this.stamp=stamp;this.glyphs=new Set(font.getCharacterSet());this.fallbacks=fallbacks.map(font=>({font,glyphs:new Set(font.getCharacterSet())}));this.onFieldLine=onFieldLine;this.newPage();}
+  private constructor(document:PDFDocument,font:PDFFont,fallbacks:PDFFont[],boldFonts:PDFFont[],title:string,lang:Language,stamp:string,onFieldLine:ReportBuildOptions['onFieldLine'],operational=false){this.operational=operational;this.document=document;this.font=font;this.title=title;this.lang=lang;this.stamp=stamp;this.glyphs=new Set(font.getCharacterSet());this.fallbacks=fallbacks.map(font=>({font,glyphs:new Set(font.getCharacterSet())}));this.boldFonts=boldFonts.map(font=>({font,glyphs:new Set(font.getCharacterSet())}));this.onFieldLine=onFieldLine;this.newPage();}
   static async create(title:string,lang:Language,state:PlatformState,options:ReportBuildOptions,operational=false) {
     const [library,{default:fontkit}]=await Promise.all([import('pdf-lib'),import('@pdf-lib/fontkit')]);
     rgb=library.rgb;
@@ -358,34 +388,43 @@ class TextPdf {
     // Browser-only lazy assets; fontBytes-only Node callers never fetch relative URLs.
     const fallbackBytes=options.fallbackFontBytes??(typeof window!=='undefined'?await Promise.all(['ReportSupplement-Regular.ttf','ReportSymbols-Regular.ttf'].map(name=>assetBytes('fonts/'+name))):[]);
     const fallbacks=await Promise.all(fallbackBytes.map(bytes=>document.embedFont(bytes,{subset:true})));
-    document.setTitle(title);document.setAuthor(PRODUCT_NAME_EN);document.setSubject(`Authorized immutable snapshot; selectable text; snapshotToken=${state.snapshotToken}`);
-    return new TextPdf(document,font,fallbacks,title,lang,state.serverTime,options.onFieldLine,operational);
+    const boldFonts:PDFFont[]=[];
+    if(hasBold(title)||hasBold(state)){
+      if(typeof window==='undefined'&&!options.boldFontBytes)throw new Error('Rich PDF in Node requires boldFontBytes / 富文字 PDF 請注入真粗體字型');
+      const bold=options.boldFontBytes??await assetBytes('fonts/NotoSansTC-Bold.ttf');
+      const supplements=options.boldFallbackFontBytes??(typeof window!=='undefined'?[await assetBytes('fonts/ReportSupplement-Bold.ttf')]:[]);
+      boldFonts.push(...await Promise.all([bold,...supplements].map(bytes=>document.embedFont(bytes,{subset:true}))));
+    }
+    document.setTitle(richTextToPlainText(title));document.setAuthor(PRODUCT_NAME_EN);document.setSubject(`Authorized immutable snapshot; selectable text; snapshotToken=${state.snapshotToken}`);
+    return new TextPdf(document,font,fallbacks,boldFonts,title,lang,state.serverTime,options.onFieldLine,operational);
   }
-  private safe(text:string):string {
+  private safe(text:string,bold=false):string {
     const value=text.replace(new RegExp(String.fromCharCode(13)+'\\n?','g'),'\n').replace(/\t/g,'    ').replace(/[\u0095\u0099\u009C]/g,'•');
-    for(const char of value)if(char!=='\n')this.actualFont(char.codePointAt(0)!);
+    for(const char of value)if(char!=='\n')this.actualFont(char.codePointAt(0)!,bold);
     return value;
   }
-  private actualFont(codepoint:number):PDFFont {
-    const cached=this.fontForCodepoint.get(codepoint);if(cached)return cached;
+  private actualFont(codepoint:number,bold=false):PDFFont {
+    const key=`${bold?1:0}:${codepoint}`,cached=this.fontForCodepoint.get(key);if(cached)return cached;
     // TC aliases bullet and source hyphens to other codepoints; preserve their own cmap/glyph identities.
-    const font=![0x2022,0x2011,0x00ad].includes(codepoint)&&this.glyphs.has(codepoint)?this.font:this.fallbacks.find(f=>f.glyphs.has(codepoint))?.font;
+    const alias=[0x2022,0x2011,0x00ad].includes(codepoint);
+    const font=bold?(alias?this.boldFonts.slice(1):this.boldFonts).find(f=>f.glyphs.has(codepoint))?.font??this.fallbacks.find(f=>f.glyphs.has(codepoint))?.font:!alias&&this.glyphs.has(codepoint)?this.font:this.fallbacks.find(f=>f.glyphs.has(codepoint))?.font;
     if(!font)throw new Error(`Report font has no glyph for U+${codepoint.toString(16).toUpperCase()} / 字型不支援此字元，請注入 PDF fallbackFontBytes，已停止以免遺失內容`);
-    this.fontForCodepoint.set(codepoint,font);return font;
+    this.fontForCodepoint.set(key,font);return font;
   }
-  private runs(text:string):{font:PDFFont;text:string}[] {
-    const runs:{font:PDFFont;text:string}[]=[];
-    for(const char of text){const font=this.actualFont(char.codePointAt(0)!),last=runs.at(-1);if(last?.font===font&&char!=='\u00ad'&&last.text!=='\u00ad')last.text+=char;else runs.push({font,text:char});}
+  private runs(text:string):PdfRun[] {
+    const runs:PdfRun[]=[];
+    for(const style of richTextRuns(text))for(const char of this.safe(style.text,style.bold)){const font=this.actualFont(char.codePointAt(0)!,style.bold),last=runs.at(-1);if(last?.font===font&&last.color===style.color&&char!=='\u00ad'&&last.text!=='\u00ad')last.text+=char;else runs.push({font,text:char,color:style.color});}
     return runs;
   }
   private textWidth(text:string,size:number):number {
     const key=`${size}:${text}`,cached=this.measurements.get(key);
     if(cached!==undefined){this.measurements.delete(key);this.measurements.set(key,cached);return cached;}
-    const width=this.runs(text).reduce((sum,run)=>sum+run.font.widthOfTextAtSize(run.text,size),0);
+    const width=this.runs(text).reduce((sum,run)=>sum+this.runWidth(run,size),0);
     if(this.measurements.size>=8192)this.measurements.delete(this.measurements.keys().next().value!);
     this.measurements.set(key,width);return width;
   }
-  private wrap(text:string,width:number,size=PDF_BODY):string[] {
+  private wrap(text:string,width:number,size=PDF_BODY):PdfLine[] {
+    if(isRichText(text))return this.wrapRich(text,width,size);
     const result:string[]=[];
     for(const paragraph of this.safe(compactBlankLines(text)).split('\n')) {
       const chars=Array.from(paragraph);
@@ -404,13 +443,51 @@ class TextPdf {
         result.push(line);offset+=take;
       }
     }
+    return result.map(text=>({text,indent:0}));
+  }
+  private wrapRich(text:string,width:number,size:number):PdfLine[]{
+    const value=compactRichText(text),doc=decodeRichText(value),plain=doc.text,result:PdfLine[]=[];let paragraphStart=0;
+    for(const paragraph of plain.split('\n')){
+      const chars=Array.from(paragraph),offsets=[0];for(const char of chars)offsets.push(offsets.at(-1)!+char.length);
+      const part=(start:number,end:number)=>sliceRichText(value,paragraphStart+offsets[start],paragraphStart+offsets[end]);
+      // Only rich paragraphs gain hanging list indentation; legacy geometry is unchanged.
+      const list=doc.lists.find(list=>list.start<=paragraphStart&&list.end>paragraphStart);
+      const prefix=list?(list.kind==='bullet'?'• ':`${list.ordinal}. `):/^\s*(?:\d+\. |• )/.exec(paragraph)?.[0];
+      const markerStart=list?.start??paragraphStart;
+      const hanging=prefix?this.textWidth(sliceRichText(value,markerStart,markerStart+prefix.length),size):0;
+      if(!chars.length)result.push({text:'',indent:0});
+      let offset=0;
+      while(offset<chars.length){
+        const indent=offset||list&&paragraphStart>list.start?hanging:0,available=width-indent,remaining=chars.length-offset,measure=(n:number)=>this.textWidth(part(offset,offset+n),size);
+        if(measure(1)>available)throw new Error('PDF column cannot fit one rich glyph');
+        let fit=1,upper=Math.min(2,remaining);
+        while(upper<remaining&&measure(upper)<=available){fit=upper;upper=Math.min(upper*2,remaining);}
+        if(measure(upper)<=available)fit=upper;
+        else{let lo=fit,hi=upper;while(hi-lo>1){const mid=Math.floor((lo+hi)/2);if(measure(mid)<=available)lo=mid;else hi=mid;}fit=lo;}
+        const line=chars.slice(offset,offset+fit).join('');let take=fit;
+        if(fit<remaining){const space=line.lastIndexOf(' ');if(space>line.length/3)take=Array.from(line.slice(0,space+1)).length;}
+        result.push({text:part(offset,offset+take),indent});offset+=take;
+      }
+      paragraphStart+=paragraph.length+1;
+    }
     return result;
   }
-  private draw(text:string,x:number,y:number,size=PDF_BODY,color=rgb(.12,.17,.22)) {
-    for(const run of this.runs(this.safe(text))){this.page.drawText(run.text,{x,y,font:run.font,size,color});x+=this.textWidth(run.text,size);}
+  private draw(value:string|PdfLine,x:number,y:number,size=PDF_BODY,color=rgb(.12,.17,.22),forceColor=false) {
+    const text=typeof value==='string'?value:value.text;x+=typeof value==='string'?0:value.indent;
+    for(const run of this.runs(text)){
+      const inline=run.color&&!forceColor?RICH_COLORS[run.color]:undefined;
+      const ink=inline?rgb(...(inline.slice(1).match(/../g)!.map(v=>parseInt(v,16)/255) as [number,number,number])):color;
+      this.page.drawText(run.text,{x,y,font:run.font,size,color:ink});
+      // Advance the exact same shaped font run used for drawing, never per-character widths.
+      x+=this.runWidth(run,size);
+    }
   }
-  private fieldLine(fieldId:string,text:string,x:number,y:number,width:number,size=PDF_BODY){
-    this.draw(text,x,y,size);this.onFieldLine?.({fieldId,page:this.document.getPageCount()-1,x,baseline:PAGE_HEIGHT-y,width,size});
+  private runWidth(run:PdfRun,size:number){
+    const key=`font:${run.font.name}:${size}:${run.text}`,cached=this.measurements.get(key);if(cached!==undefined)return cached;
+    const width=run.font.widthOfTextAtSize(run.text,size);if(this.measurements.size>=8192)this.measurements.delete(this.measurements.keys().next().value!);this.measurements.set(key,width);return width;
+  }
+  private fieldLine(fieldId:string,text:string|PdfLine,x:number,y:number,width:number,size=PDF_BODY){
+    this.draw(text,x,y,size);const indent=typeof text==='string'?0:text.indent;this.onFieldLine?.({fieldId,page:this.document.getPageCount()-1,x:x+indent,baseline:PAGE_HEIGHT-y,width:width-indent,size});
   }
   private newPage() {
     this.page=this.document.addPage([PAGE_WIDTH,PAGE_HEIGHT]);this.y=PAGE_HEIGHT-81;
@@ -504,7 +581,7 @@ class TextPdf {
             const style=c===logical.statusColumn?logical.status:undefined;
             this.page.drawRectangle({x,y:this.y-height,width:widths[c],height,color:style?color(style.background):rgb(1,1,1),borderWidth:.6,borderColor:rgb(.55,.63,.7)});
             heads[c].forEach((h,n)=>this.draw(h,x+PDF_PAD,this.y-PDF_AUX-4-n*20,PDF_AUX));
-            lines[c].slice(offset,offset+take).forEach((line,n)=>{const baseline=this.y-headerHeight-PDF_PAD-PDF_BODY-n*PDF_LEADING;this.draw(line,x+PDF_PAD,baseline,PDF_BODY,style?color(style.color):rgb(.12,.17,.22));this.onFieldLine?.({fieldId:`${prefix}:${block}:${rowIndex}:${entryIndex}:${c}`,page:this.document.getPageCount()-1,x:x+PDF_PAD,baseline:PAGE_HEIGHT-baseline,width:widths[c]-PDF_PAD*2,size:PDF_BODY});});
+            lines[c].slice(offset,offset+take).forEach((line,n)=>{const baseline=this.y-headerHeight-PDF_PAD-PDF_BODY-n*PDF_LEADING;this.draw(line,x+PDF_PAD,baseline,PDF_BODY,style?color(style.color):rgb(.12,.17,.22),!!style);this.onFieldLine?.({fieldId:`${prefix}:${block}:${rowIndex}:${entryIndex}:${c}`,page:this.document.getPageCount()-1,x:x+PDF_PAD+line.indent,baseline:PAGE_HEIGHT-baseline,width:widths[c]-PDF_PAD*2-line.indent,size:PDF_BODY});});
             x+=widths[c];
           }
           this.y-=height;offset+=take;if(offset<count)continuation();
@@ -652,7 +729,7 @@ export function downloadReportBytes(bytes:Uint8Array,filename:string,mime:string
   if(typeof document==='undefined')throw new Error('Downloads require a browser; use the pure builder in Node');
   const blob=new Blob([new Uint8Array(bytes).buffer],{type:mime});
   const url=URL.createObjectURL(blob),anchor=document.createElement('a');
-  anchor.href=url;anchor.download=filename;anchor.style.display='none';document.body.appendChild(anchor);
+  anchor.href=url;anchor.download=richTextToPlainText(filename);anchor.style.display='none';document.body.appendChild(anchor);
   try{anchor.click();}finally{anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),60_000);}
 }
 const reportFilename=(state:PlatformState,name:string,extension:string)=>`${name}-${state.serverTime.slice(0,10)||'snapshot'}.${extension}`;

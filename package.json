@@ -51,6 +51,11 @@
     "qa:sync-efficiency-ui": "node --experimental-strip-types scripts/verify-sync-efficiency-ui.mjs",
     "qa:management-viewer": "node --experimental-strip-types scripts/verify-management-viewer.mjs",
     "qa:management-viewer-ui": "node --experimental-strip-types scripts/verify-management-viewer-ui.mjs",
+    "qa:rich-text-editor": "node --experimental-strip-types scripts/verify-rich-text-editor.mjs",
+    "qa:rich-text-app": "node --experimental-strip-types scripts/verify-rich-text-app.mjs",
+    "qa:rich-text-roundtrip": "node --experimental-strip-types scripts/verify-rich-text-roundtrip.mjs",
+    "qa:rich-text-management": "node --experimental-strip-types scripts/verify-rich-text-management.mjs",
+    "qa:rich-text-reports": "node --experimental-strip-types scripts/verify-rich-text-reports.mjs rich",
     "import:sources": "python3 scripts/import_sources.py"
   },
   "dependencies": {

@@ -1,5 +1,6 @@
 import type {Assessment,Language,RemarksStatus} from './types.ts';
 
+import {isRichTextEmpty} from './richText.ts';
 // Remarks are a separate manual judgement, never an input to Y/N or scoring.
 export const REMARKS_STATUSES:ReadonlyArray<{value:RemarksStatus;zh:string;en:string;background:string;color:string}> = [
  {value:'fully_met',zh:'完全符合',en:'Fully compliant',background:'#DFF2E6',color:'#195C36'},
@@ -11,4 +12,4 @@ export const REMARKS_STATUSES:ReadonlyArray<{value:RemarksStatus;zh:string;en:st
 export const remarksStatusDefinition=(value:Assessment['remarksStatus'])=>REMARKS_STATUSES.find(s=>s.value===value);
 export const remarksStatusLabel=(value:Assessment['remarksStatus'],lang:Language)=>remarksStatusDefinition(value)?.[lang]??(lang==='zh'?'未選擇':'Not selected');
 export const remarksStatusStyle=(value:Assessment['remarksStatus'])=>{const s=remarksStatusDefinition(value);return s?{backgroundColor:s.background,color:s.color}:undefined;};
-export const hasItemRemarks=(assessment:Assessment|undefined)=>!!assessment?.remarks?.trim();
+export const hasItemRemarks=(assessment:Assessment|undefined)=>!isRichTextEmpty(assessment?.remarks);

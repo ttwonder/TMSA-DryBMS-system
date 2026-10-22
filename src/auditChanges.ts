@@ -1,3 +1,4 @@
+import {richTextToPlainText} from './richText.ts';
 import {REMARKS_STATUSES} from './itemRemarks.ts';
 import type { AuditLog, BrowseState, Language } from './types';
 
@@ -75,8 +76,9 @@ export function describeAudit(log:AuditLog,lang:Language,state?:BrowseState):Aud
   };
   const add=(a:unknown,b:unknown,path:string[],labels:string[],field:string,entry?:EntryChange)=>{
     const before=entry==='added'&&a===undefined?t('（原無此筆）','(no previous entry)'):format(a,field,'before'),after=entry==='removed'&&b===undefined?t('（此筆已移除）','(entry removed)'):format(b,field,'after'),label=labels.join(t('／',' / '));
-    const short=[before,after].every(v=>v.length<=52&&!/[\r\n]/.test(v));
-    const detail=short?`${before} → ${after}`:mode==='diff'?t('內容已修改','Content changed'):t('已保存內容（展開查看）','Saved content (expand to view)');
+    const plainBefore=richTextToPlainText(before),plainAfter=richTextToPlainText(after);
+    const short=[plainBefore,plainAfter].every(v=>v.length<=52&&!/[\r\n]/.test(v));
+    const detail=before!==after&&plainBefore===plainAfter?t('文字格式已修改','Text formatting changed'):short?`${plainBefore} → ${plainAfter}`:mode==='diff'?t('內容已修改','Content changed'):t('已保存內容（展開查看）','Saved content (expand to view)');
     changes.push({path:JSON.stringify(path),label,before,after,summary:`${label}${t('：',': ')}${detail}`});
   };
   const priority=['reviewed','response','conformity','executionStatus','percent','status','urgency','selfAssessment','evidence','content','title','plan','targetDate','departmentIds','assigneeIds','scoreTargets','events'];
