@@ -6,7 +6,7 @@ import type { Filters } from './domain';
 export const IMPROVEMENTS_PER_PAGE = 40;
 export interface ImprovementListFilters extends Filters {
   itemId?: string;
-  source?: '' | 'non_external' | 'management_review' | 'management_directive' | `inspection:${string}`;
+  source?: '' | Exclude<Improvement['source'], 'external'> | `inspection:${string}`;
   proposedFrom?: string;
   proposedTo?: string;
   // This is a display restriction, not a new persisted lifecycle status.

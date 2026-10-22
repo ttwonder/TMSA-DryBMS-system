@@ -1,9 +1,9 @@
 import type { Improvement, Language } from './types';
 
-export const COMPANY_IMPROVEMENT_SOURCES = ['management_review', 'management_directive'] as const;
-export const isCompanyImprovement = (source: Improvement['source']) => COMPANY_IMPROVEMENT_SOURCES.some(value => value === source);
+export const STANDALONE_IMPROVEMENT_SOURCES = ['management_review', 'management_directive', 'vessel_safety_meeting', 'company_safety_meeting'] as const;
+export const isStandaloneImprovement = (source: Improvement['source']) => STANDALONE_IMPROVEMENT_SOURCES.some(value => value === source);
 export function improvementSourceLabel(source: Improvement['source'], lang: Language): string {
-  const labels = { external: ['外部檢查', 'External inspection'], non_external: ['自行提出', 'Self-proposed'], management_review: ['管理審查會議', 'Management review meeting'], management_directive: ['管理層指令', 'Management directive'] };
+  const labels = { external: ['外部檢查', 'External inspection'], non_external: ['自行提出', 'Self-proposed'], management_review: ['管理審查會議', 'Management review meeting'], management_directive: ['管理層指令', 'Management directive'], vessel_safety_meeting: ['船舶安全會議', 'Vessel safety meeting'], company_safety_meeting: ['公司安全會議', 'Company safety meeting'] };
   return labels[source]?.[lang === 'zh' ? 0 : 1] ?? source;
 }
 /** Date-only business fact. No timestamp/inspection-date inference for saved rows. */

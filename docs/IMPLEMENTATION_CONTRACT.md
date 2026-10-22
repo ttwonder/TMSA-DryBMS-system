@@ -188,3 +188,11 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 - 只減少已測得的重複 fontkit shaping：保留原 per-document exact width cache，另在每份文件的每個嵌入字型內有界重用完全相同、預設 features 的 shaping 結果。不得採單字寬相加近似、不跨快照存業務資料、不延長 timeout、不改授權／GM／保存或字型資產。
 - 三邏輯行、15pt 正文／14pt 輔助、原換頁邊界、全文／字元／fallback／ToUnicode 都要以實際產檔及前後幾何比對確認。共享 TextPdf 僅做備註／框架／改善／歷史的有限代表性回歸；未變動 SQL／人員／保存層以基準 hash 保護，不重做已完成的人員批。
 - 本批接續最新已提交功能完成有限驗證後，建立獨立本機 commit，供使用者一起 Push。原暫停 handback 與所有失敗證據保留；最新交付見 `docs/REMARKS_EXPORT_FOLLOWUP_DELIVERY.md`、`qa-evidence/remarks-export-followup/resumed-e838b86/`。不得聲稱正式慢匯出的根因或正式加速已驗證，亦不代執行正式 SQL／Push／部署。
+
+## 最新追加：船舶及公司安全會議來源
+
+- 待改善項目新增「船舶安全會議」（`vessel_safety_meeting`）及「公司安全會議」（`company_safety_meeting`），接在原來源後，保留原來源代碼及排序。英文分別為 Vessel safety meeting／Company safety meeting。
+- 使用者已確認兩者均可獨立建立，TMSA／DRYBMS 條目關聯選填；不因名稱推定體系、條目或角色。原自行提出仍須條目，原外部檢查的來源／finding／關聯範圍與去重不變。
+- 新增／完整編輯、列表與報告中心來源篩選、來源顯示、操作紀錄及 PDF／Excel 共用相同代碼／標籤；來源與其他篩選仍為 AND，無關聯的項目不冒充屬於任一體系。既有已保存來源仍不可任意改寫。
+- 沿原記錄級 lease／CAS／ACK、明確保存／取消及來源身分限制；不改 UI 版面、預設來源、角色、進度或歷史，不回填／改寫既有記錄。
+- 新增019前向 SQL 及獨立唯讀 readback，只擴充已知 validator 的來源與無Item白名單；001–018及舊 readback 不改。正式安裝與唯讀核對必須先於新版前端發布；舊 readback 的函式hash可能因升級失配，不是重跑舊 SQL 的理由。未知前置版本先核對，不盲目安裝。使用者自行執行正式 SQL／Push／部署，本機通過不是正式驗收。

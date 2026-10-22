@@ -33,7 +33,7 @@ const enums: Record<string, Record<string, Pair>> = {
   urgency:{urgent:['盡快','Urgent'],high:['高','High'],medium:['中','Medium'],low:['低','Low']},
   role:{owner:['Owner','Owner'],admin:['管理員','Administrator'],operator:['操作員','Operator'],vessel:['船端','Vessel']},
   classification:{finding:['缺失','Observation'],ofi:['建議改善','OFI'],positive:['正面觀察','Positive observation'],guidance:['指引','Guidance'],no_finding:['無缺失','No finding'],general:['一般觀察（非自動判No）','General observation (not automatically No)']},
-  source:{external:['外部檢查','External inspection'],non_external:['自行提出','Self-raised'],management_review:['管理審查會議','Management review meeting'],management_directive:['管理層指令','Management directive']},type:{formal:['正式','Formal'],informal:['非正式','Informal']},
+  source:{external:['外部檢查','External inspection'],non_external:['自行提出','Self-raised'],management_review:['管理審查會議','Management review meeting'],management_directive:['管理層指令','Management directive'],vessel_safety_meeting:['船舶安全會議','Vessel safety meeting'],company_safety_meeting:['公司安全會議','Company safety meeting']},type:{formal:['正式','Formal'],informal:['非正式','Informal']},
 };
 const metadata = new Set(['id','version','createdAt','updatedAt','updatedBy']);
 // Same key-level exclusion as the server audit sanitizer; never expose nested credentials.

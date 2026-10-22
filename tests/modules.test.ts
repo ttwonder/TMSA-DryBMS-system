@@ -177,6 +177,18 @@ test('saved imported general themes can track progress without guessing Item IDs
   assert.notEqual(Improvements.improvementValidation(action, ctx), '');
 });
 
+for (const source of ['vessel_safety_meeting','company_safety_meeting'] as const) test(`safety meeting ${source} can be created with optional item links`, () => {
+  const state = fixture(), ctx = context(state);
+  const action = { ...Inspections.improvementFromFinding(Inspections.createInspectionDraft(state, 'TMSA'), finding(state)), source, itemIds: [] as string[], inspectionId: undefined, findingId: undefined, sourceKey: undefined, sources: [] };
+  const before = structuredClone(action);
+  assert.equal(Improvements.improvementValidation(action, ctx), '');
+  assert.deepEqual(action, before);
+  action.itemIds = [state.items[0].id];
+  assert.equal(Improvements.improvementValidation(action, ctx), '');
+  assert.notEqual(Improvements.improvementValidation({...action, source:'non_external', itemIds:[]}, ctx), '');
+  assert.notEqual(Improvements.improvementValidation({...action, title:''}, ctx), '');
+});
+
 test('effective selection is unique, filtered and empty never becomes all', () => {
   const state = fixture();
   const inspection = Inspections.createInspectionDraft(state, 'TMSA');
