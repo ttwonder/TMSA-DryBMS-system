@@ -9,7 +9,7 @@ const {layoutFixture}=createRequire(import.meta.url)('../scripts/layout-fixture.
 const meetings=[['vessel_safety_meeting','船舶安全會議','Vessel safety meeting'],['company_safety_meeting','公司安全會議','Company safety meeting']] as const;
 
 test('standalone source vocabulary extends the existing choices in order',()=>{
- assert.deepEqual(STANDALONE_IMPROVEMENT_SOURCES,['management_review','management_directive','vessel_safety_meeting','company_safety_meeting']);
+ assert.deepEqual(STANDALONE_IMPROVEMENT_SOURCES,['management_review','management_directive','vessel_safety_meeting','company_safety_meeting','seminar','external_regulatory_impact']);
  for(const source of STANDALONE_IMPROVEMENT_SOURCES)assert.equal(isStandaloneImprovement(source),true);
  for(const source of ['external','non_external'] as const)assert.equal(isStandaloneImprovement(source),false);
 });

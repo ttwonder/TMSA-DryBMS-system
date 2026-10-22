@@ -9,7 +9,7 @@ const rich=(text:string,color:'red'|'blue'='red')=>encodeRichText({text,spans:[{
 test('plain consumer labels and searches strip every composed rich fragment',()=>{
  const content={en:rich('Across styled boundary'),zh:rich('雙語內容','blue')};assert.equal(bi(content,'en'),'Across styled boundary');
  const action={id:'one',title:rich('Action title'),content,plan:rich('Plan details'),events:[{content:rich('Progress phrase')}],itemIds:['i'],departmentIds:[],assigneeIds:[],status:'open',urgency:'medium',updatedAt:'2026-01-01'};
- const state={items:[{id:'i',code:'I-1',frameworkId:'TMSA',chapterId:'chapter'}],improvements:[action]} as unknown as BrowseState;
+ const state={chapters:[],items:[{id:'i',code:'I-1',frameworkId:'TMSA',chapterId:'chapter'}],improvements:[action]} as unknown as BrowseState;
  for(const query of ['styled boundary','雙語內容','Action title','Plan details','Progress phrase','I-1'])assert.deepEqual(filteredImprovements(state,{query}).map(v=>v.id),['one']);
  for(const query of ['RT1:','"s":','not present'])assert.equal(filteredImprovements(state,{query}).length,0);
 });

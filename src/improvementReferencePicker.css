@@ -1,0 +1,50 @@
+/* Only the improvement-reference field. Import after styles.css / themes.css. */
+.improvement-reference-picker {
+  grid-column: 1 / -1;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 6px 10px 8px;
+  border: 1px solid var(--border, #dce3e8);
+  border-radius: 4px;
+  color: var(--theme-text, #193447);
+  background: var(--theme-surface, #fff);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.improvement-reference-picker > legend { padding: 0 4px; font-size: 15px; font-weight: 600; }
+.improvement-reference-picker .irp-hint { color: var(--muted, #617584); font-size: 14px; font-weight: 400; }
+.improvement-reference-picker .irp-frameworks { min-width: 0; margin: 5px 0; padding: 0; border: 0; }
+.improvement-reference-picker .irp-frameworks > legend { padding: 0; font-size: 14px; font-weight: 600; }
+.improvement-reference-picker .irp-frameworks > div { display: flex; flex-wrap: wrap; gap: 4px 20px; }
+.improvement-reference-picker label { display: flex; align-items: flex-start; min-width: 0; gap: 6px; padding: 5px 0; overflow-wrap: anywhere; cursor: pointer; }
+.improvement-reference-picker input[type=checkbox] { width: 18px; height: 18px; margin: 2px 0 0; flex: 0 0 18px; }
+.improvement-reference-picker label > span { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.improvement-reference-picker .irp-chapters { max-height: 310px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border-top: 1px solid var(--border); }
+.improvement-reference-picker h4 { margin: 0; font-size: 14px; font-weight: 600; }
+.improvement-reference-picker .irp-framework-section > h4 { padding: 4px 0 2px; color: var(--blue); }
+.improvement-reference-picker .irp-chapter + .irp-chapter { border-top: 1px solid var(--border); }
+.improvement-reference-picker .irp-chapter-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px; align-items: start; }
+.improvement-reference-picker button { color: var(--blue); background: var(--theme-alt, #f4f7fa); border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; font-size: 14px; line-height: 1.5; min-height: 30px; max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
+.improvement-reference-picker button:hover:not(:disabled) { border-color: var(--blue); }
+.improvement-reference-picker .irp-chapter-row > button { margin: 3px 0; }
+.improvement-reference-picker .irp-items { margin: 0 0 5px 9px; padding: 0 6px 0 13px; border-left: 2px solid var(--border); }
+.improvement-reference-picker .irp-items[hidden] { display: none; }
+.improvement-reference-picker .irp-items label + label { border-top: 1px solid var(--border); }
+.improvement-reference-picker .irp-selected { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 5px; }
+.improvement-reference-picker .irp-selected h4 { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.improvement-reference-picker .irp-selected ul { list-style: none; padding: 0; margin: 2px 0 0; max-height: 180px; overflow-y: auto; overscroll-behavior: contain; }
+.improvement-reference-picker .irp-selected li { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: start; padding: 3px 0; }
+.improvement-reference-picker .irp-selected-text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 14px; }
+.improvement-reference-picker .irp-retained { display: block; font-size: 14px; color: var(--theme-orange, #925412); }
+.improvement-reference-picker:disabled label { cursor: default; }
+.improvement-reference-picker button:disabled { color: var(--muted); background: var(--theme-alt, #f4f7fa); opacity: 1; cursor: not-allowed; }
+@media (max-width: 620px) {
+  .improvement-reference-picker { padding: 5px 7px 7px; }
+  .improvement-reference-picker .irp-chapters { max-height: 300px; }
+  .improvement-reference-picker .irp-chapter-row { gap: 4px; }
+  .improvement-reference-picker .irp-chapter-row > button { max-width: 100px; }
+  .improvement-reference-picker label { min-height: 36px; }
+  .improvement-reference-picker button { min-height: 36px; padding: 5px 6px; }
+}

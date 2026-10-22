@@ -33,7 +33,7 @@ registerHooks({
 const Improvements = await import('../src/Improvements.tsx');
 const Inspections = await import('../src/Inspections.tsx');
 const Management = await import('../src/Management.tsx');
-const { DEFAULT_PERMISSIONS, inspectionScore } = await import('../src/domain.ts');
+const { DEFAULT_PERMISSIONS, inspectionScore, filteredImprovements, openIssuesFor } = await import('../src/domain.ts');
 const { createElement } = await import('react');
 const { renderToStaticMarkup } = await import('react-dom/server');
 
@@ -57,6 +57,43 @@ const source = (name: string): string => {
   const path = new URL(`../src/${name}.tsx`, import.meta.url);
   return existsSync(path) ? readFileSync(path, 'utf8') : '';
 };
+
+test('hierarchical links: chapter-only self-proposed actions validate without expanding items', () => {
+  const state=fixture(),inspection=Inspections.createInspectionDraft(state,'TMSA');
+  const action={...Inspections.improvementFromFinding(inspection,finding(state)),source:'non_external' as const,inspectionId:undefined,findingId:undefined,sourceKey:undefined,sources:[],itemIds:[],chapterIds:[state.chapters[0].id,state.chapters.find(c=>c.frameworkId==='DRYBMS')!.id]};
+  const before=JSON.stringify(action);
+  assert.equal(Improvements.improvementValidation(action,context(state)),'');
+  assert.equal(JSON.stringify(action),before);assert.deepEqual(action.itemIds,[]);
+  assert.notEqual(Improvements.improvementValidation({...action,chapterIds:[]},context(state)),'');
+});
+
+test('hierarchical links: framework and chapter filters include chapter-only actions once, without item stars', () => {
+  const state=fixture(),inspection=Inspections.createInspectionDraft(state,'TMSA');
+  const chapter=state.chapters[0],dry=state.chapters.find(c=>c.frameworkId==='DRYBMS')!;
+  const action={...Inspections.improvementFromFinding(inspection,finding(state)),itemIds:[],chapterIds:[chapter.id,dry.id]};state.improvements=[action];
+  for(const frameworkId of ['TMSA','DRYBMS'] as const)assert.deepEqual(filteredImprovements(state,{frameworkId}).map(r=>r.id),[action.id]);
+  assert.deepEqual(filteredImprovements(state,{chapterId:chapter.id}).map(r=>r.id),[action.id]);
+  assert.deepEqual(filteredImprovements(state,{chapterId:state.chapters[1].id}),[]);
+  assert.deepEqual(openIssuesFor(state,state.items[0].id),[]);
+  state.improvements=[{...action,itemIds:[state.items[0].id]}];
+  assert.equal(filteredImprovements(state,{chapterId:chapter.id}).length,1);
+});
+
+test('hierarchical links: external chapter references stay within the frozen source finding', () => {
+  const state=fixture(),inspection={...Inspections.createInspectionDraft(state,'TMSA'),version:1};inspection.findings=[finding(state)];state.inspections=[inspection];
+  const action={...Inspections.improvementFromFinding(inspection,inspection.findings[0]),itemIds:[],chapterIds:[state.items[0].chapterId]};
+  assert.equal(Improvements.improvementValidation(action,context(state)),'');
+  assert.notEqual(Improvements.improvementValidation({...action,chapterIds:[state.chapters[1].id]},context(state)),'');
+});
+
+test('hierarchical links: optional chapters reject null, malformed, duplicate or missing references', () => {
+  const state=fixture(),inspection=Inspections.createInspectionDraft(state,'TMSA');
+  const action={...Inspections.improvementFromFinding(inspection,finding(state)),source:'company_safety_meeting' as const,inspectionId:undefined,findingId:undefined,sourceKey:undefined,sources:[],itemIds:[]};
+  assert.equal(Improvements.improvementValidation(action,context(state)),'');
+  for(const chapterIds of [null,'chapter',[1],['missing'],[state.chapters[0].id,state.chapters[0].id]]) {
+    assert.notEqual(Improvements.improvementValidation({...action,chapterIds:chapterIds as unknown as string[]},context(state)),'');
+  }
+});
 
 test('existing external progress validates against authoritative thin source classification without fetching the entire inspection', async () => {
   const { inspectionSummary } = await import('../src/syncState.ts');
@@ -177,7 +214,7 @@ test('saved imported general themes can track progress without guessing Item IDs
   assert.notEqual(Improvements.improvementValidation(action, ctx), '');
 });
 
-for (const source of ['vessel_safety_meeting','company_safety_meeting'] as const) test(`safety meeting ${source} can be created with optional item links`, () => {
+for (const source of ['vessel_safety_meeting','company_safety_meeting','seminar','external_regulatory_impact'] as const) test(`standalone source ${source} can be created with optional item links`, () => {
   const state = fixture(), ctx = context(state);
   const action = { ...Inspections.improvementFromFinding(Inspections.createInspectionDraft(state, 'TMSA'), finding(state)), source, itemIds: [] as string[], inspectionId: undefined, findingId: undefined, sourceKey: undefined, sources: [] };
   const before = structuredClone(action);

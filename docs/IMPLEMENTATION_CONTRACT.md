@@ -196,3 +196,14 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 - 新增／完整編輯、列表與報告中心來源篩選、來源顯示、操作紀錄及 PDF／Excel 共用相同代碼／標籤；來源與其他篩選仍為 AND，無關聯的項目不冒充屬於任一體系。既有已保存來源仍不可任意改寫。
 - 沿原記錄級 lease／CAS／ACK、明確保存／取消及來源身分限制；不改 UI 版面、預設來源、角色、進度或歷史，不回填／改寫既有記錄。
 - 新增019前向 SQL 及獨立唯讀 readback，只擴充已知 validator 的來源與無Item白名單；001–018及舊 readback 不改。正式安裝與唯讀核對必須先於新版前端發布；舊 readback 的函式hash可能因升級失配，不是重跑舊 SQL 的理由。未知前置版本先核對，不盲目安裝。使用者自行執行正式 SQL／Push／部署，本機通過不是正式驗收。
+
+## 最新追加：研討會、法規影響與階層關聯
+
+- 來源新增「研討會」（`seminar`，Seminar）與「外部法規規則影響」（`external_regulatory_impact`，External regulatory and rule impacts），追加於兩個安全會議後。使用者已確認兩者可獨立建立，章節／小項目關聯選填；不帶外部檢查來源身分、不建立或冒充 finding，不改既有 `external` 去重及來源鎖定。
+- 原 `non_external` 持久碼保持，全部來源名稱顯示統一為「內部管理需求」／Internal management needs，涵蓋新增／編輯選項、清單／報告篩選、詳情、歷史操作紀錄及 PDF／Excel。既有自行提出記錄（使用者回報17筆）沿共用標籤直接顯示新名，不逐筆回填，不改ID、版本、內容、進度、來源raw或歷史。17筆是使用者回報數量，本機合成17筆驗證不能冒充正式數量查證；使用者自行輸入的正文不做全域文字替換。
+- 原平面Item選擇改為體系→大章節→小項目，均支援多選及跨體系。體系選取只控制瀏覽，不保存為業務關聯；切換體系不清除既選。勾章節直接保存穩定 `chapterIds?:string[]`，展開小項目不自動全選，選章節與選Item相互獨立；已有停用／範圍外關聯保留、可手動移除。
+- 內部管理需求至少一個章節或Item；其他已允許獨立的來源可皆空。外部改善章節範圍由來源檢查凍結 snapshot 中 finding 的Item推導，不能用目前條目搬移後的章節放寬；元件候選篩選不是權限，保存仍由既有server validator檢查。
+- 舊記錄缺chapterIds視為無直接章節關聯，不回填。舊client省略此欄保存須保留已保存值，明確[]才清除；非陣列／非字串／重複／不存在的章節拒絕。章節不展開成全部Item、不冒加Item星號，不改自評／符合程度／評分。
+- 章節與體系篩選、總覽分佈及報告授權快照納入真正的章節關聯，同一改善每個集合只計一次，跨章節件數仍可重疊。列表、詳情、audit與實際PDF／Excel顯示業務框架／章節代碼與章節標記；Item原關聯與操作保留。
+- 020前向擴充直接章節驗證、舊client省略保留、篩選及授權快照；021只擴兩新來源白名單。001–019及原readback不改，020／021各有獨立catalog-only readback。僅DDL，不改業務／歷史／audit；未知版本／非預期ACL拒絕，保原fenced lease／CAS／operation ACK、角色與GM排除。
+- 正式順序：核對已安裝版本→019及其readback（若未裝）→020及其readback→021及其readback→發布新版前端。後續migration會合法改前一readback的函式hash，不盲重跑舊檔。SQL執行、Push／部署仍由使用者決定；本批只交付本機版本，接受證據見 `docs/IMPROVEMENT_SOURCES_CHAPTER_LINKS_DELIVERY.md`。
