@@ -95,7 +95,7 @@ export function RichTextEditor({value,onChange,rows=3,disabled=false,readOnly=fa
   onFocusCapture={()=>{pendingBlur.current=false;if(editable)setFocused(true);}}
   onBlurCapture={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node)){if(pointerActive.current)pendingBlur.current=true;else{setFocused(false);savedRange.current=null;}}}}>
   {focused&&editable&&<div className="rich-editor-toolbar" role="toolbar" aria-label={labels.toolbar} onMouseDown={event=>event.preventDefault()}>
-   {(Object.keys(RICH_COLORS) as RichColor[]).map(color=><button key={color} type="button" className="rich-editor-color" aria-label={labels[color]} title={labels[color]} onClick={()=>command('foreColor',RICH_COLORS[color])}><span style={{color:RICH_COLORS[color]}} aria-hidden="true">A</span></button>)}
+   {(Object.keys(RICH_COLORS) as RichColor[]).map(color=><button key={color} type="button" className="rich-editor-color" aria-label={labels[color]} title={labels[color]} onClick={()=>command('foreColor',RICH_COLORS[color])}><span data-rich-color={color} style={{color:RICH_COLORS[color]}} aria-hidden="true">A</span></button>)}
    <button type="button" aria-label={labels.bold} title={labels.bold} aria-pressed={bold} onClick={()=>command('bold')}><b aria-hidden="true">B</b></button>
    {!singleLine&&<><button type="button" aria-label={labels.ordered} title={labels.ordered} onClick={()=>command('insertOrderedList')}><span aria-hidden="true">1.</span></button><button type="button" aria-label={labels.bullet} title={labels.bullet} onClick={()=>command('insertUnorderedList')}><span aria-hidden="true">•</span></button></>}
   </div>}
@@ -122,5 +122,5 @@ export function RichText({value,compact=false,sentence=false,inline=false,classN
  const raw=value??'';
  if(!isRichText(raw))return sentence?formatStandardText(raw):compact?compactBlankLines(raw):raw;
  const projected=sentence?reflowRichText(raw,formatStandardText(richTextToPlainText(raw))):compact?compactRichText(raw):raw;
- return <span className={className} style={inline?undefined:{whiteSpace:'pre-wrap'}}>{richTextRuns(projected).map((run,index)=><span key={index} style={{...(run.bold?{fontWeight:700}:{}),...(run.color?{color:RICH_COLORS[run.color]}:{})}}>{run.text}</span>)}</span>;
+ return <span className={['rich-text-content',className].filter(Boolean).join(' ')} style={inline?undefined:{whiteSpace:'pre-wrap'}}>{richTextRuns(projected).map((run,index)=><span key={index} data-rich-color={run.color} style={{...(run.bold?{fontWeight:700}:{}),...(run.color?{color:RICH_COLORS[run.color]}:{})}}>{run.text}</span>)}</span>;
 }

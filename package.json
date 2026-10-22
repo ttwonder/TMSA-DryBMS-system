@@ -51,6 +51,7 @@
     "qa:sync-efficiency-ui": "node --experimental-strip-types scripts/verify-sync-efficiency-ui.mjs",
     "qa:management-viewer": "node --experimental-strip-types scripts/verify-management-viewer.mjs",
     "qa:management-viewer-ui": "node --experimental-strip-types scripts/verify-management-viewer-ui.mjs",
+    "qa:display-themes": "node --experimental-strip-types scripts/verify-display-themes.mjs",
     "qa:rich-text-editor": "node --experimental-strip-types scripts/verify-rich-text-editor.mjs",
     "qa:rich-text-app": "node --experimental-strip-types scripts/verify-rich-text-app.mjs",
     "qa:rich-text-roundtrip": "node --experimental-strip-types scripts/verify-rich-text-roundtrip.mjs",

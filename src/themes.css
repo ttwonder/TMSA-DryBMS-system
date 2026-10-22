@@ -1,0 +1,219 @@
+/* Screen-only display preferences. Normal and print keep the original palette.
+   Import after styles.css and richText.css. No saved content or report colors change. */
+@media screen {
+  html[data-theme="normal"], html[data-theme="eye"] { color-scheme: light; }
+  html[data-theme="dark"] {
+    color-scheme: dark;
+    --theme-page: #111a21;
+    --theme-surface: #1c2833;
+    --theme-alt: #253644;
+    --theme-text: #e4edf2;
+    --theme-muted: #adc0ce;
+    --theme-border: #536b7c;
+    --theme-link: #8cc9f0;
+    --theme-primary: #245e80;
+    --theme-on-primary: #f4fbff;
+    --theme-green: #86d7b0;
+    --theme-orange: #f4c07b;
+    --theme-red: #ffa5a5;
+    --theme-purple: #d8b4f8;
+    --theme-blue: #8cc9f0;
+    --theme-green-bg: #19382c;
+    --theme-orange-bg: #3a2f20;
+    --theme-red-bg: #40292e;
+    --theme-purple-bg: #342a42;
+    --theme-blue-bg: #203746;
+    --theme-success-button: #246147;
+    --theme-danger-button: #923b43;
+    --theme-backdrop: #060e18bb;
+    --theme-shadow: #00000055;
+  }
+  html[data-theme="eye"] {
+    --theme-page: #e9eee2;
+    --theme-surface: #f6f4e8;
+    --theme-alt: #e7ebdc;
+    --theme-text: #293b2f;
+    --theme-muted: #536553;
+    --theme-border: #8b9b84;
+    --theme-link: #365f55;
+    --theme-primary: #365f55;
+    --theme-on-primary: #fbf8ee;
+    --theme-green: #2c6543;
+    --theme-orange: #855319;
+    --theme-red: #9e3d3d;
+    --theme-purple: #694c85;
+    --theme-blue: #235b94;
+    --theme-green-bg: #e3eddf;
+    --theme-orange-bg: #f2e8d3;
+    --theme-red-bg: #f5e4dd;
+    --theme-purple-bg: #ede5ef;
+    --theme-blue-bg: #e3ebdf;
+    --theme-success-button: #2c6543;
+    --theme-danger-button: #9e3d3d;
+    --theme-backdrop: #253b2f80;
+    --theme-shadow: #293b2f26;
+  }
+
+  /* The only shared layout change is the small control beside language. */
+  .display-controls { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+  .theme-switch { width: 92px; min-width: 92px; height: 29px; padding: 3px 5px; font-size: 14px; }
+  .theme-switch:lang(en) { width: 110px; min-width: 110px; }
+  .app-header > .header-tools { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+  .header-tools > .identity { min-width: 0; overflow-wrap: anywhere; }
+
+  html:is([data-theme="dark"], [data-theme="eye"]) {
+    --navy: var(--theme-text);
+    --blue: var(--theme-link);
+    --green: var(--theme-green);
+    --orange: var(--theme-orange);
+    --red: var(--theme-red);
+    --purple: var(--theme-purple);
+    --border: var(--theme-border);
+    --muted: var(--theme-muted);
+    color: var(--theme-text);
+    background: var(--theme-page);
+    accent-color: var(--theme-primary);
+  }
+  html:is([data-theme="dark"], [data-theme="eye"]) body { color: var(--theme-text); background: var(--theme-page); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(input, select, textarea, option, optgroup) {
+    color: var(--theme-text); background-color: var(--theme-surface); border-color: var(--theme-border);
+  }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(input, textarea)::placeholder,
+  html:is([data-theme="dark"], [data-theme="eye"]) .rich-editor-input:empty::before { color: var(--theme-muted); opacity: 1; }
+  html:is([data-theme="dark"], [data-theme="eye"]) input[type="checkbox"] { accent-color: var(--theme-primary); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(input, select, textarea):focus {
+    outline-color: var(--theme-link); border-color: var(--theme-link);
+  }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(button, summary, a):focus-visible {
+    outline: 2px solid var(--theme-link); outline-offset: 2px;
+  }
+  html:is([data-theme="dark"], [data-theme="eye"]) ::selection { color: var(--theme-on-primary); background: var(--theme-primary); }
+
+  /* Explicit existing surface families; no blanket div/span recoloring. */
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.app-header, .main-nav, .toolbar, .score-card, .panel, .chapter-navigation, .item-detail, .management-sidebar, .report-card, .login-card, .modal, .toast, .multi-select-dropdown, .data-table, .summary-grid > div) {
+    color: var(--theme-text); background-color: var(--theme-surface); border-color: var(--theme-border);
+  }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.metadata-grid, .assessment-editor, .assessment-decision, .item-responsibility, .audit-detail, .detail-box, .modal > header, .app-footer, .navigation-legend, .level-label, .latest-progress, .secondary-filters > summary) {
+    color: var(--theme-text); background-color: var(--theme-alt); border-color: var(--theme-border);
+  }
+  html:is([data-theme="dark"], [data-theme="eye"]) .item-detail .assessment-editor { background: transparent; }
+  html:is([data-theme="dark"], [data-theme="eye"]) .modal .editor-actions { background: var(--theme-surface); border-color: var(--theme-border); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .modal-backdrop { background: var(--theme-backdrop); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.modal, .toast, .login-card) { box-shadow: 0 4px 20px var(--theme-shadow); }
+  html[data-theme="dark"] .brand img { background-color: #fff; border-radius: 3px; }
+
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.score-card-footer, .priority-panel .priority-item, .target-chapter, .navigation-search, .requirement-block, .bilingual > div + div, .multi-select, .linked-issue, .source-details, .source-details section, .item-pagination, .events li, .progress-history li, .event-row, .checklist-table th, .checklist-table td, .data-table td, .segmented) { border-color: var(--theme-border); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .score-card { border-top-color: var(--theme-muted); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .score-card.tmsa { border-top-color: var(--theme-blue); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .score-card.drybms { border-top-color: var(--theme-green); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.data-table th, .checklist-table th) { color: var(--theme-text); background: var(--theme-alt); border-color: var(--theme-border); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .data-table tbody tr:hover { background: var(--theme-alt); }
+
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.eyebrow, .calculation-note, .score-card strong small, .score-caption, .score-card-footer, .priority-item p, .target-score span, .target-score small, .chapter-button small, .navigation-legend, .level-label, .source-context-label, .metadata-grid small, .field > span, .multi-select legend, .source-details, .dry-score-panel > p, .item-pagination small, .empty-state, .event-row small, .events small, .report-card p, .login-intro p, .login-card p, .login-card > small, .login-footnote, .app-footer, .info-label, .list-hint, .improvement-table .improvement-content, .picker-selection) { color: var(--theme-muted); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.score-card-footer b, .requirement-block h3, .item-content-grid h3, .bilingual > div + div) { color: var(--theme-text); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.text-link, .text-button, .secondary-filters > summary) { color: var(--theme-link); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.icon-button, .toast button) { color: var(--theme-muted); }
+
+  /* Native and custom navigation retain selected, hover and keyboard states. */
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.main-nav > button, .tabs button, .subtabs button, .management-tabs button, .inspection-tabs button, .management-sidebar button) { color: var(--theme-muted); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.segmented button, .chapter-button, .item-nav) { background: var(--theme-surface); color: var(--theme-text); border-color: var(--theme-border); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.main-nav > button, .tabs button, .subtabs button, .management-tabs button, .inspection-tabs button, .management-sidebar button, .segmented button, .chapter-button, .item-nav):hover:not(:disabled) { background: var(--theme-alt); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.main-nav > button.active, .tabs button.active, .subtabs button.active, .management-tabs button.active, .inspection-tabs button.active, .management-sidebar button.active, .segmented button.active, .chapter-button.current, .item-nav.active) {
+    color: var(--theme-link); background: var(--theme-blue-bg); border-color: var(--theme-link);
+  }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.btn.neutral, .btn.secondary) { background: var(--theme-surface); color: var(--theme-text); border-color: var(--theme-border); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .btn.primary { background: var(--theme-primary); color: var(--theme-on-primary); border-color: var(--theme-primary); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .btn.success { background: var(--theme-success-button); color: var(--theme-on-primary); border-color: var(--theme-success-button); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .btn.danger { background: var(--theme-danger-button); color: var(--theme-on-primary); border-color: var(--theme-danger-button); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .btn.outline { background: transparent; color: var(--theme-link); border-color: var(--theme-link); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .btn:hover:not(:disabled) { filter: none; box-shadow: inset 0 0 0 1px currentColor; }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.mini-progress, .progress-track) { background: var(--theme-alt); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.mini-progress > span, .progress-track > span) { background: var(--theme-blue); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .mini-progress.success > span { background: var(--theme-green); }
+
+  /* Semantic status pairs remain distinct on all new surfaces. */
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.notice, .notice.source-note, .selection-bar, .urgency.medium, .status-pill.in_progress, .status-in_progress) { background: var(--theme-blue-bg); color: var(--theme-blue); border-color: var(--theme-blue); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.environment-label, .btn.warning, .notice.warning, .urgency.high, .status-pill.yellow, .status-pill.open, .status-open, .linked-improvements) { background: var(--theme-orange-bg); color: var(--theme-orange); border-color: var(--theme-orange); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.notice.error, .urgency.urgent, .status-pill.red, .gap-marker) { background: var(--theme-red-bg); color: var(--theme-red); border-color: var(--theme-red); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.notice.success, .status-pill.green, .status-pill.closed, .status-pill.final, .status-closed, .dry-score-panel, .tmsa14-switch.included, .improvement-table .urgency.low, .linked-improvement-table .urgency.low) { background: var(--theme-green-bg); color: var(--theme-green); border-color: var(--theme-green); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.status-pill.purple, .status-pill.draft) { background: var(--theme-purple-bg); color: var(--theme-purple); border-color: var(--theme-purple); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.count-badge, .level-badge, .badge, .urgency.low, .tmsa14-switch.excluded) { background: var(--theme-alt); color: var(--theme-muted); border-color: var(--theme-border); }
+  /* Badge utilities can coexist with .badge; semantic pairs win that cascade. */
+  html:is([data-theme="dark"], [data-theme="eye"]) .badge.status-open { background: var(--theme-orange-bg); color: var(--theme-orange); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .badge.status-closed { background: var(--theme-green-bg); color: var(--theme-green); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .badge.status-in_progress { background: var(--theme-blue-bg); color: var(--theme-blue); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.improvement-star, .multi-select .retained-reference, .linked-improvements summary) { color: var(--theme-orange); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.lock-label, .filter-active) { color: var(--theme-green); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.inspection-status.green, .chapter-button .chapter-status.green) { color: var(--theme-green); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.inspection-status.yellow, .chapter-button .chapter-status.yellow) { color: var(--theme-orange); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.inspection-status.red, .chapter-button .chapter-status.red) { color: var(--theme-red); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .chapter-button .chapter-status.purple { color: var(--theme-purple); }
+  /* Selected inspection chapters use a dark primary surface, even in eye care. */
+  html[data-theme="eye"] .btn.primary .inspection-status.green { color: #b8e9cc; }
+  html[data-theme="eye"] .btn.primary .inspection-status.yellow { color: #ffe0a0; }
+  html[data-theme="eye"] .btn.primary .inspection-status.red { color: #ffc6c6; }
+  html:is([data-theme="dark"], [data-theme="eye"]) .status-dot.green { background: var(--theme-green); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .status-dot.yellow { background: var(--theme-orange); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .status-dot.red { background: var(--theme-red); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .status-dot.purple { background: var(--theme-purple); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .tmsa14-switch .scope-light { background: var(--theme-muted); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .tmsa14-switch.included .scope-light { background: var(--theme-green); box-shadow: 0 0 0 2px var(--theme-green-bg); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .toast { border-left-color: var(--theme-blue); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .toast.success { border-left-color: var(--theme-green); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .toast.error { border-left-color: var(--theme-red); }
+
+  /* Override only the paired inline status colors, not reports or arbitrary styles. */
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(select, option, span)[data-remarks-status="fully_met"] { background-color: var(--theme-green-bg) !important; color: var(--theme-green) !important; }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(select, option, span)[data-remarks-status="partial_improvable"] { background-color: var(--theme-blue-bg) !important; color: var(--theme-blue) !important; }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(select, option, span)[data-remarks-status="partial_blocked"] { background-color: var(--theme-purple-bg) !important; color: var(--theme-purple) !important; }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(select, option, span)[data-remarks-status="not_met_improvable"] { background-color: var(--theme-orange-bg) !important; color: var(--theme-orange) !important; }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(select, option, span)[data-remarks-status="not_met_blocked"] { background-color: var(--theme-red-bg) !important; color: var(--theme-red) !important; }
+
+  html:is([data-theme="dark"], [data-theme="eye"]) .rich-editor { color: var(--theme-text); background: var(--theme-surface); border-color: var(--theme-border); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .rich-editor:focus-within { border-color: var(--theme-link); box-shadow: 0 0 0 1px var(--theme-link); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .rich-editor .rich-editor-toolbar { color: var(--theme-text); background: var(--theme-alt); border-color: var(--theme-border); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .rich-editor-toolbar > button { color: var(--theme-text); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .rich-editor-toolbar > button:is(:hover, :focus-visible, [aria-pressed="true"]) { background: var(--theme-blue-bg); border-color: var(--theme-link); }
+  html:is([data-theme="dark"], [data-theme="eye"]) .rich-editor-toolbar > button:focus-visible { outline: 2px solid var(--theme-link); outline-offset: -2px; }
+  html:is([data-theme="dark"], [data-theme="eye"]) .rich-editor-disabled { color: var(--theme-muted); background: var(--theme-alt); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(input, textarea)[readonly] { color: var(--theme-text); background: var(--theme-alt); }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.btn, button, input, select, textarea):disabled {
+    opacity: 1; color: var(--theme-muted); background-color: var(--theme-alt); border-color: var(--theme-border); -webkit-text-fill-color: currentColor;
+  }
+
+  /* Only canonical rich-text colors inside their three known scopes are mapped.
+     Hex/RGB attributes cover initial HTML and native contenteditable foreColor.
+     The underlying inline attributes and serialized canonical bytes stay intact. */
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.rich-text-content, .rich-editor-input, .rich-editor-toolbar) :is(
+    [data-rich-color="black"], font[color="#000000" i], font[color="#000" i], font[color="black" i],
+    :is(span, font)[style*="color:#000000" i], :is(span, font)[style*="color: #000000" i],
+    :is(span, font)[style*="color:rgb(0,0,0)" i], :is(span, font)[style*="color: rgb(0,0,0)" i],
+    :is(span, font)[style*="color:rgb(0, 0, 0)" i], :is(span, font)[style*="color: rgb(0, 0, 0)" i],
+    font[color="rgb(0, 0, 0)" i], font[color="rgb(0,0,0)" i]
+  ) { color: var(--theme-text) !important; }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.rich-text-content, .rich-editor-input, .rich-editor-toolbar) :is(
+    [data-rich-color="red"], font[color="#c62828" i],
+    :is(span, font)[style*="color:#c62828" i], :is(span, font)[style*="color: #c62828" i],
+    :is(span, font)[style*="color:rgb(198,40,40)" i], :is(span, font)[style*="color: rgb(198,40,40)" i],
+    :is(span, font)[style*="color:rgb(198, 40, 40)" i], :is(span, font)[style*="color: rgb(198, 40, 40)" i],
+    font[color="rgb(198, 40, 40)" i], font[color="rgb(198,40,40)" i]
+  ) { color: var(--theme-red) !important; }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.rich-text-content, .rich-editor-input, .rich-editor-toolbar) :is(
+    [data-rich-color="blue"], font[color="#1565c0" i],
+    :is(span, font)[style*="color:#1565c0" i], :is(span, font)[style*="color: #1565c0" i],
+    :is(span, font)[style*="color:rgb(21,101,192)" i], :is(span, font)[style*="color: rgb(21,101,192)" i],
+    :is(span, font)[style*="color:rgb(21, 101, 192)" i], :is(span, font)[style*="color: rgb(21, 101, 192)" i],
+    font[color="rgb(21, 101, 192)" i], font[color="rgb(21,101,192)" i]
+  ) { color: var(--theme-blue) !important; }
+  html:is([data-theme="dark"], [data-theme="eye"]) :is(.rich-text-content, .rich-editor-input, .rich-editor-toolbar) :is(
+    [data-rich-color="green"], font[color="#237a35" i],
+    :is(span, font)[style*="color:#237a35" i], :is(span, font)[style*="color: #237a35" i],
+    :is(span, font)[style*="color:rgb(35,122,53)" i], :is(span, font)[style*="color: rgb(35,122,53)" i],
+    :is(span, font)[style*="color:rgb(35, 122, 53)" i], :is(span, font)[style*="color: rgb(35, 122, 53)" i],
+    font[color="rgb(35, 122, 53)" i], font[color="rgb(35,122,53)" i]
+  ) { color: var(--theme-green) !important; }
+}
+@media screen and (max-width: 620px) {
+  .app-header > .header-tools { width: 100%; flex-wrap: wrap; }
+  .header-tools > .display-controls { margin-left: auto; }
+}
