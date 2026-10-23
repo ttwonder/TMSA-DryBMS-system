@@ -236,3 +236,7 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 - 章節與體系篩選、總覽分佈及報告授權快照納入真正的章節關聯，同一改善每個集合只計一次，跨章節件數仍可重疊。列表、詳情、audit與實際PDF／Excel顯示業務框架／章節代碼與章節標記；Item原關聯與操作保留。
 - 020前向擴充直接章節驗證、舊client省略保留、篩選及授權快照；021只擴兩新來源白名單。001–019及原readback不改，020／021各有獨立catalog-only readback。僅DDL，不改業務／歷史／audit；未知版本／非預期ACL拒絕，保原fenced lease／CAS／operation ACK、角色與GM排除。
 - 正式順序：核對已安裝版本→019及其readback（若未裝）→020及其readback→021及其readback→發布新版前端。後續migration會合法改前一readback的函式hash，不盲重跑舊檔。SQL執行、Push／部署仍由使用者決定；本批只交付本機版本，接受證據見 `docs/IMPROVEMENT_SOURCES_CHAPTER_LINKS_DELIVERY.md`。
+
+## 待改善來源目錄管理（023 獨立追加）
+
+來源 ID 與原語義保持；沿既有 optional `SystemSettings.improvementSources` 管理雙語標籤及啟用狀態，只允 active Owner/admin 明確 Save。自訂來源為 `custom:<UUID v4>` standalone，不得冒充 external identity。停用只阻新增，歷史仍可保存／結案／重開／匯出。舊 client 省略目錄要在 validator 前保留原值；GM 在 read/sync/canonical export/persistence 前移除目錄。已授權 snapshot 不跟隨 live 改名。此追加不變更前九項報表版面／12pt／多選／排序／密度，亦不改 001–022。完整契約、023/readback 交接、真本機驗證邊界見 [IMPROVEMENT_SOURCE_CATALOG.md](IMPROVEMENT_SOURCE_CATALOG.md)。

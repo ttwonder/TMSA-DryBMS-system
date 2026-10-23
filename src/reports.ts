@@ -303,7 +303,7 @@ const excelDate=(value:string|null|undefined):Date|null=>{const day=reportDate(v
 const improvementStatus=(status:Improvement['status'],lang:Language)=>tr(lang,{open:'開啟',in_progress:'進行中',closed:'結案'}[status],{open:'Open',in_progress:'In progress',closed:'Closed'}[status]);
 const urgencyLabel=(row:Improvement,lang:Language)=>tr(lang,{urgent:'緊急',high:'高',medium:'中',low:'低'}[row.urgency],row.urgency);
 function relatedCodes(state:PlatformState,row:Improvement,lang:Language){return improvementReferenceLabels(improvementReferenceIndex(state),row,lang).join('\n')||'—';}
-function businessSource(state:PlatformState,row:Improvement,lang:Language){return [improvementSourceLabel(row.source,lang),row.source==='external'?state.inspections.find(i=>i.id===row.inspectionId)?.title:''].filter(Boolean).join('\n');}
+function businessSource(state:PlatformState,row:Improvement,lang:Language){return [improvementSourceLabel(row.source,lang,state.settings),row.source==='external'?state.inspections.find(i=>i.id===row.inspectionId)?.title:''].filter(Boolean).join('\n');}
 // Deduplicate only identical text AND formatting; equal words can carry distinct author emphasis.
 function fullImprovementContent(row:Improvement){const body=bilingual(row.content),title=compactRichText(row.title);return [body,compactRichText(row.content.en),compactRichText(row.content.zh)].includes(title)?body:compactRichText(title+'\n'+body);}
 function operationalSheet(book:ExcelJS.Workbook,name:string,headers:string[],widths:number[],description:string){

@@ -1,3 +1,4 @@
+import {activeImprovementSource} from './improvementTracking';
 import {useReportPrint,printProvided} from './useReportPrint';
 import {RichTextEditor,RichText} from './RichTextEditor';
 import {richTextToPlainText,isRichTextEmpty} from './richText';
@@ -135,6 +136,7 @@ export default function Inspections(ctx: PageProps) {
   const createAction = async (inspection: Inspection, finding: Finding) => {
     const existing = state.improvements.find(row => row.sourceKey === `${inspection.id}:${finding.id}` || row.inspectionId === inspection.id && row.findingId === finding.id);
     if (existing) { ctx.navigate('improvements', existing.id); return; }
+    if (!activeImprovementSource('external',state.settings)) { ctx.notify(t('外部檢查來源已停用，不能新增改善；既有檢查與改善仍可編輯。', 'The external inspection source is inactive. Existing inspections and actions remain editable.'),'error'); return; }
     const summary = state.inspections.find(row => row.id === inspection.id);
     const canonical = summary?await hydrate(summary):null;
     const originalFinding = canonical?.findings.find(row => row.id === finding.id);

@@ -233,3 +233,4 @@
 .improvement-plan,.improvement-latest-progress{margin-top:5px;border-top:1px solid var(--border);padding-top:4px}
 .improvement-plan>small,.improvement-latest-progress>small{color:var(--muted)}
 .improvement-plan p,.improvement-latest-progress p{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:620px){.improvement-source-settings .page-heading{grid-template-columns:minmax(0,1fr)}.improvement-source-settings .page-heading>.page-actions{grid-column:1;grid-row:3;max-width:100%}.improvement-source-settings .page-heading .btn{white-space:normal}}

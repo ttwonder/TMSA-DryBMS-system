@@ -15,7 +15,7 @@ const actions: Record<string, Pair> = {
 };
 const kinds: Record<string, Pair> = {framework:['體系設定','Framework'],chapter:['分章','Chapter'],item:['標準條目','Standard item'],assessment:['目前自評','Current assessment'],improvement:['待改善項目','Improvement'],inspection:['歷史檢查','Inspection'],person:['人員','Person'],dryScore:['DRYBMS 四級自評','DRYBMS maturity assessment'],settings:['系統設定','Settings'],export:['報表匯出','Report export'],import:['資料匯入','Data import'],workspace:['工作區','Workspace']};
 const fields: Record<string, Pair> = {
-  milestones:['具體階段目標','Specific milestones'],milestoneEvents:['階段變更歷史','Milestone change history'],goal:['階段目標','Milestone goal'],plannedDate:['預期完成日期','Planned completion date'],achievedDate:['實際達成日期','Actual achievement date'],milestoneId:['階段識別','Milestone identity'],reason:['理由','Reason'],cascade:['順延後續未達成階段','Shift subsequent unachieved milestones'],before:['變更前','Before'],after:['變更後','After'],
+  improvementSources:['改善來源目錄','Improvement sources'],milestones:['具體階段目標','Specific milestones'],milestoneEvents:['階段變更歷史','Milestone change history'],goal:['階段目標','Milestone goal'],plannedDate:['預期完成日期','Planned completion date'],achievedDate:['實際達成日期','Actual achievement date'],milestoneId:['階段識別','Milestone identity'],reason:['理由','Reason'],cascade:['順延後續未達成階段','Shift subsequent unachieved milestones'],before:['變更前','Before'],after:['變更後','After'],
   reviewed:['已完成本次更新','Update complete'],response:['Y/N','Y/N'],conformity:['符合程度','Conformity'],executionStatus:['執行狀態','Implementation status'],percent:['完成百分比','Completion percentage'],status:['狀態','Status'],urgency:['急迫程度','Urgency'],
   selfAssessment:['自評','Self assessment'],evidence:['執行佐證','Evidence'],content:['內容','Content'],title:['標題','Title'],plan:['改善計劃','Action plan'],proposedDate:['提出日期','Proposed date'],targetDate:['目標日期','Target date'],departmentIds:['涉及部門','Departments'],departmentId:['部門','Department'],assigneeIds:['執行人','Assignees'],itemIds:['關聯 Item','Linked items'],chapterIds:['關聯章節','Linked chapters'],itemId:['Item','Item'],
   events:['進度紀錄','Progress history'],at:['時間','Time'],by:['記錄人','Recorded by'],closedAt:['結案時間','Closed at'],closedBy:['結案人','Closed by'],
@@ -72,7 +72,7 @@ export function describeAudit(log:AuditLog,lang:Language,state?:BrowseState):Aud
     if (value==='') return t('（空白）','(empty)');
     if (typeof value==='boolean') return field==='reviewed'?(value?t('已勾選','Checked'):t('未勾選','Unchecked')):field==='active'?(value?t('啟用','Active'):t('停用','Inactive')):(value?t('是','Yes'):t('否','No'));
     if (typeof value==='number') return field==='percent'||field==='levels'?`${value}%`:String(value);
-    if (typeof value==='string'&&field==='source') return improvementSourceLabel(value as Parameters<typeof improvementSourceLabel>[0],lang);
+    if (typeof value==='string'&&field==='source') return improvementSourceLabel(value as Parameters<typeof improvementSourceLabel>[0],lang,state?.settings);
     if (typeof value==='string') return own(enums,field)&&own(enums[field],value)?translated(enums[field],value):reference(value,field,side==='before'?log.before:log.after);
     if (Array.isArray(value)) return value.length?value.map(v=>format(v,field,side)).join('\n'):t('（空清單）','(empty list)');
     if (isObject(value)) return Object.entries(value).filter(([k])=>!sensitive(k)&&!metadata.has(k)).map(([k,v])=>`${translated(fields,k)}: ${format(v,k,side)}`).join('\n')||t('（空內容）','(empty object)');

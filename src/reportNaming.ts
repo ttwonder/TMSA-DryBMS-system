@@ -11,7 +11,7 @@ export function reportDescriptor(state:PlatformState,request:Omit<ExportRequest,
  const chapter=(id:string)=>{const c=state.chapters.find(c=>c.id===id);return c?`${c.frameworkId} ${c.code} ${bi(c.name,lang)}`:missing;};
  if(request.frameworkId)parts.push(request.frameworkId);else if(f.frameworkId&&f.frameworkId!=='all')parts.push(f.frameworkId);
  if(request.kind==='framework'||request.kind==='overview')add(t('章節','Chapters'),request.ids,chapter);else add(t('章節','Chapters'),values(f.chapterIds,f.chapterId),chapter);
- add(t('來源','Sources'),values(f.sources,f.source),id=>id.startsWith('inspection:')?(()=>{const i=state.inspections.find(i=>i.id===id.slice(11));return i?`${i.date} ${i.frameworkId} ${richTextToPlainText(i.title)}`:missing;})():improvementSourceLabel(id as Parameters<typeof improvementSourceLabel>[0],lang));
+ add(t('來源','Sources'),values(f.sources,f.source),id=>id.startsWith('inspection:')?(()=>{const i=state.inspections.find(i=>i.id===id.slice(11));return i?`${i.date} ${i.frameworkId} ${richTextToPlainText(i.title)}`:missing;})():improvementSourceLabel(id as Parameters<typeof improvementSourceLabel>[0],lang,state.settings));
  add(t('部門','Departments'),values(f.departmentIds,f.departmentId),id=>bi(state.settings.departments.find(d=>d.id===id)?.name,lang)||missing);
  add(t('人員','People'),values(f.personIds,f.personId),id=>state.people.find(p=>p.id===id)?.name||missing);
  if(f.itemId){const i=state.items.find(i=>i.id===f.itemId);parts.push('Item='+(i?i.frameworkId+' '+i.code:missing));}
