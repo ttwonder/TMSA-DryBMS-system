@@ -20,6 +20,16 @@ seed.improvements=[{id:'layout-existing',version:0,createdAt:'2026-01-01T00:00:0
 let qa,vite,browser,page,current='setup';
 const dialog=()=>page.getByRole('dialog');
 const labels=lang=>lang==='zh'?['標題（英文）','標題（繁中）','內容（英文）','內容（繁中）']:['Title (English)','Title (Traditional Chinese)','Content (English)','Content (Traditional Chinese)'];
+const lowerLabels=lang=>lang==='zh'?{departments:'負責部門',assignees:'執行人',urgency:'急迫程度',proposed:'提出日期',target:'目標日期',plan:'改善計劃'}:{departments:'Responsible departments',assignees:'Assignees',urgency:'Urgency',proposed:'Proposed date',target:'Target date',plan:'Action plan'};
+const lowerGeometry=async(lang)=>dialog().evaluate((root,n)=>{
+ const box=e=>{assertElement(e);const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom};};
+ const assertElement=e=>{if(!e)throw new Error('Expected original lower-form control is missing');};
+ const field=name=>[...root.querySelectorAll('label.field')].find(e=>e.firstChild?.textContent.trim()===name);
+ const group=name=>[...root.querySelectorAll('fieldset.multi-select')].find(e=>e.querySelector('legend')?.textContent===name);
+ const plan=root.querySelector('[role="textbox"][aria-label="'+n.plan+'"]'),source=[...root.querySelector('.modal-body').children].find(e=>e.matches('.notice')&&e.querySelector('strong'));
+ const fields=[n.urgency,n.proposed,n.target].map(name=>field(name));
+ return{departments:box(group(n.departments)),assignees:box(group(n.assignees)),headShortcut:box(root.querySelector('.department-head-shortcut')),fields:fields.map(box),controls:fields.map(e=>box(e.querySelector('input,select'))),plan:box(plan.closest('.rich-editor')),planField:box(plan.closest('.field')),source:box(source),milestones:box(root.querySelector('.milestone-section')),content:box(root.querySelector('[role="textbox"][aria-label="'+(n.plan==='改善計劃'?'內容（英文）':'Content (English)')+'"]').closest('.rich-editor')),planFont:parseFloat(getComputedStyle(plan).fontSize)};
+},lowerLabels(lang));
 const picture=async name=>{const p=join(out,name+'.png');await page.screenshot({path:p});receipt.screenshots.push(p);};
 const run=async(id,fn)=>{current=id;const count=receipt.violations.length;await fn();receipt.cases.push({id,status:receipt.violations.length===count?'PASS':'FAIL'});};
 const cancel=async()=>{await dialog().getByRole('button',{name:/^(取消／放棄草稿|Cancel \/ discard draft)$/}).click();await expect(dialog()).toHaveCount(0);};
@@ -31,14 +41,14 @@ try{
  const port=await new Promise((resolve,reject)=>{const p=net.createServer();p.once('error',reject);p.listen(0,'127.0.0.1',()=>{const n=p.address().port;p.close(e=>e?reject(e):resolve(n));});});
  vite=await createServer({root,base:'/',server:{host:'127.0.0.1',port,strictPort:true,watch:{ignored:['**/qa-evidence/**','**/private-seed/**']}},logLevel:'error'});await vite.listen();const ui=`http://127.0.0.1:${port}`;
  browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});
- const open=async(width,lang,theme)=>{
+ const open=async(width,lang,theme,user=qa.users.owner)=>{
   const ctx=await browser.newContext({viewport:{width,height:1000}});
   await ctx.route('**/*',r=>{const origin=new URL(r.request().url()).origin;if(![ui,qa.url].includes(origin)){receipt.blocked.push(origin);return r.abort();}return r.continue();});
-  await ctx.addInitScript(({config,user,lang,theme})=>{localStorage.setItem('fpmc-compliance-config',JSON.stringify(config));localStorage.setItem('fpmc-compliance-language',lang);localStorage.setItem('fpmc-compliance-theme',theme);sessionStorage.setItem('fpmc-compliance-client-id',user.clientId);sessionStorage.setItem('fpmc-compliance-session',JSON.stringify({user:user.user,sessionToken:user.sessionToken}));},{config:qa.config,user:qa.users.owner,lang,theme});
+  await ctx.addInitScript(({config,user,lang,theme})=>{localStorage.setItem('fpmc-compliance-config',JSON.stringify(config));localStorage.setItem('fpmc-compliance-language',lang);localStorage.setItem('fpmc-compliance-theme',theme);sessionStorage.setItem('fpmc-compliance-client-id',user.clientId);sessionStorage.setItem('fpmc-compliance-session',JSON.stringify({user:user.user,sessionToken:user.sessionToken}));},{config:qa.config,user,lang,theme});
   page=await ctx.newPage();page.setDefaultTimeout(15000);page.on('pageerror',e=>receipt.errors.push(e.message));page.on('dialog',d=>d.accept());await page.goto(ui);await page.locator('.main-nav').getByRole('button',{name:lang==='zh'?'待改善項目':'Improvements',exact:true}).click();return ctx;
  };
  const before=await ledger();
- const configs=baseline?[{width:1440,lang:'zh',theme:'normal'}]:[1440,390].flatMap(width=>['zh','en'].flatMap(lang=>['normal','dark','eye'].map(theme=>({width,lang,theme}))));
+ const configs=baseline?[{width:1440,lang:'zh',theme:'normal'}]:[...[1440,390].flatMap(width=>['zh','en'].flatMap(lang=>['normal','dark','eye'].map(theme=>({width,lang,theme})))),{width:1024,lang:'zh',theme:'eye'},{width:768,lang:'en',theme:'normal'}];
  for(const {width,lang,theme} of configs){
   const ctx=await open(width,lang,theme);
   for(const entry of ['create','full'])await run(`${entry}-${width}-${lang}-${theme}`,async()=>{
@@ -53,6 +63,16 @@ try{
    if(g.documentOverflow||g.modalOverflow||g.font.some(x=>x<16))fail('Do not shrink text or introduce horizontal document/modal overflow');
    if(theme!=='normal'&&g.theme!==theme)fail('Requested theme did not load');
    await picture(current+'-form');
+   const n=lowerLabels(lang),lower=await lowerGeometry(lang),[urgency,proposed,target]=lower.fields;
+   if(width>900){
+    if(!(lower.departments.x<lower.assignees.x&&lower.assignees.right<urgency.x&&Math.abs(urgency.x-proposed.x)<2&&Math.abs(urgency.x-target.x)<2&&lower.headShortcut.bottom<=urgency.y&&urgency.bottom<=proposed.y&&proposed.bottom<=target.y))fail('Right column must place urgency, proposed date and target date vertically below the head shortcut');
+    if(Math.abs(lower.controls[2].bottom-lower.departments.bottom)>2||Math.abs(lower.controls[2].bottom-lower.assignees.bottom)>2)fail('Target date bottom must align with department and assignee selector bottoms');
+   }
+   if(width<=620&&!(lower.departments.bottom<=lower.assignees.y&&lower.assignees.bottom<=lower.headShortcut.y&&lower.headShortcut.bottom<=urgency.y&&urgency.bottom<=proposed.y&&proposed.bottom<=target.y))fail('Narrow screens must retain the department, assignee and date controls in readable normal flow');
+   if(Math.abs(lower.plan.x-lower.content.x)>2||Math.abs(lower.plan.width-lower.content.width)>2||Math.abs(lower.plan.height-lower.content.height)>2||lower.planFont<16)fail('Action plan must match the full-width compact content editor without shrinking text');
+   if(lower.planField.y<lower.source.bottom||lower.planField.bottom>lower.milestones.y)fail('Action plan must appear after the source result and before specific milestones');
+   await dialog().getByRole('group',{name:n.departments,exact:true}).evaluate(el=>el.scrollIntoView({block:'start'}));await picture(current+'-lower');
+   if(width<=620){await dialog().getByRole('textbox',{name:n.plan,exact:true}).scrollIntoViewIfNeeded();await picture(current+'-plan');}
    const picker=dialog().locator('.improvement-reference-picker'),framework=picker.locator('.irp-frameworks').getByRole('checkbox',{name:'TMSA',exact:true});await framework.check();
    const scroller=picker.locator('.irp-chapters');await scroller.scrollIntoViewIfNeeded();
    const chapters=await scroller.evaluate(el=>{const r=el.getBoundingClientRect(),rows=[...el.querySelectorAll('.irp-chapter-row')].map(x=>x.getBoundingClientRect());return {height:r.height,clientHeight:el.clientHeight,scrollHeight:el.scrollHeight,overflowY:getComputedStyle(el).overflowY,total:rows.length,fullyVisible:rows.filter(x=>x.top>=r.top&&x.bottom<=r.bottom+1).length};});
@@ -61,8 +81,9 @@ try{
    await picture(current+'-chapters');
    const last=picker.getByRole('checkbox',{name:new RegExp('^(關聯章節|Link chapter) TMSA 12 ·')});await last.focus();await last.press('Space');await expect(last).toBeChecked();
    assert(await scroller.evaluate(el=>el.scrollTop>0));assert.equal(await picker.locator('.irp-chapter-row').count(),12);
-   await dialog().getByRole('textbox',{name:names[2],exact:true}).fill('UNSAVED layout draft');await cancel();
-   receipt.geometry.push({case:current,...g,chapters});
+   await dialog().getByRole('textbox',{name:names[2],exact:true}).fill('UNSAVED layout draft');
+   await dialog().locator('label.field').filter({hasText:new RegExp('^'+n.urgency)}).locator('select').selectOption('high');await dialog().getByLabel(n.proposed,{exact:true}).fill('2026-10-24');await dialog().getByLabel(n.target,{exact:true}).fill('2026-12-31');await dialog().getByRole('textbox',{name:n.plan,exact:true}).fill('UNSAVED full-width plan\nCancelled second line');await cancel();
+   receipt.geometry.push({case:current,...g,chapters,lower});
   });
   await ctx.close();
  }
@@ -73,12 +94,27 @@ try{
   const values=['QA layout saved','版面保存測試','Full-width English content\nSecond line retained','中文內容滿寬\n第二行仍保留'];
   for(const [i,name] of labels('zh').entries())await dialog().getByRole('textbox',{name,exact:true}).fill(values[i]);
   const content=dialog().getByRole('textbox',{name:labels('zh')[2],exact:true});await content.focus();await content.press('Control+A');await dialog().getByRole('button',{name:'紅色',exact:true}).click();
+  await dialog().locator('label.field').filter({hasText:/^急迫程度/}).locator('select').selectOption('urgent');await dialog().getByLabel('提出日期',{exact:true}).fill('2026-10-23');await dialog().getByLabel('目標日期',{exact:true}).fill('2026-12-15');
+  const planText='Full-width action plan 改善計劃\nSecond line 保留換行',plan=dialog().getByRole('textbox',{name:'改善計劃',exact:true});await plan.fill(planText);await plan.press('Control+A');await dialog().getByRole('button',{name:'藍色',exact:true}).click();
+  await dialog().locator('label.field').filter({hasText:/^來源/}).locator('select').selectOption('company_safety_meeting');
   const picker=dialog().locator('.improvement-reference-picker');await picker.locator('.irp-frameworks').getByRole('checkbox',{name:'TMSA',exact:true}).check();await picker.getByRole('checkbox',{name:/^關聯章節 TMSA 12 ·/}).check();await picker.getByRole('button',{name:'選擇小項目 TMSA 1',exact:true}).click();await picker.getByRole('checkbox',{name:/^TMSA 1\.1\.1 ·/}).check();await picker.locator('.irp-frameworks').getByRole('checkbox',{name:'DRYBMS',exact:true}).check();await picker.getByRole('checkbox',{name:/^關聯章節 DRYBMS 1 ·/}).check();
   await dialog().getByRole('button',{name:'確認保存',exact:true}).click();await expect(dialog()).toHaveCount(0);
   const saved=(await ledger()).find(r=>r.kind==='improvement'&&r.id!=='layout-existing');assert(saved);const record=saved.body;
   assert.deepEqual(record.chapterIds.slice().sort(),['chapter-DRYBMS','layout-chapter-12']);assert.deepEqual(record.itemIds,['item-a']);assert.equal(richTextToPlainText(record.content.en),values[2]);assert.equal(richTextToPlainText(record.content.zh),values[3]);assert(richTextRuns(record.content.en).some(run=>run.color==='red'&&run.text.includes('Full-width English content')));
+  assert.equal(record.urgency,'urgent');assert.equal(record.proposedDate,'2026-10-23');assert.equal(record.targetDate,'2026-12-15');assert.equal(record.source,'company_safety_meeting');assert.equal(richTextToPlainText(record.plan),planText);assert(richTextRuns(record.plan).some(run=>run.color==='blue'&&run.text.includes('Full-width action plan')));
   await page.locator('.improvement-table tbody tr').filter({hasText:'QA layout saved'}).getByRole('button',{name:'完整編輯',exact:true}).click();await expect(dialog().getByRole('textbox',{name:labels('zh')[2],exact:true})).toHaveText(values[2],{useInnerText:true});await picture('saved-full-edit');await cancel();assert.deepEqual((await ledger()).find(r=>r.id===record.id),saved);
   const ctx=page.context();await ctx.close();await open(1440,'zh','normal');await expect(page.locator('.improvement-table tbody tr').filter({hasText:'QA layout saved'})).toHaveCount(1);receipt.savedRecordId=record.id;
+ });
+ await run('original-full-edit-save-moved-fields-and-peer-readback',async()=>{
+  const ownerPage=page,prior=(await ledger()).find(r=>r.id===receipt.savedRecordId),peer=await open(1440,'zh','eye',qa.users.peer),peerPage=page;page=ownerPage;
+  await page.locator('.improvement-table tbody tr').filter({hasText:'QA layout saved'}).getByRole('button',{name:'完整編輯',exact:true}).click();
+  await expect(dialog().getByRole('textbox',{name:'改善計劃',exact:true})).toHaveText('Full-width action plan 改善計劃\nSecond line 保留換行',{useInnerText:true});
+  await dialog().locator('label.field').filter({hasText:/^急迫程度/}).locator('select').selectOption('high');await dialog().getByLabel('提出日期',{exact:true}).fill('2026-10-24');await dialog().getByLabel('目標日期',{exact:true}).fill('2026-12-31');
+  const planText='Updated action plan 完整編輯\nSecond line unchanged format',plan=dialog().getByRole('textbox',{name:'改善計劃',exact:true});await plan.fill(planText);await plan.press('Control+A');await dialog().getByRole('button',{name:'綠色',exact:true}).click();
+  await dialog().getByRole('button',{name:'確認保存',exact:true}).click();await expect(dialog()).toHaveCount(0);
+  const saved=(await ledger()).find(r=>r.id===receipt.savedRecordId);assert.equal(saved.version,prior.version+1);assert.equal(saved.body.urgency,'high');assert.equal(saved.body.proposedDate,'2026-10-24');assert.equal(saved.body.targetDate,'2026-12-31');assert.equal(richTextToPlainText(saved.body.plan),planText);assert(richTextRuns(saved.body.plan).some(run=>run.color==='green'&&run.text.includes('Updated action plan')));
+  for(const key of ['title','content','source','chapterIds','itemIds','departmentIds','assigneeIds','events','milestones','milestoneEvents'])assert.deepEqual(saved.body[key],prior.body[key],key+' must remain unchanged');
+  page=peerPage;const row=page.locator('.improvement-table tbody tr').filter({hasText:'QA layout saved'});await expect(row).toContainText('2026-12-31',{timeout:18000});await row.getByRole('button',{name:'完整編輯',exact:true}).click();await expect(dialog().getByRole('textbox',{name:'改善計劃',exact:true})).toHaveText(planText,{useInnerText:true});await expect(dialog().getByLabel('提出日期',{exact:true})).toHaveValue('2026-10-24');await expect(dialog().getByLabel('目標日期',{exact:true})).toHaveValue('2026-12-31');await dialog().getByRole('group',{name:'負責部門',exact:true}).evaluate(el=>el.scrollIntoView({block:'start'}));await picture('saved-peer-full-edit-lower');await cancel();assert.deepEqual((await ledger()).find(r=>r.id===receipt.savedRecordId),saved);await peer.close();page=ownerPage;
  });
  assert.deepEqual(receipt.errors,[]);assert.deepEqual(receipt.blocked,[]);receipt.status='PASS';
 }catch(error){receipt.status='FAIL';receipt.failure={case:current,message:String(error.stack)};await page?.screenshot({path:join(out,'failure.png')}).catch(()=>{});process.exitCode=1;}
