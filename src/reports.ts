@@ -17,7 +17,7 @@ import type { Assessment, BiText, Chapter, ExportRequest, FrameworkId, Improveme
 import { assessmentFor, currentIncludesTmsa14, inspectionIncludesTmsa14, departmentsLabel, filteredImprovements, frameworkScore, hasPermission, inspectionScore, openIssuesFor, peopleLabel, type Filters } from './domain.ts';
 
 export interface ReportFieldLine {fieldId:string;page:number;x:number;baseline:number;width:number;size:number}
-export interface ReportBuildOptions { templateBytes?:Uint8Array; fontBytes?:Uint8Array; fallbackFontBytes?:Uint8Array[]; boldFontBytes?:Uint8Array; boldFallbackFontBytes?:Uint8Array[]; onFieldLine?:(line:ReportFieldLine)=>void; }
+export interface ReportBuildOptions { departmentIds?:string[]; templateBytes?:Uint8Array; fontBytes?:Uint8Array; fallbackFontBytes?:Uint8Array[]; boldFontBytes?:Uint8Array; boldFallbackFontBytes?:Uint8Array[]; onFieldLine?:(line:ReportFieldLine)=>void; }
 const assetUrl = (path:string) => `${(import.meta as ImportMeta & {env?:{BASE_URL?:string}}).env?.BASE_URL ?? '/'}${path}`;
 async function assetBytes(path:string):Promise<Uint8Array> {
   const response=await fetch(assetUrl(path));
@@ -38,11 +38,23 @@ function selectedChapters(state:BrowseState,frameworkId:FrameworkId,ids?:string[
   if(!state.frameworks.some(f=>f.id===frameworkId&&f.active)) throw new Error('Framework unavailable / 框架不可用');
   return chapters;
 }
+function reportDepartments(state:BrowseState,ids:unknown=[]):string[] {
+  if(!Array.isArray(ids)||ids.some(id=>typeof id!=='string'||!state.settings.departments.some(d=>d.id===id))||new Set(ids).size!==ids.length)throw new Error('Selected department is unavailable / 所選部門不存在或重複');
+  return ids;
+}
+/** Department OR, chapter AND; an explicitly empty saved assignment stays empty. */
+export function selectedFrameworkItems(state:BrowseState,frameworkId:FrameworkId,chapterIds?:string[],departmentIds:string[]=[]) {
+  const chapters=new Set(selectedChapters(state,frameworkId,chapterIds).map(c=>c.id)),departments=new Set(reportDepartments(state,departmentIds));
+  const assignments=new Map(state.assessments.map(a=>[a.itemId,a.departmentIds]));
+  return state.items.filter(item=>item.active&&item.frameworkId===frameworkId&&chapters.has(item.chapterId)&&(!departments.size||(assignments.get(item.id)??item.departmentIds).some(id=>departments.has(id))));
+}
+const noFrameworkItems=()=>new Error('No items match selected departments and chapters / 所選部門與章節沒有符合的條目');
 /** Select only current, active items within the explicitly authorized chapter scope. */
-export function selectedRemarkRows(state:BrowseState,frameworkId:FrameworkId,chapterIds?:string[]) {
+export function selectedRemarkRows(state:BrowseState,frameworkId:FrameworkId,chapterIds?:string[],departmentIds:string[]=[]) {
   if(state.viewScope==='management_viewer')throw new Error('FORBIDDEN');
-  return selectedChapters(state,frameworkId,chapterIds).flatMap(chapter=>state.items
-    .filter(item=>item.active&&item.frameworkId===frameworkId&&item.chapterId===chapter.id)
+  const items=selectedFrameworkItems(state,frameworkId,chapterIds,departmentIds);
+  return selectedChapters(state,frameworkId,chapterIds).flatMap(chapter=>items
+    .filter(item=>item.chapterId===chapter.id)
     .sort((a,b)=>a.level-b.level||a.order-b.order||a.code.localeCompare(b.code))
     .flatMap(item=>{const assessment=assessmentFor(state,item.id);return assessment&&hasItemRemarks(assessment)?[{chapter,item,assessment}]:[];}));
 }
@@ -177,7 +189,9 @@ function responseText(a:Pick<Assessment,'response'>|undefined){return a?.respons
 
 /** Real OOXML; TMSA always starts from the sanitized 20-sheet source-style asset. */
 export async function buildFrameworkExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
-  const chapters=selectedChapters(state,frameworkId,chapterIds);
+  const selected=selectedFrameworkItems(state,frameworkId,chapterIds,options.departmentIds);
+  if(!selected.length)throw noFrameworkItems();
+  const chapters=selectedChapters(state,frameworkId,chapterIds).filter(c=>!options.departmentIds?.length||selected.some(i=>i.chapterId===c.id));
   const [ExcelJS,JSZip]=await Promise.all([loadExcel(),loadZip()]);
   const template=new ExcelJS.Workbook();
   const templateBytes=options.templateBytes??await assetBytes('templates/tmsa-template.xlsx');
@@ -190,7 +204,7 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
   const selectedSheets=new Set<number>();
   const year=/^\d{4}/.exec(state.serverTime)?.[0]??'Current';
   for(const chapter of chapters) {
-    const items=state.items.filter(i=>i.active&&i.frameworkId===frameworkId&&i.chapterId===chapter.id).sort((a,b)=>a.order-b.order||a.code.localeCompare(b.code));
+    const items=selected.filter(i=>i.chapterId===chapter.id).sort((a,b)=>a.order-b.order||a.code.localeCompare(b.code));
     let sheet=frameworkId==='TMSA'?book.getWorksheet(`E${chapter.code}`):undefined;
     if(!sheet&&frameworkId==='TMSA')sheet=book.worksheets.find(s=>items.some(i=>i.sources.some(loc=>loc.sheet===s.name))&&!selectedSheets.has(s.id));
     if(!sheet)sheet=newChapterSheet(book,`${frameworkId==='TMSA'?'E':'D'}${chapter.code}`,reference);
@@ -263,6 +277,8 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
     }
     const end=Math.max(firstRow,sheet.rowCount);
     for(let row=header;row<=end;row++)for(let col=1;col<=7;col++){const cell=sheet.getCell(row,col);tableBorder(cell);cell.alignment={...cell.alignment,wrapText:true,vertical:'top'};}
+    // Department excerpts retain source coordinates/styles, without blank template pages.
+    if(options.departmentIds?.length)for(let row=firstRow;row<=end;row++)sheet.getRow(row).hidden=!sheet.getCell(row,1).text;
     for(let column=8;column<=sheet.columnCount;column++)sheet.getColumn(column).hidden=true;
     sheet.autoFilter={from:{row:header,column:1},to:{row:end,column:7}};
     sheet.views=[{state:'frozen',xSplit:1,ySplit:header}];
@@ -316,8 +332,8 @@ function finishOperationalSheet(sheet:ExcelJS.Worksheet){
  sheet.views=[{state:'frozen',ySplit:4}];sheet.autoFilter={from:{row:4,column:1},to:{row:Math.max(4,sheet.rowCount),column:sheet.columnCount}};
  sheet.pageSetup={paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,printTitlesRow:'4:4',printArea:`A1:${sheet.getColumn(sheet.columnCount).letter}${sheet.rowCount}`};sheet.headerFooter={oddFooter:'&LFPMC&C&P / &N'};
 }
-export async function buildRemarksExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[]):Promise<Uint8Array> {
- const rows=selectedRemarkRows(state,frameworkId,chapterIds);if(!rows.length)throw noRemarks();
+export async function buildRemarksExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
+ const rows=selectedRemarkRows(state,frameworkId,chapterIds,options.departmentIds);if(!rows.length)throw noRemarks();
  const Excel=await loadExcel(),book=new Excel.Workbook();book.creator=PRODUCT_NAME_EN;
  const sheet=operationalSheet(book,tr(lang,'條目備註','Item remarks'),lang==='zh'?['對應章節','Item','備註狀態','涉及部門','追蹤人員','完整備註']:['Chapter','Item','Remarks status','Departments','Follow-up people','Complete remarks'],[22,10,13,22,20,126],tr(lang,'同 Item 續列保留全文與責任分工；續文開頭 [序/總數] 為閱讀標籤。篩選後請整表依 Item、完整備註升冪排序；勿單獨排序一欄。狀態為獨立補充判斷。','Continuation rows retain complete remarks and assignments; [part/total] prefixes identify reading order. Sort the whole range by Item, then Complete remarks ascending; never sort one column alone. Status is an independent supplementary assessment.'));
  for(const {chapter,item,assessment:a} of rows)operationalRows(sheet,[`${chapter.code} · ${bilingual(chapter.name)}`,item.code,remarksStatusLabel(a.remarksStatus,lang),departmentsLabel(state,a.departmentIds??item.departmentIds,lang)||'—',peopleLabel(state,a.assigneeIds??[])||'—',a.remarks??''],null,[6],3,remarksStatusDefinition(a.remarksStatus));
@@ -630,13 +646,16 @@ const frameworkHeaders=(lang:Language,restricted=false)=>lang==='zh'?['Item','KP
 const frameworkRatios=[7,20,24,5,25,14,9];
 const tmsa14ReportScope=(included:boolean,count:number,lang:Language)=>tr(lang,`有效計分範圍：${count} 分章等權；第14章：${included?'納入':'不納入'}。原條文及逐項評定全部保留。`,`Scoring scope: ${count} equal-weight chapters; TMSA chapter 14: ${included?'included':'excluded'}. All definitions and item grades are retained.`);
 export async function buildFrameworkPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
-  const chapters=selectedChapters(state,frameworkId,chapterIds),framework=state.frameworks.find(f=>f.id===frameworkId)!;
-  const title=`${frameworkId} · ${tr(lang,'完整自評報告','Full self-assessment report')}`;
+  const selected=selectedFrameworkItems(state,frameworkId,chapterIds,options.departmentIds),filtered=!!options.departmentIds?.length;
+  if(!selected.length)throw noFrameworkItems();
+  const chapters=selectedChapters(state,frameworkId,chapterIds).filter(c=>!filtered||selected.some(i=>i.chapterId===c.id)),framework=state.frameworks.find(f=>f.id===frameworkId)!;
+  const title=`${frameworkId} · ${filtered?tr(lang,'部門自評摘錄','Department assessment extract'):tr(lang,'完整自評報告','Full self-assessment report')}`;
   const pdf=await TextPdf.create(title,lang,state,options);snapshotIntro(pdf,state,lang,title);
   pdf.paragraph(bilingual(framework.scopeLabel));pdf.paragraph(bilingual(framework.description));
   pdf.paragraph(state.viewScope==='management_viewer'?tr(lang,'英文上、繁中下。Y/N、完成更新、符合程度及執行狀態各自獨立。停用條目不列入目前報告。','English above Traditional Chinese. Y/N, review, conformity and execution are independent. Inactive items are excluded from current reports.'):tr(lang,'英文上、繁中下。Y/N、完成更新、符合程度、執行狀態、改善結案各自獨立。停用條目不列入目前報告。','English above Traditional Chinese. Y/N, review, conformity, execution and improvement closure are independent. Inactive items are excluded from current reports.'),PDF_AUX);
   const score=frameworkScore(state,frameworkId,chapters.map(c=>c.id));
-  if(frameworkId==='TMSA')pdf.paragraph(tmsa14ReportScope(currentIncludesTmsa14(state),score.totalChapters,lang),PDF_AUX);
+  if(filtered)pdf.paragraph(`${tr(lang,'部門篩選','Department filter')}: ${departmentsLabel(state,options.departmentIds!,lang)}. ${tr(lang,'下方僅列符合部門與章節的條目；分數與完成數仍使用完整章節，不按部門重算。','Only items matching departments and chapters are listed; scores and reviewed counts still use complete chapters, not a department-only recalculation.')}`,PDF_AUX);
+  else if(frameworkId==='TMSA')pdf.paragraph(tmsa14ReportScope(currentIncludesTmsa14(state),score.totalChapters,lang),PDF_AUX);
   pdf.paragraph(`${tr(lang,'所選分章等權平均','Equal-weight mean of selected complete chapters')}: ${score.score===null?tr(lang,'未完整評定','Not fully assessed'):score.score.toFixed(2)+' / 4'}${score.provisional?tr(lang,'（暫估 / 來源缺口）',' (provisional / source gap)'):''}`);
   for(const chapter of chapters) {
     const chapterScore=score.rows.find(row=>row.chapterId===chapter.id)!;
@@ -644,13 +663,13 @@ export async function buildFrameworkPdf(state:PlatformState,frameworkId:Framewor
     if(chapterScore.includedInTotal===false)pdf.paragraph(tr(lang,'此章保留顯示，不納入總分。','Chapter retained; excluded from total.'),PDF_AUX);
     if(chapter.aim)pdf.paragraph(bilingual(chapter.aim));
     pdf.paragraph(`${tr(lang,'本章分數','Chapter score')}: ${chapterScore.score===null?tr(lang,'未評','Not assessed'):chapterScore.score.toFixed(2)+' / 4'}${chapterScore.provisional?tr(lang,'（暫估）',' (provisional)'):''} | ${tr(lang,'完成更新','Reviewed')}: ${chapterScore.updated}/${chapterScore.total}`,PDF_AUX);
-    const items=state.items.filter(i=>i.active&&i.frameworkId===frameworkId&&i.chapterId===chapter.id).sort((a,b)=>a.order-b.order);
+    const items=selected.filter(i=>i.chapterId===chapter.id).sort((a,b)=>a.order-b.order);
     pdf.table(frameworkHeaders(lang,state.viewScope==='management_viewer'),frameworkRatios,itemPdfRows(state,items,lang));
   }
   return pdf.finish();
 }
 export async function buildRemarksPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
- const rows=selectedRemarkRows(state,frameworkId,chapterIds);if(!rows.length)throw noRemarks();
+ const rows=selectedRemarkRows(state,frameworkId,chapterIds,options.departmentIds);if(!rows.length)throw noRemarks();
  const title=`${frameworkId} · ${tr(lang,'條目備註','Item remarks')}`,pdf=await TextPdf.create(title,lang,state,options,true);pdf.heading(title);
  for(const {chapter,item,assessment:a} of rows)pdf.groupedTable(`${frameworkId} ${item.code}`,[
   {headers:lang==='zh'?['對應章節','Item','備註狀態']:['Chapter','Item','Remarks status'],cells:[`${chapter.code} · ${bilingual(chapter.name)}`,item.code,remarksStatusLabel(a.remarksStatus,lang)],ratios:[4,2,4],statusColumn:2,status:remarksStatusDefinition(a.remarksStatus)},
@@ -769,11 +788,14 @@ export async function authorizeReportSnapshot(ctx:PageProps,request:Omit<ExportR
   if(request.kind==='improvements')selectedImprovementRows(ctx.state,request.ids,request.filters as ImprovementListFilters|undefined);
   else if(request.kind==='inspection'){if(request.ids.length!==1||!ctx.state.inspections.some(i=>i.id===request.ids[0]))throw new Error(ctx.t('請選取有效檢查','Choose a valid inspection'));}
   else {if(!request.frameworkId)throw new Error('Framework ID required');selectedChapters(ctx.state,request.frameworkId,request.ids);}
+  const departmentIds=request.kind==='framework'?reportDepartments(ctx.state,(request.filters as {departmentIds?:unknown}|undefined)?.departmentIds):[];
+  if(request.kind==='framework'&&!selectedFrameworkItems(ctx.state,request.frameworkId!,request.ids,departmentIds).length)throw noFrameworkItems();
   if(request.format==='xlsx'&&request.kind!=='framework'&&request.kind!=='improvements')throw new Error('XLSX supports framework and improvement reports only');
   const canonical=await ctx.api.authorizeExport({...request,snapshotToken:ctx.state.snapshotToken});
   if(!canonical?.snapshotToken||!canonical.serverTime)throw new Error(ctx.t('伺服器未提供有效報告快照','Server did not return a valid report snapshot'));
   if(request.kind==='improvements')selectedImprovementRows(canonical,request.ids,request.filters as ImprovementListFilters|undefined);
   else if(request.kind==='inspection'){if(!canonical.inspections.some(i=>i.id===request.ids[0]))throw new Error('Inspection absent from authorized snapshot');}
   else selectedChapters(canonical,request.frameworkId!,request.ids);
+  if(request.kind==='framework'&&!selectedFrameworkItems(canonical,request.frameworkId!,request.ids,departmentIds).length)throw noFrameworkItems();
   return canonical;
 }

@@ -103,6 +103,8 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   const previousIncompletePercent = useRef(0);
   const [validation, setValidation] = useState('');
   const [exporting, setExporting] = useState(false);
+  const exportOwner=useRef({api:ctx.api,session:ctx.api.sessionToken,actor:ctx.user.id});
+  exportOwner.current={api:ctx.api,session:ctx.api.sessionToken,actor:ctx.user.id};
   const [milestoneActionPending, setMilestoneActionPending] = useState(false);
   const milestoneSubmission = useRef<{record:Improvement;intent:SaveIntent}|null>(null);
   const [detailId, setDetailId] = useState('');
@@ -259,17 +261,22 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
     milestoneSubmission.current={intent,record:submitted};
     if (await editor.save(intent,{record:submitted})) ctx.onInlineClose?.();
   };
-  const exportPdf = async () => {
+  const exportSelected = async (format:'pdf'|'xlsx') => {
+    if(exporting||!can('exportReports'))return;
     const ids = effectiveSelection(selected, filterImprovementList(state, filters));
     if (!ids.length) { ctx.notify(t('請明確勾選仍符合篩選的改善記錄，空選不會匯出全部。', 'Explicitly select matching records. Empty selection never exports all.'), 'error'); return; }
+    const initiating=exportOwner.current;
+    const unchanged=()=>exportOwner.current.api===initiating.api&&exportOwner.current.actor===initiating.actor&&exportOwner.current.session===initiating.session&&initiating.api.sessionToken===initiating.session;
     setExporting(true);
     try {
-      const canonical = await ctx.api.authorizeExport({ format: 'pdf', kind: 'improvements', ids, snapshotToken: state.snapshotToken, filters });
-      const eligible = filterImprovementList(canonical, filters);
-      if (effectiveSelection(ids, eligible).length !== ids.length) throw new Error('EXPORT_RECORD_NOT_AVAILABLE');
-      const { downloadImprovementsPdf } = await import('./reports');
-      await downloadImprovementsPdf(canonical, ids, ctx.lang, t('待改善項目', 'Improvement actions'));
-      ctx.notify(t('PDF已產生並啟動下載。', 'PDF generated and download started.'), 'success');
+      const {authorizeReportSnapshot,buildImprovementsExcel,buildImprovementsPdf,downloadReportBytes}=await import('./reports');
+      if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
+      const canonical=await authorizeReportSnapshot(ctx,{format,kind:'improvements',ids,filters});
+      if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
+      const bytes=format==='xlsx'?await buildImprovementsExcel(canonical,ids,ctx.lang):await buildImprovementsPdf(canonical,ids,ctx.lang,t('待改善項目','Improvement actions'));
+      if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
+      downloadReportBytes(bytes,`improvements-${canonical.serverTime.slice(0,10)}.${format}`,format==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'application/pdf');
+      ctx.notify(format==='xlsx'?t('Excel已產生並啟動下載。','Excel generated and download started.'):t('PDF已產生並啟動下載。', 'PDF generated and download started.'), 'success');
     } catch (error) { ctx.notify(error instanceof Error ? error.message : String(error), 'error'); }
     finally { setExporting(false); }
   };
@@ -290,7 +297,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
 
   return <>
     {!ctx.inlineTarget && <>
-    <PageHeading title={filters.source === 'management_review' ? t('管審會執行計劃清單', 'Management review execution plan') : t('待改善項目', 'Improvement actions')} subtitle={t('提出日期為獨立日期；最近更新日期篩選為UTC，並非回溯快照。', 'Proposed date is independent. Last updated filters use UTC, not historical reconstruction.')} actions={<>{can('createImprovements') && <button className="btn primary" disabled={editor.busy || !!draft} onClick={create}>{t('新增改善', 'New action')}</button>}{can('exportReports') && <button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportPdf()}>{exporting ? t('產生中…', 'Generating…') : `${t('匯出已選PDF', 'Export selected PDF')} (${ids.length})`}</button>}</>} />
+    <PageHeading title={filters.source === 'management_review' ? t('管審會執行計劃清單', 'Management review execution plan') : t('待改善項目', 'Improvement actions')} subtitle={t('提出日期為獨立日期；最近更新日期篩選為UTC，並非回溯快照。', 'Proposed date is independent. Last updated filters use UTC, not historical reconstruction.')} actions={<>{can('createImprovements') && <button className="btn primary" disabled={editor.busy || !!draft} onClick={create}>{t('新增改善', 'New action')}</button>}{can('exportReports') && <><button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportSelected('pdf')}>{exporting ? t('產生中…', 'Generating…') : `${t('匯出已選PDF', 'Export selected PDF')} (${ids.length})`}</button><button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportSelected('xlsx')}>{exporting ? t('產生中…', 'Generating…') : `${t('匯出已選Excel', 'Export selected Excel')} (${ids.length})`}</button></>}</>} />
     <nav className="improvement-list-views" aria-label={t('改善清單', 'Improvement lists')}>
       {(['all', 'unfinished', 'completed'] as ImprovementListView[]).map(view => <button key={view} className={`btn ${listView === view ? 'primary' : 'neutral'}`} aria-pressed={listView === view} onClick={() => setFilters(old => withImprovementListView(old, view))}>{view === 'all' ? t('總表', 'All actions') : view === 'unfinished' ? t('未完成', 'Unfinished') : t('已完成', 'Completed')}</button>)}
       <button className={`btn ${filters.source === 'management_review' ? 'primary' : 'neutral'}`} aria-pressed={filters.source === 'management_review'} onClick={() => setFilters(old => ({ ...old, source: old.source === 'management_review' ? '' : 'management_review' }))}>{t('管審會執行計劃清單', 'Management review execution plan')}</button>
@@ -313,7 +320,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
       <button className="btn neutral" onClick={() => { setFilters({ frameworkId: 'all' }); setSelected([]); }}>{t('清除篩選及選取', 'Clear filters and selection')}</button>
     </div>
     {filters.itemId && <div className="notice">{t('限定相關Item；新增改善將預填此Item', 'Filtered to related item; new actions prefill this item')}: {state.items.find(row => row.id === filters.itemId)?.code || filters.itemId} <button className="btn neutral" onClick={() => setFilters(old => ({ ...old, itemId: undefined }))}>{t('取消Item限定', 'Clear item scope')}</button></div>}
-    <div className="list-selection-summary"><span>{t('符合篩選', 'Matching')}: {visible.length} · {t('已選', 'Selected')}: {ids.length}</span><button className="btn neutral small" onClick={() => setSelected([])}>{t('取消全部勾選', 'Clear selection')}</button><span className="list-hint">{t('清單顯示全文；點標題查看詳情', 'Full content shown; open the title for details')}</span></div>
+    <div className="list-selection-summary"><span>{t('符合篩選', 'Matching')}: {visible.length} · {t('已選', 'Selected')}: {ids.length}</span><button className="btn neutral small" disabled={exporting||!visible.length} title={t('選中所有符合篩選條件的項目，包含其他頁','Select every matching record, including other pages')} onClick={()=>setSelected(previous=>[...new Set([...previous,...visible.map(row=>row.id)])])}>{t('全部選中','Select all')}</button><button className="btn neutral small" onClick={() => setSelected([])}>{t('取消全部勾選', 'Clear selection')}</button><span className="list-hint">{t('清單顯示全文；點標題查看詳情', 'Full content shown; open the title for details')}</span></div>
     <EditorNotice error={draft ? '' : editor.error || validation} lost={editor.lost} />
     <div ref={pageTop}>{pagination('top')}</div>
     {!visible.length ? <Empty>{t('沒有符合篩選的改善記錄。', 'No matching improvement records.')}</Empty> : <div className="table-wrap"><table className="data-table improvement-table"><thead><tr><th>{t('選取', 'Select')}</th><th>{t('內容／關聯章節及Item', 'Action / related chapters and items')}</th><th>{t('跟進資訊／操作', 'Follow-up / actions')}</th></tr></thead><tbody>{paged.rows.map(record => <tr key={record.id}><td><input type="checkbox" aria-label={`${t('選取', 'Select')} ${richTextToPlainText(record.title)}`} checked={ids.includes(record.id)} onChange={event => { const checked = event.target.checked; setSelected(old => checked ? [...old, record.id] : old.filter(id => id !== record.id)); }} /></td><td><button className="text-button" onClick={() => setDetailId(record.id)}><BilingualText value={improvementTitle(record.title)} /></button><div className="improvement-content"><BilingualText value={record.content} compact /></div><div className="improvement-origin">{improvementSourceLabel(record.source, ctx.lang)} · {t('提出日期', 'Proposed date')}: {record.proposedDate || t('未填', 'Not entered')}</div>{classification(record)}<div className="improvement-plan"><small>{t('執行計劃', 'Action plan')}</small><p className="preserve-lines"><RichText value={record.plan||'—'} compact inline/></p></div>{record.milestones?.length ? <p className="milestone-list-summary">{milestoneSummary(record,ctx.lang)}</p> : null}{latestProgress(record)}<div className="item-references">{chapterLinks(record)}{record.itemIds.map(id => <button key={id} className="btn neutral" onClick={() => { const item = state.items.find(row => row.id === id); if (item) ctx.navigate(item.frameworkId, id); }}>{openIssuesFor(state, id).length > 0 ? '⭐ ' : ''}{state.items.find(item => item.id === id)?.code || id}</button>)}</div></td><td className="improvement-metadata">

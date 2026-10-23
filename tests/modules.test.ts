@@ -179,8 +179,9 @@ test('linked source categories remain separately visible in the original item ta
 test('improvement export sends explicit intersected IDs and canonical authorized state', () => {
   const code = source('Improvements');
   assert.match(code, /effectiveSelection/);
-  assert.match(code, /authorizeExport/);
-  assert.match(code, /downloadImprovementsPdf\(canonical/);
+  assert.match(code, /authorizeReportSnapshot\(ctx/);
+  assert.match(code, /buildImprovementsPdf\(canonical/);
+  assert.match(code, /buildImprovementsExcel\(canonical/);
   assert.match(code, /if\s*\(!ids\.length\)/);
 });
 
@@ -369,7 +370,9 @@ test('focus wiring and fixed administrator management capabilities remain explic
   assert.match(source('Improvements'), /PageProps & \{ focusId\?: string(?:;[^}]+)? \}/);
   assert.match(source('Improvements'), /resolveImprovementFocus\(state, ctx\.focusId/);
   assert.match(source('Improvements'), /filterImprovementList\(state, filters\)/);
-  assert.match(source('Improvements'), /filterImprovementList\(canonical, filters\)/);
+  const reports=readFileSync(new URL('../src/reports.ts',import.meta.url),'utf8');
+  assert.match(reports,/selectedImprovementRows\(canonical,request\.ids,request\.filters/);
+  assert.match(reports,/filterImprovementList\(state,filters\)/);
   assert.match(readFileSync(new URL('../src/improvementList.ts', import.meta.url), 'utf8'), /record\.itemIds\.includes\(filters\.itemId\)/);
   const management = source('Management');
   assert.match(management, /role === 'admin' && \['enterManagement', 'manageUsers'\]\.includes\(capability\)/);
