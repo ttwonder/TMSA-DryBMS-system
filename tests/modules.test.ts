@@ -180,7 +180,8 @@ test('improvement export sends explicit intersected IDs and canonical authorized
   const code = source('Improvements');
   assert.match(code, /effectiveSelection/);
   assert.match(code, /authorizeReportSnapshot\(ctx/);
-  assert.match(code, /buildImprovementsPdf\(canonical/);
+  assert.match(code, /printReport\(\{format,kind:'improvements',ids,filters\}\)/);
+  assert.match(readFileSync('src/useReportPrint.ts','utf8'), /buildPrintReport\(canonical,request/);
   assert.match(code, /buildImprovementsExcel\(canonical/);
   assert.match(code, /if\s*\(!ids\.length\)/);
 });
@@ -410,7 +411,7 @@ test('real React static rendering enforces management roles and explicit export 
   const action = Inspections.improvementFromFinding(inspection, finding(state)); state.improvements.push(action);
   const markup = renderToStaticMarkup(createElement(Improvements.default, context(state)));
   assert.ok(markup.indexOf('Finding EN') < markup.indexOf('發現繁中'));
-  assert.match(markup, /disabled=""[^>]*>匯出已選PDF \(0\)/);
+  assert.match(markup, /disabled=""[^>]*>列印已選／另存PDF \(0\)/);
   const history = renderToStaticMarkup(createElement(Inspections.default, context(state)));
   assert.match(history, /未完整記分（不是0分）/);
   assert.doesNotMatch(history, /0\.00 \/ 4/);

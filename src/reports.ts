@@ -368,14 +368,15 @@ export async function buildImprovementsExcel(state:PlatformState,ids:string[],la
  return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
 }
 
-interface PdfRow {key:string;cells:string[];warning?:boolean}
+export interface PdfRow {key:string;cells:string[];warning?:boolean}
 interface PdfLine {text:string;indent:number}
 interface PdfRun {font:PDFFont;text:string;color?:keyof typeof RICH_COLORS}
 const hasBold=(value:unknown):boolean=>typeof value==='string'?richTextRuns(value).some(run=>run.bold):!!value&&typeof value==='object'&&Object.values(value).some(hasBold);
-interface PdfGroupRow {headers:string[];cells:string[];ratios?:number[];statusColumn?:number;status?:{background:string;color:string};entries?:{headers:string[];cells:string[];ratios:number[]}[]}
+export interface PdfGroupRow {headers:string[];cells:string[];ratios?:number[];statusColumn?:number;status?:{background:string;color:string};entries?:{headers:string[];cells:string[];ratios:number[]}[]}
 const PDF_BODY=15,PDF_AUX=14,PDF_LEADING=23,PDF_PAD=8;
 const PAGE_WIDTH=1190.55,PAGE_HEIGHT=841.89,MARGIN=34,BOTTOM=64;
 class TextPdf {
+  readonly embedsSnapshotMetadata=true;
   readonly document:PDFDocument;readonly font:PDFFont;readonly title:string;readonly lang:Language;readonly stamp:string;
   private page!:PDFPage;private y=0;private readonly glyphs:Set<number>;
   private readonly fallbacks:{font:PDFFont;glyphs:Set<number>}[];
@@ -632,8 +633,19 @@ class TextPdf {
     return this.document.save({useObjectStreams:true});
   }
 }
-function snapshotIntro(pdf:TextPdf,state:PlatformState,lang:Language,title:string) {
-  pdf.heading(title);pdf.paragraph(`${tr(lang,'伺服器快照時間','Server snapshot time')}: ${state.serverTime}\n${tr(lang,'快照識別（完整值見PDF文件內容）','Snapshot token (full value in PDF properties)')}: ${state.snapshotToken.length>32?state.snapshotToken.slice(0,16)+'…'+state.snapshotToken.slice(-12):state.snapshotToken}`,PDF_AUX);
+export interface ReportWriter<T> {
+ readonly embedsSnapshotMetadata?:boolean;
+ heading(text:string):void; paragraph(text:string,size?:number):void;
+ table(headers:string[],ratios:number[],rows:PdfRow[],layout?:'auto'|'overview'):void;
+ groupedTable(key:string,rows:PdfGroupRow[],prefix:string):void;
+ finish():Promise<T>;
+}
+export type ReportFactory<T>=(title:string,lang:Language,state:PlatformState,options:ReportBuildOptions,operational?:boolean)=>Promise<ReportWriter<T>>;
+function snapshotIntro(pdf:ReportWriter<unknown>,state:PlatformState,lang:Language,title:string) {
+  const embedded=pdf.embedsSnapshotMetadata===true;
+  const label=embedded?tr(lang,'快照識別（完整值見PDF文件內容）','Snapshot token (full value in PDF properties)'):tr(lang,'快照識別（完整值）','Snapshot token (complete)');
+  const token=embedded&&state.snapshotToken.length>32?state.snapshotToken.slice(0,16)+'…'+state.snapshotToken.slice(-12):state.snapshotToken;
+  pdf.heading(title);pdf.paragraph(`${tr(lang,'伺服器快照時間','Server snapshot time')}: ${state.serverTime}\n${label}: ${token}`,PDF_AUX);
 }
 function itemPdfRows(state:PlatformState,items:StandardItem[],lang:Language):PdfRow[] {
   return items.map(item=>{
@@ -645,12 +657,13 @@ function itemPdfRows(state:PlatformState,items:StandardItem[],lang:Language):Pdf
 const frameworkHeaders=(lang:Language,restricted=false)=>lang==='zh'?['Item','KPI\n關鍵績效指標','BPG\n最佳實務指引','Y/N',restricted?'目前自評':'目前自評 / 關聯改善','佐證','負責部門']:['Item','Key Performance Indicator','Best Practice Guidance','Y/N',restricted?'Current assessment':'Current assessment / Improvements','Evidence','PIC / Departments'];
 const frameworkRatios=[7,20,24,5,25,14,9];
 const tmsa14ReportScope=(included:boolean,count:number,lang:Language)=>tr(lang,`有效計分範圍：${count} 分章等權；第14章：${included?'納入':'不納入'}。原條文及逐項評定全部保留。`,`Scoring scope: ${count} equal-weight chapters; TMSA chapter 14: ${included?'included':'excluded'}. All definitions and item grades are retained.`);
-export async function buildFrameworkPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
+export async function buildFrameworkPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {return renderFrameworkReport(TextPdf.create,state,frameworkId,lang,chapterIds,options);}
+export async function renderFrameworkReport<T>(create:ReportFactory<T>,state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<T> {
   const selected=selectedFrameworkItems(state,frameworkId,chapterIds,options.departmentIds),filtered=!!options.departmentIds?.length;
   if(!selected.length)throw noFrameworkItems();
   const chapters=selectedChapters(state,frameworkId,chapterIds).filter(c=>!filtered||selected.some(i=>i.chapterId===c.id)),framework=state.frameworks.find(f=>f.id===frameworkId)!;
   const title=`${frameworkId} · ${filtered?tr(lang,'部門自評摘錄','Department assessment extract'):tr(lang,'完整自評報告','Full self-assessment report')}`;
-  const pdf=await TextPdf.create(title,lang,state,options);snapshotIntro(pdf,state,lang,title);
+  const pdf=await create(title,lang,state,options);snapshotIntro(pdf,state,lang,title);
   pdf.paragraph(bilingual(framework.scopeLabel));pdf.paragraph(bilingual(framework.description));
   pdf.paragraph(state.viewScope==='management_viewer'?tr(lang,'英文上、繁中下。Y/N、完成更新、符合程度及執行狀態各自獨立。停用條目不列入目前報告。','English above Traditional Chinese. Y/N, review, conformity and execution are independent. Inactive items are excluded from current reports.'):tr(lang,'英文上、繁中下。Y/N、完成更新、符合程度、執行狀態、改善結案各自獨立。停用條目不列入目前報告。','English above Traditional Chinese. Y/N, review, conformity, execution and improvement closure are independent. Inactive items are excluded from current reports.'),PDF_AUX);
   const score=frameworkScore(state,frameworkId,chapters.map(c=>c.id));
@@ -668,9 +681,10 @@ export async function buildFrameworkPdf(state:PlatformState,frameworkId:Framewor
   }
   return pdf.finish();
 }
-export async function buildRemarksPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
+export async function buildRemarksPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {return renderRemarksReport(TextPdf.create,state,frameworkId,lang,chapterIds,options);}
+export async function renderRemarksReport<T>(create:ReportFactory<T>,state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<T> {
  const rows=selectedRemarkRows(state,frameworkId,chapterIds,options.departmentIds);if(!rows.length)throw noRemarks();
- const title=`${frameworkId} · ${tr(lang,'條目備註','Item remarks')}`,pdf=await TextPdf.create(title,lang,state,options,true);pdf.heading(title);
+ const title=`${frameworkId} · ${tr(lang,'條目備註','Item remarks')}`,pdf=await create(title,lang,state,options,true);pdf.heading(title);
  for(const {chapter,item,assessment:a} of rows)pdf.groupedTable(`${frameworkId} ${item.code}`,[
   {headers:lang==='zh'?['對應章節','Item','備註狀態']:['Chapter','Item','Remarks status'],cells:[`${chapter.code} · ${bilingual(chapter.name)}`,item.code,remarksStatusLabel(a.remarksStatus,lang)],ratios:[4,2,4],statusColumn:2,status:remarksStatusDefinition(a.remarksStatus)},
   {headers:lang==='zh'?['涉及部門','追蹤人員']:['Departments','Follow-up people'],cells:[departmentsLabel(state,a.departmentIds??item.departmentIds,lang)||'—',peopleLabel(state,a.assigneeIds??[])||'—']},
@@ -678,8 +692,9 @@ export async function buildRemarksPdf(state:PlatformState,frameworkId:FrameworkI
  ],'remarks');
  return pdf.finish();
 }
-export async function buildImprovementsPdf(state:PlatformState,ids:string[],lang:Language,title?:string,options:ReportBuildOptions={}):Promise<Uint8Array> {
- const rows=selectedImprovementRows(state,ids),reportTitle=title??tr(lang,'明選改善項目報告','Explicitly selected improvements'),pdf=await TextPdf.create(reportTitle,lang,state,options,true);pdf.heading(reportTitle);
+export async function buildImprovementsPdf(state:PlatformState,ids:string[],lang:Language,title?:string,options:ReportBuildOptions={}):Promise<Uint8Array> {return renderImprovementsReport(TextPdf.create,state,ids,lang,title,options);}
+export async function renderImprovementsReport<T>(create:ReportFactory<T>,state:PlatformState,ids:string[],lang:Language,title?:string,options:ReportBuildOptions={}):Promise<T> {
+ const rows=selectedImprovementRows(state,ids),reportTitle=title??tr(lang,'明選改善項目報告','Explicitly selected improvements'),pdf=await create(reportTitle,lang,state,options,true);pdf.heading(reportTitle);
  rows.forEach((row,index)=>pdf.groupedTable(`${tr(lang,'項目','Action')} ${index+1}`,[
   {headers:lang==='zh'?['急迫度','狀態','最新更新']:['Urgency','Status','Updated'],cells:[urgencyLabel(row,lang),improvementStatus(row.status,lang),reportDate(row.updatedAt)||'—']},
   {headers:lang==='zh'?['關聯編號','來源','分類','目標日期','結案時間']:['Related codes','Source','Classification','Target date','Closed date'],cells:[relatedCodes(state,row,lang),businessSource(state,row,lang),row.source==='external'?findingClassificationLabel(improvementFindingClassification(state,row),lang):'—',reportDate(row.targetDate)||'—',reportDate(row.closedAt)||'—'],ratios:[2,3,1.8,1.6,1.6]},
@@ -707,12 +722,13 @@ export function inspectionCoverage(inspection:Inspection) {
   const assessed=valid.filter(r=>r.reviewed&&r.response!==null).length;
   return {total:ids.size,assessed,complete:ids.size>0&&assessed===ids.size,orphanResults:inspection.results.filter(r=>!allIds.has(r.itemId))};
 }
-export async function buildInspectionPdf(state:PlatformState,inspectionId:string,lang:Language,options:ReportBuildOptions={}):Promise<Uint8Array> {
+export async function buildInspectionPdf(state:PlatformState,inspectionId:string,lang:Language,options:ReportBuildOptions={}):Promise<Uint8Array> {return renderInspectionReport(TextPdf.create,state,inspectionId,lang,options);}
+export async function renderInspectionReport<T>(create:ReportFactory<T>,state:PlatformState,inspectionId:string,lang:Language,options:ReportBuildOptions={}):Promise<T> {
   const inspection=state.inspections.find(i=>i.id===inspectionId);
   if(!inspection)throw new Error('Inspection is outside authorized snapshot / 檢查不在授權快照');
   const coverage=inspectionCoverage(inspection);
   const score=inspectionScore(inspection),reportTitle=`${tr(lang,'凍結檢查報告','Frozen inspection report')} · ${inspection.title}`;
-  const pdf=await TextPdf.create(reportTitle,lang,state,options);snapshotIntro(pdf,state,lang,reportTitle);
+  const pdf=await create(reportTitle,lang,state,options);snapshotIntro(pdf,state,lang,reportTitle);
   pdf.paragraph(`${inspection.id}\n${tr(lang,'機構 / 日期','Organization / date')}: ${inspection.organization} | ${inspection.date}\n${tr(lang,'類型 / 狀態','Type / status')}: ${tr(lang,inspection.type==='formal'?'正式':'非正式',inspection.type)} | ${tr(lang,inspection.status==='final'?'已發布':'草稿',inspection.status)}\n${tr(lang,'匯入 / 修訂自','Imported / supersedes')}: ${inspection.imported?'Y':'N'} / ${inspection.supersedesId??'—'}`);
   pdf.paragraph(bilingual(inspection.snapshot.framework.scopeLabel));
   pdf.paragraph(`${tr(lang,'凍結計分方法版本','Frozen scoring version')}: ${inspection.snapshot.scoringVersion}\n${tr(lang,'計分方法','Scoring method')}: ${inspection.snapshot.framework.scoring}\n${tr(lang,'逐項評定覆蓋率','Item assessment coverage')}: ${coverage.assessed}/${coverage.total}\n${tr(lang,'檢查得分','Inspection score')}: ${score.score===null?tr(lang,'未完整記分；未評定不視為 0 分','Not completely scored; unassessed is not zero'):score.score.toFixed(2)+' / 4'}${score.provisional?tr(lang,'（暫估 / 來源缺口）',' (provisional / source gap)'):''}`);
@@ -740,10 +756,11 @@ export async function buildInspectionPdf(state:PlatformState,inspectionId:string
   pdf.table(findingHeaders,[13,12,30,30,19],inspection.findings.map(f=>({key:f.id.slice(0,12),warning:!!f.warning,cells:[`${f.id}\n${f.classification==='finding'||f.classification==='ofi'?findingClassificationLabel(f.classification,lang):tr(lang,classLabels[f.classification],f.classification)}`,f.itemIds.map(id=>inspection.snapshot.items.find(i=>i.id===id)?.code??id).join('\n')||tr(lang,'一般事項 / 無條目連結','General / no item link'),bilingual(f.observation),bilingual(f.recommendation),[sourcesText(f.sources),f.warning].filter(Boolean).join('\n')]})));
   return pdf.finish();
 }
-export async function buildOverviewPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions & {filters?:Filters}={}):Promise<Uint8Array> {
+export async function buildOverviewPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions & {filters?:Filters}={}):Promise<Uint8Array> {return renderOverviewReport(TextPdf.create,state,frameworkId,lang,chapterIds,options);}
+export async function renderOverviewReport<T>(create:ReportFactory<T>,state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions & {filters?:Filters}={}):Promise<T> {
   const restricted=state.viewScope==='management_viewer';
   const chapters=selectedChapters(state,frameworkId,chapterIds),ids=chapters.map(c=>c.id),score=frameworkScore(state,frameworkId,ids);
-  const reportTitle=`${frameworkId} · ${tr(lang,'現況總覽報告','Current overview')}`,pdf=await TextPdf.create(reportTitle,lang,state,options);snapshotIntro(pdf,state,lang,reportTitle);
+  const reportTitle=`${frameworkId} · ${tr(lang,'現況總覽報告','Current overview')}`,pdf=await create(reportTitle,lang,state,options);snapshotIntro(pdf,state,lang,reportTitle);
   const framework=state.frameworks.find(f=>f.id===frameworkId)!;pdf.paragraph(bilingual(framework.scopeLabel));
   if(frameworkId==='TMSA')pdf.paragraph(tmsa14ReportScope(currentIncludesTmsa14(state),score.totalChapters,lang),PDF_AUX);
   const scoped=state.items.filter(i=>i.active&&i.frameworkId===frameworkId&&ids.includes(i.chapterId));

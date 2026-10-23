@@ -13,7 +13,19 @@
 
 Windows 上 `reports.ts` 與 `Reports.tsx` 的無副檔名匯入有解析歧義。頁面應用 `import Reports from './Reports.tsx'`，builders 用 `./reports.ts`；不改名、不刪其中任何檔案。需要 TypeScript `allowImportingTsExtensions`（noEmit 模式）。
 
-## API
+## 最新交付方式：瀏覽器列印／另存 PDF
+
+使用者已批准改用瀏覽器列印，明確取代本文下方舊「直下載 PDF、不用 window.print」說明。報告中心五類，以及兩框架、總覽、歷史清單與改善清單的 mounted PDF 入口，均改走 `useReportPrint`：同步保留窗口→原授權RPC→canonical選取驗證→共享內容投影→安全 HTML→瀏覽器列印。不是目前畫面截圖／目前分頁，也沒有將 HTML 偽裝成 PDF bytes。
+
+列印採本機系統字型，不呼叫字型資產／外部字型；HTML CSP 拒絕字型／圖片／script／連線來源，只允許固定內嵌樣式。rich text用既有decode/runs重建白名單標記、escape全部來源。A3橫式，15pt正文、14pt表頭／輔助，長段落可續頁並重複識別與表頭。
+
+瀏覽器視窗若遭阻擋，允許彈出後重試；準備失敗／取消／頁面退出／登入身分或權限失效即關閉窗口。成功呼叫列印不宣稱已另存文件；可在保留的快照窗口 Ctrl+P 重開列印，原頁可再次操作。關閉列印對話框亦不永久busy。audit只證明授權提供快照。Excel未改交付方式。
+
+`render*Report<T>` 為五種內容的單一投影；`HtmlReport` 與 legacy `TextPdf` 各自writer共享它。下方 `build*Pdf`／`download*Pdf` 是保留的歷史API，mounted頁面不再呼叫，也不需要刪大型TTF檔或改部署SQL。瀏覽器具體字形依使用者OS字型；未主張所有Unicode／所有瀏覽器均已驗證。
+
+重跑：`npm run qa:browser-print`、`npm run qa:report-selection`。前者 print() stub檢查App流程並另用真Chrome CDP輸出PDF，並非native列印對話框驗收；本機證據與限制見 `docs/BROWSER_PRINT_DELIVERY.md`。
+
+## 歷史 API（保留供離線回歸）
 
 `src/reports.ts` 提供下列實際瀏覽器下載介面，皆為 `Promise<void>`：
 

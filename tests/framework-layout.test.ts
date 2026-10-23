@@ -34,7 +34,7 @@ for(const frameworkId of ['TMSA','DRYBMS'] as const)for(const lang of ['zh','en'
  const label=lang==='zh'?'初始化自評':'Initialize self-assessment';
  const actions=[...html.matchAll(/<button\b[^>]*>([^<]*)<\/button>/g)].map(match=>match[1]);
  assert(actions.includes(label),'The original framework page must expose the requested initialization action');
- assert(actions.indexOf(label)<actions.indexOf('Excel'));assert(actions.indexOf('Excel')<actions.indexOf('PDF'));
+ assert(actions.indexOf(label)<actions.indexOf('Excel'));assert(actions.indexOf('Excel')<actions.indexOf(lang==='zh'?'列印／另存PDF':'Print / Save as PDF'));
  assert.equal(JSON.stringify(state),before,'Rendering must not reset any assessment');
 });
 test('framework initialization shortcut is absent for operators and inactive privileged accounts',()=>{

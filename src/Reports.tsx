@@ -7,10 +7,12 @@ import {bi,hasPermission,overviewChapterScope} from './domain';
 import {filterImprovementList,type ImprovementListFilters} from './improvementList';
 import {improvementSourceLabel,STANDALONE_IMPROVEMENT_SOURCES} from './improvementTracking';
 import {PageHeading,MultiSelect,Empty} from './ui';
-import {authorizeReportSnapshot,buildFrameworkExcel,buildFrameworkPdf,buildRemarksExcel,buildRemarksPdf,selectedRemarkRows,selectedFrameworkItems,buildImprovementsExcel,buildImprovementsPdf,buildInspectionPdf,buildOverviewPdf,downloadReportBytes} from './reports.ts';
+import {authorizeReportSnapshot,buildFrameworkExcel,buildRemarksExcel,selectedRemarkRows,selectedFrameworkItems,buildImprovementsExcel,downloadReportBytes} from './reports.ts';
 
+import {useReportPrint,printProvided} from './useReportPrint';
 type ReportKind=ExportRequest['kind']|'remarks';
 export default function Reports(ctx:PageProps) {
+  const printReport=useReportPrint(ctx);
   const {state,lang,t}=ctx;const restricted=state.viewScope==='management_viewer';
   const [kind,setKind]=useState<ReportKind>('framework');
   const [format,setFormat]=useState<ExportRequest['format']>('xlsx');
@@ -44,10 +46,11 @@ export default function Reports(ctx:PageProps) {
     try {
       if(kind==='remarks'&&!selectedRemarkRows(state,frameworkId,ids,departmentIds).length)throw new Error(t('所選章節沒有已填寫的備註。','No remarks in the selected chapters.'));
       const request:Omit<ExportRequest,'snapshotToken'>={format,kind:kind==='remarks'?'framework':kind,ids,frameworkId:kind==='framework'||kind==='overview'||kind==='remarks'?frameworkId:undefined,filters:kind==='improvements'?filters:kind==='overview'?{...filters,frameworkId,chapterIds:ids}: {chapterIds:kind==='framework'||kind==='remarks'?ids:undefined,...(kind==='framework'||kind==='remarks'?{departmentIds:[...departmentIds]}:{}),...(kind==='remarks'?{reportVariant:'remarks'}:{})}};
+      if(format==='pdf'){await printReport(request);ctx.notify(printProvided(ctx),'success');return;}
       // This RPC authorizes and records the export; no builder receives the live page state.
       const canonical=await authorizeReportSnapshot(ctx,request);
       if(!unchanged())throw new Error(t('登入已變更，已停止輸出。','The signed-in session changed; export stopped.'));
-      const bytes=kind==='remarks'?(format==='xlsx'?await buildRemarksExcel(canonical,frameworkId,lang,ids,{departmentIds}):await buildRemarksPdf(canonical,frameworkId,lang,ids,{departmentIds})):kind==='framework'?(format==='xlsx'?await buildFrameworkExcel(canonical,frameworkId,lang,ids,{departmentIds}):await buildFrameworkPdf(canonical,frameworkId,lang,ids,{departmentIds})):kind==='improvements'?(format==='xlsx'?await buildImprovementsExcel(canonical,ids,lang):await buildImprovementsPdf(canonical,ids,lang)):kind==='inspection'?await buildInspectionPdf(canonical,ids[0],lang):await buildOverviewPdf(canonical,frameworkId,lang,ids,{filters});
+      const bytes=kind==='remarks'?await buildRemarksExcel(canonical,frameworkId,lang,ids,{departmentIds}):kind==='framework'?await buildFrameworkExcel(canonical,frameworkId,lang,ids,{departmentIds}):await buildImprovementsExcel(canonical,ids,lang);
       if(!unchanged())throw new Error(t('登入已變更，已停止下載。','The signed-in session changed; download stopped.'));
       downloadReportBytes(bytes,`${kind==='framework'||kind==='overview'||kind==='remarks'?frameworkId+'-':''}${kind}-${canonical.serverTime.slice(0,10)}.${format}`,format==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'application/pdf');
       ctx.notify(t('文件已產生並啟動下載；保存位置由瀏覽器決定。','The document was generated and download started; the browser controls where it is saved.'),'success');
@@ -61,9 +64,9 @@ export default function Reports(ctx:PageProps) {
     <section className="panel">
       <div className="toolbar">
         <label><span>{t('報告種類','Report type')}</span><select aria-label={t('報告種類','Report type')} value={kind} disabled={busy} onChange={event=>changeKind(event.target.value as ReportKind)}><option value="framework">{t('框架完整自評','Full framework assessment')}</option>{!restricted&&<option value="remarks">{t('條目備註','Item remarks')}</option>}{!restricted&&<option value="improvements">{t('明選改善項目','Selected improvements')}</option>}<option value="inspection">{t('凍結歷史檢查','Frozen inspection')}</option><option value="overview">{t('管控總覽','Management overview')}</option></select></label>
-        <label><span>{t('文件格式','File format')}</span><select aria-label={t('文件格式','File format')} disabled={busy||(kind==='inspection'||kind==='overview')} value={format} onChange={event=>setFormat(event.target.value as ExportRequest['format'])}><option value="xlsx">Excel (.xlsx)</option><option value="pdf">PDF (.pdf)</option></select></label>
+        <label><span>{t('文件格式','File format')}</span><select aria-label={t('文件格式','File format')} disabled={busy||(kind==='inspection'||kind==='overview')} value={format} onChange={event=>setFormat(event.target.value as ExportRequest['format'])}><option value="xlsx">Excel (.xlsx)</option><option value="pdf">{t('列印／另存 PDF','Print / Save as PDF')}</option></select></label>
         {(kind==='framework'||kind==='overview'||kind==='remarks')&&<label><span>{t('框架','Framework')}</span><select aria-label={t('報告框架','Report framework')} value={frameworkId} disabled={busy} onChange={event=>{const fw=event.target.value as FrameworkId;setFrameworkId(fw);setChapterIds(state.chapters.filter(c=>c.active&&c.frameworkId===fw).map(c=>c.id));}}><option>TMSA</option><option>DRYBMS</option></select></label>}
-        <button className="btn primary" disabled={!allowed||busy} onClick={()=>void exportReport()}>{busy?t('產生中…','Generating…'):t('生成並下載','Generate and download')}</button>
+        <button className="btn primary" disabled={!allowed||busy} onClick={()=>void exportReport()}>{busy?t('產生中…','Generating…'):format==='pdf'?t('列印／另存PDF','Print / Save as PDF'):t('生成並下載','Generate and download')}</button>
       </div>
       <p className="calculation-note">{kind==='remarks'?t('備註獨立清單：對應章節、Item、狀態、涉及部門、追蹤人員及完整備註；Excel／PDF均保留狀態文字與顏色。','Separate remarks list: chapter, Item, status, departments, follow-up people and complete text; Excel/PDF retain status labels and colours.'):kind==='improvements'?t('Excel 依文件序號／段次保留全文，全部進度另表，可篩選及排序；PDF 正文15pt、輔助≥14pt。','Excel retains full text by document number/part, with a separate progress sheet, filters and sorting; PDF body 15pt, auxiliary ≥14pt.'):t('Excel 原樣式／同 Item 續列；PDF 正文15pt、輔助≥14pt，不縮字、不裁文。','Source-style Excel with Item continuations; PDF body 15pt, auxiliary ≥14pt. No shrinking or clipping.')}</p>
       {(kind==='framework'||kind==='remarks')&&<><fieldset className="multi-select-control" disabled={busy}><MultiSelect label={t('部門篩選（多選）','Department filter (multiple)')} options={state.settings.departments.map(d=>({id:d.id,label:bi(d.name,lang)}))} selected={departmentIds} onChange={setDepartmentIds}/></fieldset><p className="muted">{t('未選部門＝不限部門；多部門任一符合，再與所選章節取交集。','No departments selected = all departments. Match any selected department AND a selected chapter.')}</p></>}

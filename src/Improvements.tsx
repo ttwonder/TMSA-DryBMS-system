@@ -1,3 +1,4 @@
+import {useReportPrint,printProvided} from './useReportPrint';
 import {RichTextEditor,RichText} from './RichTextEditor';
 import {richTextToPlainText,isRichTextEmpty} from './richText';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -261,6 +262,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
     milestoneSubmission.current={intent,record:submitted};
     if (await editor.save(intent,{record:submitted})) ctx.onInlineClose?.();
   };
+  const printReport=useReportPrint(ctx);
   const exportSelected = async (format:'pdf'|'xlsx') => {
     if(exporting||!can('exportReports'))return;
     const ids = effectiveSelection(selected, filterImprovementList(state, filters));
@@ -269,11 +271,12 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
     const unchanged=()=>exportOwner.current.api===initiating.api&&exportOwner.current.actor===initiating.actor&&exportOwner.current.session===initiating.session&&initiating.api.sessionToken===initiating.session;
     setExporting(true);
     try {
-      const {authorizeReportSnapshot,buildImprovementsExcel,buildImprovementsPdf,downloadReportBytes}=await import('./reports');
+      if(format==='pdf'){await printReport({format,kind:'improvements',ids,filters});ctx.notify(printProvided(ctx),'success');return;}
+      const {authorizeReportSnapshot,buildImprovementsExcel,downloadReportBytes}=await import('./reports');
       if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
       const canonical=await authorizeReportSnapshot(ctx,{format,kind:'improvements',ids,filters});
       if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
-      const bytes=format==='xlsx'?await buildImprovementsExcel(canonical,ids,ctx.lang):await buildImprovementsPdf(canonical,ids,ctx.lang,t('待改善項目','Improvement actions'));
+      const bytes=await buildImprovementsExcel(canonical,ids,ctx.lang);
       if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
       downloadReportBytes(bytes,`improvements-${canonical.serverTime.slice(0,10)}.${format}`,format==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'application/pdf');
       ctx.notify(format==='xlsx'?t('Excel已產生並啟動下載。','Excel generated and download started.'):t('PDF已產生並啟動下載。', 'PDF generated and download started.'), 'success');
@@ -297,7 +300,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
 
   return <>
     {!ctx.inlineTarget && <>
-    <PageHeading title={filters.source === 'management_review' ? t('管審會執行計劃清單', 'Management review execution plan') : t('待改善項目', 'Improvement actions')} subtitle={t('提出日期為獨立日期；最近更新日期篩選為UTC，並非回溯快照。', 'Proposed date is independent. Last updated filters use UTC, not historical reconstruction.')} actions={<>{can('createImprovements') && <button className="btn primary" disabled={editor.busy || !!draft} onClick={create}>{t('新增改善', 'New action')}</button>}{can('exportReports') && <><button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportSelected('pdf')}>{exporting ? t('產生中…', 'Generating…') : `${t('匯出已選PDF', 'Export selected PDF')} (${ids.length})`}</button><button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportSelected('xlsx')}>{exporting ? t('產生中…', 'Generating…') : `${t('匯出已選Excel', 'Export selected Excel')} (${ids.length})`}</button></>}</>} />
+    <PageHeading title={filters.source === 'management_review' ? t('管審會執行計劃清單', 'Management review execution plan') : t('待改善項目', 'Improvement actions')} subtitle={t('提出日期為獨立日期；最近更新日期篩選為UTC，並非回溯快照。', 'Proposed date is independent. Last updated filters use UTC, not historical reconstruction.')} actions={<>{can('createImprovements') && <button className="btn primary" disabled={editor.busy || !!draft} onClick={create}>{t('新增改善', 'New action')}</button>}{can('exportReports') && <><button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportSelected('pdf')}>{exporting ? t('產生中…', 'Generating…') : `${t('列印已選／另存PDF', 'Print selected / Save as PDF')} (${ids.length})`}</button><button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportSelected('xlsx')}>{exporting ? t('產生中…', 'Generating…') : `${t('匯出已選Excel', 'Export selected Excel')} (${ids.length})`}</button></>}</>} />
     <nav className="improvement-list-views" aria-label={t('改善清單', 'Improvement lists')}>
       {(['all', 'unfinished', 'completed'] as ImprovementListView[]).map(view => <button key={view} className={`btn ${listView === view ? 'primary' : 'neutral'}`} aria-pressed={listView === view} onClick={() => setFilters(old => withImprovementListView(old, view))}>{view === 'all' ? t('總表', 'All actions') : view === 'unfinished' ? t('未完成', 'Unfinished') : t('已完成', 'Completed')}</button>)}
       <button className={`btn ${filters.source === 'management_review' ? 'primary' : 'neutral'}`} aria-pressed={filters.source === 'management_review'} onClick={() => setFilters(old => ({ ...old, source: old.source === 'management_review' ? '' : 'management_review' }))}>{t('管審會執行計劃清單', 'Management review execution plan')}</button>

@@ -32,6 +32,8 @@
     "qa:performance-native": "node --experimental-strip-types scripts/verify-performance-native.mjs",
     "qa:performance-races": "node --experimental-strip-types scripts/verify-performance-races.mjs",
     "qa:report-mounted": "node --experimental-strip-types scripts/verify-report-mounted.mjs",
+    "qa:browser-print-artifacts": "uv run --offline --no-project --python 3.12 --with pymupdf python scripts/verify-browser-print-artifacts.py",
+    "qa:browser-print": "node --experimental-strip-types scripts/verify-browser-print.mjs",
     "qa:report-selection": "node --experimental-strip-types scripts/verify-report-selection.mjs",
     "qa:report-selection-artifacts": "uv run --no-project --python 3.12 --with openpyxl --with pymupdf --with pywin32 python scripts/verify-report-selection-artifacts.py",
     "qa:remarks-export-followup": "node --experimental-strip-types scripts/verify-remarks-export-followup.mjs candidate",
