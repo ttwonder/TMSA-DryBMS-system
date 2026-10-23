@@ -198,6 +198,7 @@
 .guidance-column .responsibility-grid{grid-template-columns:1fr}
 .responsibility-controls{display:flex;flex-direction:column;gap:8px;min-width:0;border:0;margin:0;padding:0}
 .multi-select-control{min-width:0;max-width:100%;margin:0;padding:0;border:0}
+.improvement-multifilter{flex:0 1 250px;min-width:180px;max-width:100%}.toolbar .improvement-multifilter label{display:flex;flex-direction:row;align-items:flex-start;min-width:0;width:auto;gap:5px}.toolbar .improvement-multifilter input[type=checkbox]{width:16px;min-width:16px;height:16px;padding:0;margin:3px 0 0;flex:0 0 16px}.improvement-multifilter .multi-select>div{display:flex;flex-direction:column;gap:4px}.improvement-multifilter .multi-select-dropdown summary{min-height:36px}
 .multi-select-dropdown{border:1px solid #cbd5dc;border-radius:4px;background:#fff;min-width:0}
 .multi-select-dropdown>summary{padding:6px 8px;font-size:15px;display:flex;justify-content:space-between;gap:6px;overflow-wrap:anywhere}
 .multi-select-dropdown>summary[aria-disabled=true]{color:var(--muted);cursor:not-allowed}

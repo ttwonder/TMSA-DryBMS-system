@@ -21,7 +21,7 @@ test('saved remarks workbook preserves four colors, bold and literal list text w
  const runs=(cell.value as ExcelJS.CellRichTextValue).richText;
  for(const [i,line] of text.split('\n').entries()){
   const run=runs.find(r=>r.text.includes(line));assert.ok(run,`Run missing ${line}`);
-  assert.equal(run.font?.bold,true);assert.equal(run.font?.color?.argb,'FF'+Object.values(RICH_COLORS)[i].slice(1).toUpperCase());assert.equal(run.font?.size,14);
+  assert.equal(run.font?.bold,true);assert.equal(run.font?.color?.argb,'FF'+Object.values(RICH_COLORS)[i].slice(1).toUpperCase());assert.equal(run.font?.size,12);
  }
  assert.equal(saved.worksheets[0].getCell('C5').font.color?.argb,'FF'+remarksStatusDefinition(state.assessments[0].remarksStatus)!.color.slice(1),'Business status color remains independent');
  assert.equal(JSON.stringify(state),before);

@@ -28,7 +28,7 @@ for entry in receipt['artifacts']:
     compact = re.sub(r'\s+', '', text)
     missing = [x for x in expected if re.sub(r'\s+', '', x) not in compact]
     spans = [(p.number, s) for p in doc for block in p.get_text('dict')['blocks'] if 'lines' in block for line in block['lines'] for s in line['spans'] if s['text'].strip()]
-    tiny = [(p, s['size'], s['text']) for p,s in spans if s['size'] < 13.8]
+    tiny = [(p, s['size'], s['text']) for p,s in spans if s['size'] < 11.8 or (s['size'] > 12.2 and s['size'] < 16.8)]
     outside = [(p,s['text']) for p,s in spans if s['bbox'][0] < 0 or s['bbox'][2] > doc[p].rect.width + 1 or s['bbox'][1] < 0 or s['bbox'][3] > doc[p].rect.height + 1]
     blank = [p.number for p in doc if not p.get_text().strip()]
     rendered = []

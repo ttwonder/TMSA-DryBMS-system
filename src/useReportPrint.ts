@@ -3,15 +3,18 @@ import type {ExportRequest,PageProps,PlatformState,Language} from './types.ts';
 import type {Filters} from './domain.ts';
 import {hasPermission} from './domain.ts';
 import {authorizeReportSnapshot,selectedRemarkRows,renderFrameworkReport,renderRemarksReport,renderImprovementsReport,renderInspectionReport,renderOverviewReport} from './reports.ts';
+import {reportDescriptor} from './reportNaming.ts';
 import {HtmlReport} from './reportHtml.ts';
 export type PrintRequest=Omit<ExportRequest,'snapshotToken'>;
 export const printProvided=(ctx:Pick<PageProps,'t'>)=>ctx.t('已提供授權列印快照；請在瀏覽器選擇列印或另存為 PDF。是否保存由您決定。','Authorized snapshot provided for printing; choose Print or Save as PDF in the browser. Saving is your choice.');
 export async function buildPrintReport(state:PlatformState,request:PrintRequest,lang:Language):Promise<string>{
  const deps=(request.filters as {departmentIds?:string[]}|undefined)?.departmentIds;
- if(request.kind==='framework')return ((request.filters as {reportVariant?:string}|undefined)?.reportVariant==='remarks'?renderRemarksReport:renderFrameworkReport)(HtmlReport.create,state,request.frameworkId!,lang,request.ids,{departmentIds:deps});
- if(request.kind==='improvements')return renderImprovementsReport(HtmlReport.create,state,request.ids,lang);
- if(request.kind==='inspection')return renderInspectionReport(HtmlReport.create,state,request.ids[0],lang);
- return renderOverviewReport(HtmlReport.create,state,request.frameworkId!,lang,request.ids,{filters:request.filters as Filters});
+ const descriptor=reportDescriptor(state,request,lang);
+ const create:typeof HtmlReport.create=async(title,language,snapshot,options,operational)=>{const report=await HtmlReport.create(title,language,snapshot,options,operational);report.setSuggestedName(descriptor.name);report.paragraph(descriptor.scope);return report;};
+ if(request.kind==='framework')return ((request.filters as {reportVariant?:string}|undefined)?.reportVariant==='remarks'?renderRemarksReport:renderFrameworkReport)(create,state,request.frameworkId!,lang,request.ids,{departmentIds:deps});
+ if(request.kind==='improvements')return renderImprovementsReport(create,state,request.ids,lang);
+ if(request.kind==='inspection')return renderInspectionReport(create,state,request.ids[0],lang);
+ return renderOverviewReport(create,state,request.frameworkId!,lang,request.ids,{filters:request.filters as Filters});
 }
 /** Reserve synchronously in the click stack; never put data in an unvalidated window. */
 export function reservePrintWindow(isCurrent:()=>boolean,lang:Language){

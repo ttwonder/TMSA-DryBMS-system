@@ -1,4 +1,5 @@
 import { improvementPercent, milestoneEventText, milestoneProgress, milestoneSummary } from './improvementMilestones.ts';
+import {reportDescriptor} from './reportNaming.ts';
 import {PRODUCT_NAME_EN} from './branding.ts';
 import {compactBlankLines} from './standardText.ts';
 import {improvementSourceLabel} from './improvementTracking.ts';
@@ -17,7 +18,7 @@ import type { Assessment, BiText, Chapter, ExportRequest, FrameworkId, Improveme
 import { assessmentFor, currentIncludesTmsa14, inspectionIncludesTmsa14, departmentsLabel, filteredImprovements, frameworkScore, hasPermission, inspectionScore, openIssuesFor, peopleLabel, type Filters } from './domain.ts';
 
 export interface ReportFieldLine {fieldId:string;page:number;x:number;baseline:number;width:number;size:number}
-export interface ReportBuildOptions { departmentIds?:string[]; templateBytes?:Uint8Array; fontBytes?:Uint8Array; fallbackFontBytes?:Uint8Array[]; boldFontBytes?:Uint8Array; boldFallbackFontBytes?:Uint8Array[]; onFieldLine?:(line:ReportFieldLine)=>void; }
+export interface ReportBuildOptions { reportScope?:string; departmentIds?:string[]; templateBytes?:Uint8Array; fontBytes?:Uint8Array; fallbackFontBytes?:Uint8Array[]; boldFontBytes?:Uint8Array; boldFallbackFontBytes?:Uint8Array[]; onFieldLine?:(line:ReportFieldLine)=>void; }
 const assetUrl = (path:string) => `${(import.meta as ImportMeta & {env?:{BASE_URL?:string}}).env?.BASE_URL ?? '/'}${path}`;
 async function assetBytes(path:string):Promise<Uint8Array> {
   const response=await fetch(assetUrl(path));
@@ -59,13 +60,15 @@ export function selectedRemarkRows(state:BrowseState,frameworkId:FrameworkId,cha
     .flatMap(item=>{const assessment=assessmentFor(state,item.id);return assessment&&hasItemRemarks(assessment)?[{chapter,item,assessment}]:[];}));
 }
 const noRemarks=()=>new Error('No remarks in selected chapters / 所選章節沒有已填寫的備註');
+const reportUrgency={urgent:0,high:1,medium:2,low:3};
+export const compareImprovementReports=(a:Improvement,b:Improvement)=>reportUrgency[a.urgency]-reportUrgency[b.urgency]||(a.targetDate||'9999-99-99').localeCompare(b.targetDate||'9999-99-99')||(a.proposedDate||'9999-99-99').localeCompare(b.proposedDate||'9999-99-99')||a.id.localeCompare(b.id);
 export function selectedImprovementRows(state:BrowseState,ids:string[],filters?:ImprovementListFilters):Improvement[] {
   if(state.viewScope==='management_viewer')throw new Error('FORBIDDEN');
   if(!ids.length||unique(ids).length!==ids.length) throw new Error('Explicit nonempty improvement selection required / 請明選改善項目');
   const eligible=filters?filterImprovementList(state,filters):state.improvements;
   const rows=ids.map(id=>eligible.find(row=>row.id===id));
   if(rows.some(row=>!row)) throw new Error('Selected improvement no longer matches authorized scope / 改善已不符合授權或篩選');
-  return rows as Improvement[];
+  return (rows as Improvement[]).sort(compareImprovementReports);
 }
 export function assessmentNarrative(state:PlatformState,a:Assessment|undefined):BiText {
   if(!a)return {en:'Not assessed',zh:'未評定'};
@@ -95,6 +98,9 @@ function itemGuidance(item:StandardItem):BiText {
   return {en:notes.map(x=>x.en).filter(Boolean).join('\n\n'),zh:notes.map(x=>x.zh).filter(Boolean).join('\n\n')};
 }
 
+// Native Excel quantizes column widths. Retain a 3pt extra inset on narrow
+// identifier/status columns to prevent mixed-script line underestimation.
+function templateColumnContentWidth(width:number):number{return Math.max(14,width*5.625-(width<12?8:5));}
 // Font-aware browser measurement; conservative Unicode widths in headless QA.
 let excelMeasureContext:CanvasRenderingContext2D|null|undefined;
 function excelCharWidth(text:string,size:number,fontName:string,bold=false):number {
@@ -236,6 +242,7 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
     richCell(sheet.getCell('A1'),`${chapter.code} ${bilingual(chapter.name)}`);
     sheet.getCell('A1').alignment={...sheet.getCell('A1').alignment,wrapText:true,vertical:'middle'};
     sheet.getRow(1).height=Math.max(sheet.getRow(1).height??24,48);
+    if(options.reportScope){const cell=sheet.getCell('A1'),title=cell.text;cell.value={richText:[{text:title+'\n',font:{...cell.font,size:18}},{text:options.reportScope,font:{...cell.font,size:12}}]};const width=Array.from({length:7},(_,i)=>(sheet!.getColumn(i+1).width??10)*5.1).reduce((a,b)=>a+b,0)-12;sheet.getRow(1).height=Math.max(48,splitMeasured(title,width,18,cell.font.name??'Microsoft JhengHei',1).length*22+splitMeasured(options.reportScope,width,12,cell.font.name??'Microsoft JhengHei',1).length*15.4+4);}
     // Omit the requested scoring-introduction block; retain the template's normal row height and coordinates.
     sheet.getCell('E2').value=null;
     sheet.getCell('E2').alignment={wrapText:true,vertical:'top'};
@@ -245,9 +252,9 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
       const values:BiText[]=[{en:item.code,zh:''},item.kpi,itemGuidance(item),{en:responseText(a),zh:''},assessmentNarrative(state,a),evidenceNarrative(a),{en:departmentsLabel(state,a?.departmentIds??item.departmentIds,'en'),zh:departmentsLabel(state,a?.departmentIds??item.departmentIds,'zh')}];
       if(issues.length){values[4]={en:`${values[4].en}\n\n[Open improvements: ${issues.map(x=>x.id).join(', ')}]`,zh:`${values[4].zh}\n\n[未結案改善：${issues.map(x=>x.id).join(', ')}]`};}
       const styleRow=sheet.getRow(row),styles=Array.from({length:7},(_,i)=>clone(styleRow.getCell(i+1).style));
-      const fontSize=Math.max(11,...styles.map(s=>s.font?.size??11));
-      const maxLines=Math.max(4,Math.floor((300-12)/(fontSize*1.6)));
-      const chunks=values.map((value,c)=>splitExcelBiText(value,Math.max(12,(sheet!.getColumn(c+1).width??10)*5.1-12),fontSize,styles[c].font?.name??'Noto Sans TC',maxLines));
+      const fontSize=12;
+      const maxLines=23;
+      const chunks=values.map((value,c)=>splitMeasured(bilingual(value),Math.max(12,templateColumnContentWidth(sheet!.getColumn(c+1).width??10)),fontSize,styles[c].font?.name??'Microsoft JhengHei',maxLines).map(text=>({text})));
       const count=Math.max(...chunks.map(x=>x.length));
       if(count>1)sheet.spliceRows(row+1,0,...Array.from({length:count-1},()=>[]));
       for(let segment=0;segment<count;segment++) {
@@ -259,31 +266,31 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
           cell.alignment={...cell.alignment,vertical:'top',wrapText:true,shrinkToFit:false};
           cell.font={...cell.font,size:fontSize};tableBorder(cell);
           richCell(cell,value);
-          const pixelWidth=Math.max(12,(sheet.getColumn(column).width??10)*5.1-12);
+          const pixelWidth=Math.max(12,templateColumnContentWidth(sheet.getColumn(column).width??10));
           const lineCount=splitMeasured(value,pixelWidth,fontSize,cell.font.name??'Noto Sans TC',1).length;
-          maxHeight=Math.max(maxHeight,lineCount*fontSize*1.6+12);
+          maxHeight=Math.max(maxHeight,lineCount*15.4+1.5);
         }
         if(count>1) {
           const cell=target.getCell(7);cell.value=`${cell.text}\n${tr(lang,'續','Cont.')} ${segment+1}/${count}`;
-          maxHeight+=fontSize*1.6;
+          maxHeight+=15.4;
         }
         // Source has one 409.6pt legacy floor (Excel's maximum is 409.5).
         // Clamp only that inherited floor, never the measured text requirement.
-        const sourceFloor=segment===0?Math.min(styleRow.height??0,409.5):0;
-        const measuredHeight=Math.max(32,maxHeight,sourceFloor);
+        const measuredHeight=Math.max(17,maxHeight);
         if(measuredHeight>409.5)throw new Error(`Excel continuation height exceeds limit: ${item.code}`);
-        target.height=measuredHeight;
+        target.height=measuredHeight;if(segment){target.outlineLevel=1;target.getCell(1).font={...target.getCell(1).font,color:{argb:'FFFFFFFF'}};}
       }
     }
     const end=Math.max(firstRow,sheet.rowCount);
     for(let row=header;row<=end;row++)for(let col=1;col<=7;col++){const cell=sheet.getCell(row,col);tableBorder(cell);cell.alignment={...cell.alignment,wrapText:true,vertical:'top'};}
+    sheet.eachRow(row=>{if(row.number>1)row.eachCell(cell=>{cell.font={...cell.font,size:12};if(cell.value&&typeof cell.value==='object'&&'richText' in cell.value)cell.value.richText.forEach(run=>{run.font={...run.font,size:12};});});});
     // Department excerpts retain source coordinates/styles, without blank template pages.
-    if(options.departmentIds?.length)for(let row=firstRow;row<=end;row++)sheet.getRow(row).hidden=!sheet.getCell(row,1).text;
+    for(let row=firstRow;row<=end;row++)sheet.getRow(row).hidden=!sheet.getCell(row,1).text;
     for(let column=8;column<=sheet.columnCount;column++)sheet.getColumn(column).hidden=true;
     sheet.autoFilter={from:{row:header,column:1},to:{row:end,column:7}};
     sheet.views=[{state:'frozen',xSplit:1,ySplit:header}];
     sheet.pageSetup={...sheet.pageSetup,printArea:`A1:G${end}`,printTitlesRow:`1:${header}`,fitToPage:true,fitToWidth:1,fitToHeight:0};
-    sheet.headerFooter={...sheet.headerFooter,oddFooter:'&L'+frameworkId+'&C&P / &N'};
+    sheet.headerFooter={...sheet.headerFooter,oddFooter:'&L&12'+frameworkId+'&C&12&P / &N'};
   }
   for(const sheet of [...book.worksheets])if(!selectedSheets.has(sheet.id))book.removeWorksheet(sheet.id);
   book.creator=PRODUCT_NAME_EN;book.lastModifiedBy='Authorized report snapshot';book.company='';
@@ -300,10 +307,16 @@ function businessSource(state:PlatformState,row:Improvement,lang:Language){retur
 // Deduplicate only identical text AND formatting; equal words can carry distinct author emphasis.
 function fullImprovementContent(row:Improvement){const body=bilingual(row.content),title=compactRichText(row.title);return [body,compactRichText(row.content.en),compactRichText(row.content.zh)].includes(title)?body:compactRichText(title+'\n'+body);}
 function operationalSheet(book:ExcelJS.Workbook,name:string,headers:string[],widths:number[],description:string){
- const sheet=book.addWorksheet(name),size=14,fontName='Microsoft JhengHei';
+ const sheet=book.addWorksheet(name),size=12,fontName='Microsoft JhengHei';
  widths.forEach((w,i)=>sheet.getColumn(i+1).width=w);
  sheet.getCell('A1').value=name;sheet.getCell('A1').font={name:fontName,size:18,bold:true};sheet.getRow(1).height=30;
- sheet.mergeCells(2,1,3,headers.length);sheet.getCell('A2').value=description;sheet.getCell('A2').font={name:fontName,size};sheet.getCell('A2').alignment={wrapText:true,vertical:'top'};sheet.getRow(2).height=28;sheet.getRow(3).height=28;
+ sheet.mergeCells(2,1,3,headers.length);sheet.getCell('A2').value=description;sheet.getCell('A2').font={name:fontName,size};sheet.getCell('A2').alignment={wrapText:true,vertical:'top'};
+ if(description){
+  // Native 12pt JhengHei scope lines measure 16.08–16.11pt leading.
+  const width=widths.reduce((sum,w)=>sum+w*5.25,0)-10,height=Math.max(18,splitMeasured(description,width,size,fontName,1).length*16.2+4);
+  if(description.length>32767||height>819)throw new Error('Export filter description exceeds Excel header capacity');
+  sheet.getRow(2).height=height/2;sheet.getRow(3).height=height/2;
+ }else{sheet.unMergeCells(2,1,3,headers.length);sheet.getRow(2).hidden=true;sheet.getRow(3).hidden=true;}
  sheet.getRow(4).values=headers;sheet.getRow(4).height=46;
  headers.forEach((_,i)=>{const cell=sheet.getCell(4,i+1);cell.font={name:fontName,size,bold:true,color:{argb:'FF193447'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE1EAF0'}};});
  return sheet;
@@ -312,40 +325,40 @@ function operationalSheet(book:ExcelJS.Workbook,name:string,headers:string[],wid
 // instead carry an ordered [part/total] prefix inside a continued narrative.
 // Every short metadata value repeats; unusually long metadata gets ordered parts too.
 function operationalRows(sheet:ExcelJS.Worksheet,values:(string|Date|null|number)[],partColumn:number|null,narrativeColumns:number[],statusColumn?:number,status?:{background:string;color:string}){
- const size=14,fontName='Microsoft JhengHei';
- const chunks=values.map((v,i)=>typeof v==='string'?splitMeasured(compactRichText(v),(sheet.getColumn(i+1).width??20)*5.1-20,size,fontName,partColumn===null?(narrativeColumns.includes(i+1)?9:17):10):[v]);
+ const size=12,fontName='Microsoft JhengHei';
+ const chunks=values.map((v,i)=>typeof v==='string'?splitMeasured(compactRichText(v),(sheet.getColumn(i+1).width??20)*5.25-5,size,fontName,23):[v]);
  const count=Math.max(...chunks.map(c=>c.length));
  for(let part=0;part<count;part++){
   const cells=chunks.map((parts,i)=>parts.length===1?part&&narrativeColumns.includes(i+1)?'':parts[0]:parts[part]??'');
   if(partColumn!==null)cells[partColumn-1]=part+1;
   else if(count>1)for(const column of narrativeColumns)cells[column-1]=`[${String(part+1).padStart(String(count).length,'0')}/${count}]\n${cells[column-1]}`;
-  const row=sheet.addRow(cells);let height=32;
-  cells.forEach((v,i)=>{const c=row.getCell(i+1);c.font={name:fontName,size,color:{argb:'FF193447'}};if(typeof v==='string')richCell(c,v);c.alignment={wrapText:true,vertical:'top',shrinkToFit:false};tableBorder(c);if(v instanceof Date)c.numFmt='yyyy-mm-dd';height=Math.max(height,splitMeasured(typeof v==='string'?v:'X',(sheet.getColumn(i+1).width??20)*5.1-20,size,fontName,1).length*size*1.6+18);});
-  if(height>409.5)throw new Error('Operational continuation exceeds Excel row height');// Excel Sort moves values, not physical row heights. A common safe height keeps
-  // every ten-line continuation readable at any sorted position.
-  row.height=Math.max(256,height);
+  const row=sheet.addRow(cells);let height=17;
+  cells.forEach((v,i)=>{const c=row.getCell(i+1);c.font={name:fontName,size,color:{argb:'FF193447'}};if(typeof v==='string')richCell(c,v);c.alignment={wrapText:true,vertical:'top',shrinkToFit:false};tableBorder(c);if(v instanceof Date)c.numFmt='yyyy-mm-dd';height=Math.max(height,(splitMeasured(typeof v==='string'?v:'X',(sheet.getColumn(i+1).width??20)*5.25-5,size,fontName,1).length+(typeof v==='string'&&richTextToPlainText(v).endsWith('\n')?1:0))*15.4+1.5);});
+  if(height>409.5)throw new Error('Operational continuation exceeds Excel row height');
+    // Content-specific heights; a later user sort requires Excel AutoFit.
+  row.height=height;
+  if(part){row.outlineLevel=1;cells.forEach((v,i)=>{const c=row.getCell(i+1);if((i<2||partColumn===16&&i===5)&&chunks[i].length===1){c.font={...c.font,color:{argb:'FFFFFFFF'}};if(c.value&&typeof c.value==='object'&&'richText' in c.value)c.value.richText.forEach(run=>{run.font={...run.font,color:{argb:'FFFFFFFF'}};});};c.border={...c.border,top:{style:'hair',color:{argb:'FFE4EBF0'}},bottom:{style:'hair',color:{argb:'FFE4EBF0'}}};});}
   if(statusColumn&&status){const c=row.getCell(statusColumn);c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF'+status.background.slice(1)}};c.font={name:fontName,size,bold:true,color:{argb:'FF'+status.color.slice(1)}};}
  }
 }
 function finishOperationalSheet(sheet:ExcelJS.Worksheet){
  for(let c=1;c<=sheet.columnCount;c++){tableBorder(sheet.getCell(4,c));sheet.getCell(4,c).alignment={wrapText:true,vertical:'top'};}
  sheet.views=[{state:'frozen',ySplit:4}];sheet.autoFilter={from:{row:4,column:1},to:{row:Math.max(4,sheet.rowCount),column:sheet.columnCount}};
- sheet.pageSetup={paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,printTitlesRow:'4:4',printArea:`A1:${sheet.getColumn(sheet.columnCount).letter}${sheet.rowCount}`};sheet.headerFooter={oddFooter:'&LFPMC&C&P / &N'};
+ sheet.pageSetup={paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,printTitlesRow:'4:4',printArea:`A1:${sheet.getColumn(sheet.columnCount).letter}${sheet.rowCount}`};sheet.headerFooter={oddFooter:'&L&12FPMC&C&12&P / &N'};
 }
 export async function buildRemarksExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
  const rows=selectedRemarkRows(state,frameworkId,chapterIds,options.departmentIds);if(!rows.length)throw noRemarks();
  const Excel=await loadExcel(),book=new Excel.Workbook();book.creator=PRODUCT_NAME_EN;
- const sheet=operationalSheet(book,tr(lang,'條目備註','Item remarks'),lang==='zh'?['對應章節','Item','備註狀態','涉及部門','追蹤人員','完整備註']:['Chapter','Item','Remarks status','Departments','Follow-up people','Complete remarks'],[22,10,13,22,20,126],tr(lang,'同 Item 續列保留全文與責任分工；續文開頭 [序/總數] 為閱讀標籤。篩選後請整表依 Item、完整備註升冪排序；勿單獨排序一欄。狀態為獨立補充判斷。','Continuation rows retain complete remarks and assignments; [part/total] prefixes identify reading order. Sort the whole range by Item, then Complete remarks ascending; never sort one column alone. Status is an independent supplementary assessment.'));
+ const sheet=operationalSheet(book,tr(lang,'條目備註','Item remarks'),lang==='zh'?['對應章節','Item','備註狀態','涉及部門','追蹤人員','完整備註']:['Chapter','Item','Remarks status','Departments','Follow-up people','Complete remarks'],[22,10,13,22,20,126],options.reportScope??'');
  for(const {chapter,item,assessment:a} of rows)operationalRows(sheet,[`${chapter.code} · ${bilingual(chapter.name)}`,item.code,remarksStatusLabel(a.remarksStatus,lang),departmentsLabel(state,a.departmentIds??item.departmentIds,lang)||'—',peopleLabel(state,a.assigneeIds??[])||'—',a.remarks??''],null,[6],3,remarksStatusDefinition(a.remarksStatus));
  // Normal assignments repeat in full; exceptionally long labels continue in
  // the same labelled Item group instead of exceeding Excel's height ceiling.
- // Native Excel sorting does not carry heights, so all rows share the maximum.
- const height=Math.max(...sheet.getRows(5,sheet.rowCount-4)!.map(row=>row.height??256));for(let r=5;r<=sheet.rowCount;r++)sheet.getRow(r).height=height;
+ // Keep each row's content-specific height. Sorting in Excel requires AutoFit.
  finishOperationalSheet(sheet);return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
 }
-export async function buildImprovementsExcel(state:PlatformState,ids:string[],lang:Language):Promise<Uint8Array>{
+export async function buildImprovementsExcel(state:PlatformState,ids:string[],lang:Language,options:ReportBuildOptions={}):Promise<Uint8Array>{
  const rows=selectedImprovementRows(state,ids),Excel=await loadExcel(),book=new Excel.Workbook();book.creator=PRODUCT_NAME_EN;
- const description=tr(lang,'文件序號僅供本文件對應，非永久業務編號；同筆全文及計劃分段續列，短欄位重複。按文件序號、段次閱讀；全部進度見進度工作表，按文件序號、事件次序、段次閱讀。','Document numbers link this workbook only, not persistent business IDs. Complete content/plans use continuation rows with repeated short metadata. Read in document number/part order. All events are on Progress; read in document/event/part order.');
+ const description=options.reportScope??tr(lang,'文件序號僅供本文件對應，非永久業務編號；同筆全文及計劃分段續列，短欄位重複。按文件序號、段次閱讀；全部進度見進度工作表，按文件序號、事件次序、段次閱讀。','Document numbers link this workbook only, not persistent business IDs. Complete content/plans use continuation rows with repeated short metadata. Read in document number/part order. All events are on Progress; read in document/event/part order.');
  const sheet=operationalSheet(book,tr(lang,'改善項目','Improvements'),lang==='zh'?['文件序號','標題','提出日期','來源','分類','關聯編號','涉及部門','執行人','急迫度','狀態','最新更新','目標日期','結案日期','完整內容','執行計劃','段次','完成率 (%)','已達成階段數','階段總數']:['Document no.','Title','Proposed date','Source','Classification','Related codes','Departments','Assignees','Urgency','Status','Updated','Target date','Closed date','Complete content','Plan','Part','Completion (%)','Achieved milestones','Total milestones'],[12,45,18,48,28,30,40,44,14,20,18,18,18,100,85,9,18,18,18],description);
  const progress=operationalSheet(book,tr(lang,'全部進度','Progress'),lang==='zh'?['文件序號','標題','事件次序','更新日期','更新人','狀態','內容','段次']:['Document no.','Title','Event order','Update date','Updated by','Status','Content','Part'],[12,45,12,18,44,20,100,9],description);
  rows.forEach((row,i)=>{operationalRows(sheet,[i+1,row.title,excelDate(row.proposedDate),businessSource(state,row,lang),row.source==='external'?findingClassificationLabel(improvementFindingClassification(state,row),lang):'—',relatedCodes(state,row,lang),departmentsLabel(state,row.departmentIds,lang)||'—',peopleLabel(state,row.assigneeIds)||'—',urgencyLabel(row,lang),improvementStatus(row.status,lang),excelDate(row.updatedAt),excelDate(row.targetDate),excelDate(row.closedAt),fullImprovementContent(row),row.plan,1,improvementPercent(row),row.milestones?.length?milestoneProgress(row).achieved:'',row.milestones?.length??''],16,[14,15]);
@@ -373,7 +386,7 @@ interface PdfLine {text:string;indent:number}
 interface PdfRun {font:PDFFont;text:string;color?:keyof typeof RICH_COLORS}
 const hasBold=(value:unknown):boolean=>typeof value==='string'?richTextRuns(value).some(run=>run.bold):!!value&&typeof value==='object'&&Object.values(value).some(hasBold);
 export interface PdfGroupRow {headers:string[];cells:string[];ratios?:number[];statusColumn?:number;status?:{background:string;color:string};entries?:{headers:string[];cells:string[];ratios:number[]}[]}
-const PDF_BODY=15,PDF_AUX=14,PDF_LEADING=23,PDF_PAD=8;
+const PDF_BODY=12,PDF_AUX=12,PDF_LEADING=16,PDF_PAD=4;
 const PAGE_WIDTH=1190.55,PAGE_HEIGHT=841.89,MARGIN=34,BOTTOM=64;
 class TextPdf {
   readonly embedsSnapshotMetadata=true;
@@ -764,7 +777,7 @@ export async function renderOverviewReport<T>(create:ReportFactory<T>,state:Plat
   const framework=state.frameworks.find(f=>f.id===frameworkId)!;pdf.paragraph(bilingual(framework.scopeLabel));
   if(frameworkId==='TMSA')pdf.paragraph(tmsa14ReportScope(currentIncludesTmsa14(state),score.totalChapters,lang),PDF_AUX);
   const scoped=state.items.filter(i=>i.active&&i.frameworkId===frameworkId&&ids.includes(i.chapterId));
-  const assessments=state.assessments.filter(a=>scoped.some(i=>i.id===a.itemId)),issues=filteredImprovements(state,{...options.filters,frameworkId}).filter(row=>(row.itemIds.some(id=>scoped.some(i=>i.id===id))||row.chapterIds?.some(id=>ids.includes(id)))&&row.status!=='closed');
+  const assessments=state.assessments.filter(a=>scoped.some(i=>i.id===a.itemId)),issues=filteredImprovements(state,{...options.filters,frameworkId}).filter(row=>(row.itemIds.some(id=>scoped.some(i=>i.id===id))||row.chapterIds?.some(id=>ids.includes(id)))&&row.status!=='closed').sort(compareImprovementReports);
   const latestUpdate=assessments.map(a=>a.updatedAt).sort().at(-1)??'—';
   pdf.paragraph(`${tr(lang,'目前得分','Current score')}: ${score.score===null?tr(lang,'未完整評定','Not fully assessed'):score.score.toFixed(2)+' / 4'}${score.provisional?tr(lang,'（暫估 / 來源缺口）',' (provisional / source gap)'):''}\n${tr(lang,'完成更新','Reviewed')}: ${assessments.filter(a=>a.reviewed).length}/${scoped.length}${restricted?'':`\n${tr(lang,'未結案改善','Open improvements')}: ${issues.length}`}\n${tr(lang,'所選範圍最近自評更新','Latest current-assessment update in scope')}: ${latestUpdate}`);
   pdf.paragraph(restricted?tr(lang,'分數採每個所選分章的完整有效 Item 計算，部門、人員或日期條件不得篩掉 No 以提高分數。時間表示最近更新 / 匯入，非回溯證明。試算模型另行獨立，不混入目前分數。','Scores use every active item in each selected chapter; department, person or date filters must not remove No items to inflate a score. Time means latest update/import, not retrospective evidence. Simulation is a separate target model, not the current score.'):tr(lang,'分數採每個所選分章的完整有效 Item 計算，部門、人員或日期條件不得篩掉 No 以提高分數。時間表示最近更新 / 匯入，非回溯證明；章節改善分佈可重疊。試算模型另行獨立，不混入目前分數。','Scores use every active item in each selected chapter; department, person or date filters must not remove No items to inflate a score. Time means latest update/import, not retrospective evidence. Improvement distribution overlaps across chapters. Simulation is a separate target model, not the current score.'),PDF_AUX);
@@ -793,7 +806,7 @@ export function downloadReportBytes(bytes:Uint8Array,filename:string,mime:string
   try{anchor.click();}finally{anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),60_000);}
 }
 const reportFilename=(state:PlatformState,name:string,extension:string)=>`${name}-${state.serverTime.slice(0,10)||'snapshot'}.${extension}`;
-export async function downloadFrameworkExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[]):Promise<void>{downloadReportBytes(await buildFrameworkExcel(state,frameworkId,lang,chapterIds),reportFilename(state,frameworkId+'-assessment','xlsx'),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');}
+export async function downloadFrameworkExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[]):Promise<void>{const descriptor=reportDescriptor(state,{kind:'framework',format:'xlsx',frameworkId,ids:chapterIds??state.chapters.filter(c=>c.active&&c.frameworkId===frameworkId).map(c=>c.id)},lang);downloadReportBytes(await buildFrameworkExcel(state,frameworkId,lang,chapterIds,{reportScope:descriptor.scope}),descriptor.filename,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');}
 export async function downloadFrameworkPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[]):Promise<void>{downloadReportBytes(await buildFrameworkPdf(state,frameworkId,lang,chapterIds),reportFilename(state,frameworkId+'-assessment','pdf'),'application/pdf');}
 export async function downloadImprovementsPdf(state:PlatformState,ids:string[],lang:Language,title?:string):Promise<void>{downloadReportBytes(await buildImprovementsPdf(state,ids,lang,title),reportFilename(state,'improvements','pdf'),'application/pdf');}
 export async function downloadInspectionPdf(state:PlatformState,inspectionId:string,lang:Language):Promise<void>{downloadReportBytes(await buildInspectionPdf(state,inspectionId,lang),reportFilename(state,'inspection','pdf'),'application/pdf');}

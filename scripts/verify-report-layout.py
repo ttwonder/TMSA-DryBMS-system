@@ -8,7 +8,7 @@ def geometry(path):
  for page in doc:
   spans=[s for b in page.get_text('dict')['blocks'] for l in b.get('lines',[]) for s in l['spans'] if s['text'].strip()]
   for s in spans:
-   if abs(s['size']-15)<.05 and ('requirement' in s['text'] or '完整繁體' in s['text']):widths.append(s['bbox'][2]-s['bbox'][0])
+   if abs(s['size']-12)<.05 and ('requirement' in s['text'] or '完整繁體' in s['text']):widths.append(s['bbox'][2]-s['bbox'][0])
   for d in page.get_drawings():
    for kind,*args in d['items']:
     if kind!='re':continue

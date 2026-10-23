@@ -209,6 +209,15 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 - 三邏輯行、15pt 正文／14pt 輔助、原換頁邊界、全文／字元／fallback／ToUnicode 都要以實際產檔及前後幾何比對確認。共享 TextPdf 僅做備註／框架／改善／歷史的有限代表性回歸；未變動 SQL／人員／保存層以基準 hash 保護，不重做已完成的人員批。
 - 本批接續最新已提交功能完成有限驗證後，建立獨立本機 commit，供使用者一起 Push。原暫停 handback 與所有失敗證據保留；最新交付見 `docs/REMARKS_EXPORT_FOLLOWUP_DELIVERY.md`、`qa-evidence/remarks-export-followup/resumed-e838b86/`。不得聲稱正式慢匯出的根因或正式加速已驗證，亦不代執行正式 SQL／Push／部署。
 
+## 報表篩選與密度修訂（本批1–9，優先於舊字級及共同列高）
+
+- 改善主頁與報告中心來源／章節／部門／人員多選，同維OR、跨維AND；舊scalar相容，Overview單選語義不擴改。空可選篩選不限，空明選拒絕，40筆分頁與跨頁明選不變。
+- 全部PDF／XLSX非標題12pt，明確取代舊15／14pt。瀏覽器仍列印授權快照，不下載網路字型，標題僅建議PDF檔名。改善輸出依urgent→high→medium→low、targetDate升冪、獨立proposedDate升冪、缺值末及stable ID。
+- 以同改善ID或框架＋真Item ID建立組，不按display code合併。Excel一般內容盡量單列，極長無損續列；保留filterable值，組內重複識別採視覺抑制，不合併資料格。保留完整富文字／計劃／全部事件／階段及歷史。
+- 每列個別內容高度，409.5pt／32767字元上限；取消舊256pt與全表共同最大高度。使用者任意排序後需Excel AutoFit；不宣稱自動重算，重排後不承諾原分組視覺。
+- 刪除指定中英續列說明及空白帶；命名共用canonical日期＋實際篩選顯示名稱，長名有界且全文範圍保留文件內。
+- 本批不改SQL／來源身份／settings／permissions／保存協議；Source management交下一批。未stage／commit／Push／部署。完整證據及剩餘限制見 docs/REPORT_REFINEMENT_DELIVERY.md。
+
 ## 最新追加：船舶及公司安全會議來源
 
 - 待改善項目新增「船舶安全會議」（`vessel_safety_meeting`）及「公司安全會議」（`company_safety_meeting`），接在原來源後，保留原來源代碼及排序。英文分別為 Vessel safety meeting／Company safety meeting。

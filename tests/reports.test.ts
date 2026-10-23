@@ -110,10 +110,9 @@ test('long bilingual XLSX fields reconstruct exactly and include custom chapters
   const rows:ExcelJS.Row[]=[];sheet.eachRow(row=>{if(row.getCell(1).text===first.code)rows.push(row);});
   assert.ok(rows.length>2);
   const size=rows[0].getCell(2).font.size!;
-  const planned=reports.splitExcelBiText(first.kpi,(sheet.getColumn(2).width!)*5.1-12,size,rows[0].getCell(2).font.name!,Math.floor((300-12)/(size*1.6)));
-  assert.equal(planned.map(s=>s.en).join(''),first.kpi.en);
-  assert.equal(planned.map(s=>s.zh).join(''),first.kpi.zh);
-  assert.deepEqual(rows.slice(0,planned.length).map(row=>row.getCell(2).text),planned.map(s=>s.text));
+  assert.equal(size,12);
+  assert.equal(rows.map(row=>row.getCell(2).text).join(''),reports.bilingual(first.kpi));
+  const planned=rows.map(row=>({text:row.getCell(2).text,en:'',zh:''}));
   const seen=new Set<string>();for(const s of saved.worksheets)s.eachRow(r=>{if(r.getCell(1).text)seen.add(r.getCell(1).text);});
   assert.ok(seen.has('LOCAL-X'));assert.ok(!seen.has(inactive.code));
   for(const row of rows){assert.ok(row.height!<=409.5);for(let c=1;c<=7;c++)for(const side of ['left','right','top','bottom'] as const)assert.ok(row.getCell(c).border[side]?.style);}

@@ -18,7 +18,7 @@ for(const kind of ['framework','remarks','improvements','inspection','overview']
   const html=await buildPrintReport(state,r,'zh');
   const markers={framework:['KPI_0','GUIDANCE_2','ASSESSMENT_2','EVIDENCE_2'],remarks:['REMARKS_1.1.1_84','停用歷史姓名'],improvements:['CONTENT_0_89','PLAN_0_34','EVENT_2_27','EVENT_4_1'],inspection:['OBSERVATION_2','RECOMMENDATION_2','FINDING_2','ADVICE_2'],overview:['0.00 / 4','PLAN_2_1']};
   for(const marker of markers[kind])assert(html.includes(marker),marker);
-  assert.match(html,/font-src 'none'/);assert.match(html,/font-size:15pt/);assert.match(html,/font-size:14pt/);assert.match(html,/table-header-group/);assert.doesNotMatch(html,/@font-face|https?:\/\/|break-inside:avoid/);assert.equal(calls,0);assert.equal(JSON.stringify(state),before);
+  assert.match(html,/font-src 'none'/);assert.match(html,/font-size:12pt/);assert.doesNotMatch(html,/font-size:(14|15)pt/);assert.match(html,/table-header-group/);assert.doesNotMatch(html,/@font-face|https?:\/\/|break-inside:avoid/);assert.equal(calls,0);assert.equal(JSON.stringify(state),before);
  }finally{globalThis.fetch=fetch;}
 });
 for(const lang of ['zh','en'] as const)for(const kind of ['framework','inspection','overview'] as const)test(`${kind} ${lang} print retains the complete snapshot identifier without nonexistent PDF properties`,async()=>{

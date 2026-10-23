@@ -13,6 +13,6 @@ test('long BPG uses narrative width rather than tall empty auxiliary columns',as
  await writeFile(resolve(dir,'layout-long-fields.json'),JSON.stringify({fields:[state.items[0].guidance.en,state.items[0].guidance.zh]}));
  const raw=execFileSync('uv',['run','--offline','--with','pymupdf==1.26.5','--with','fonttools==4.60.1','--with','openpyxl==3.1.5','python','scripts/verify-report-layout.py','--geometry',path],{encoding:'utf8'});
  const metrics=JSON.parse(raw);await writeFile(resolve(dir,'layout-geometry.json'),JSON.stringify(metrics,null,2));
- assert.ok(metrics.narrativeWidth>=800,`Long narrative allocated only ${metrics.narrativeWidth}pt; needs >=800pt at 15pt`);
+ assert.ok(metrics.narrativeWidth>=800,`Long narrative allocated only ${metrics.narrativeWidth}pt; needs >=800pt at 12pt`);
  assert.ok(metrics.blankTallAreaFraction<=0.10,`Empty full-height columns waste ${metrics.blankTallAreaFraction} of row area`);
 });

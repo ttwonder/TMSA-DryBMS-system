@@ -11,7 +11,7 @@ import {startQaServer} from './qa-server.mjs';
 import {root,syntheticSeed} from './native-postgres.mjs';
 import {createApiClient} from '../src/api.ts';
 import {checkpointMilestones} from '../src/improvementMilestones.ts';
-const baseline=process.argv.includes('--baseline'),out=join(root,'qa-evidence/report-selection',`${baseline?'baseline':'green'}-${new Date().toISOString().replaceAll(':','-')}`);mkdirSync(out,{recursive:true});
+const baseline=process.argv.includes('--baseline'),out=join(root,'qa-evidence/report-refinement/selection',`${baseline?'baseline':'green'}-${new Date().toISOString().replaceAll(':','-')}`);mkdirSync(out,{recursive:true});
 const paths=['src/Reports.tsx','src/Improvements.tsx','src/reports.ts','scripts/verify-report-selection.mjs','tests/report-department-filter.test.ts'];
 const digest=p=>createHash('sha256').update(readFileSync(p)).digest('hex'),hashes=()=>Object.fromEntries(paths.map(p=>[p,digest(join(root,p))]));
 const receipt={status:'RUNNING',layer:'真實UI＋合成資料＋owned native PostgreSQL；非正式環境',cases:[],downloads:[],screenshots:[],errors:[],blocked:[],inputsBefore:hashes()};
@@ -22,7 +22,7 @@ seed.items.push({...base,id:'report-both',code:'1.1.4',order:4},{...base,id:'rep
 seed.assessments.push({...assessment,id:'assessment-report-both',itemId:'report-both',departmentIds:['marine','technical']},{...assessment,id:'assessment-report-second',itemId:'report-second-item'});
 for(const item of seed.items){item.kpi={en:'KPI_MARKER_'+item.id,zh:'測試指標 '+item.code};item.guidance={en:'GUIDANCE_MARKER_'+item.id,zh:'保留完整指引'};}
 for(const a of seed.assessments){a.selfAssessment={en:'ASSESSMENT_MARKER_'+a.itemId,zh:'完整已保存自評'};a.evidence={en:'EVIDENCE_MARKER_'+a.itemId,zh:'完整佐證'};}
-seed.improvements=Array.from({length:53},(_,i)=>({id:'report-action-'+String(i).padStart(2,'0'),version:0,createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z',updatedBy:'',title:`${i<45?'MATCH':'OTHER'} Action ${String(i).padStart(2,'0')}`,content:{en:'COMPLETE_ACTION_'+i+'\nSecond line retained',zh:'完整改善內容 '+i},itemIds:['item-gap'],departmentIds:[i<45?'marine':'technical'],assigneeIds:[],source:'non_external',urgency:'medium',status:'open',percent:0,targetDate:'2026-12-31',plan:'PLAN_MARKER_'+i,events:[],closedAt:null,closedBy:null,sources:[]}));
+seed.improvements=Array.from({length:53},(_,i)=>({id:'report-action-'+String(i).padStart(2,'0'),version:0,createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z',updatedBy:'',title:`${i<45?'MATCH':'OTHER'} Action ${String(i).padStart(2,'0')}`,content:{en:'COMPLETE_ACTION_'+i+'\nSecond line retained',zh:'完整改善內容 '+i},itemIds:[i%2?'report-second-item':'item-gap'],departmentIds:[i%2?'marine':'technical'],assigneeIds:[],source:'non_external',urgency:['urgent','high','medium','low'][i%4],status:'open',percent:0,targetDate:'2026-12-31',plan:'PLAN_MARKER_'+i,events:[],closedAt:null,closedBy:null,sources:[]}));
 let qa,vite,browser,page,current='setup';
 const saveReceipt=()=>writeFileSync(join(out,'receipt.json'),JSON.stringify(receipt,null,2));
 const run=async(id,fn)=>{current=id;try{await fn();receipt.cases.push({id,status:'PASS'});}catch(e){receipt.cases.push({id,status:'FAIL',message:e.message});if(!baseline)throw e;}finally{saveReceipt();}};
@@ -37,6 +37,7 @@ try{
  const original=(await api.read()).improvements.find(r=>r.id==='report-action-00'),at=new Date().toISOString();
  const staged=checkpointMilestones(original,{...original,status:'in_progress',events:[{id:'report-progress',at,by:user.user.id,status:'in_progress',percent:0,content:'PROGRESS_MARKER_COMPLETE'}],milestones:[{id:'report-stage',goal:'MILESTONE_MARKER_COMPLETE 階段目標',plannedDate:'2026-12-01',achievedDate:''}]},()=>({id:'report-plan-event',at,by:user.user.id}));
  const actionLease=await api.claim('improvement',original.id,'update');try{await api.save('improvement',staged,original.version,actionLease,'update',randomUUID());}finally{await api.release(actionLease);}
+ for(let n=0;n<3;n++){const id='multi-action-0'+n,lease=await api.claim('improvement',id,'create');try{await api.save('improvement',{...seed.improvements[n],id,title:'MULTI Action '+n,source:n===0?'management_review':n===1?'management_directive':'non_external',assigneeIds:[n===1?qa.users.operator.user.id:user.user.id]},0,lease,'create',randomUUID());}finally{await api.release(lease);}}
  const before=await business();
  const port=await new Promise((resolve,reject)=>{const s=net.createServer();s.once('error',reject);s.listen(0,'127.0.0.1',()=>{const n=s.address().port;s.close(e=>e?reject(e):resolve(n));});});
  vite=await createServer({root,base:'/',server:{host:'127.0.0.1',port,strictPort:true,watch:{ignored:['**/qa-evidence/**','**/private-seed/**']}},logLevel:'error'});await vite.listen();const ui='http://127.0.0.1:'+port;
@@ -56,19 +57,19 @@ try{
  if(!baseline){
  const counts=async()=>(await qa.db.setup.query("select (select count(*)::int from compliance_private.exports) exports,(select count(*)::int from compliance_private.audit where action='export_authorize') audits")).rows[0];
  const download=async(name,format,kind,ids,expectedItems=[],deps=[],trigger=()=>page.getByRole('button',{name:/^(生成並下載|列印／另存PDF)$/}).click())=>{
-  const prior=await counts(),path=join(out,name+'.'+format);
-  if(format==='pdf'){const n=await page.evaluate(()=>window.__printCalls.length);await trigger();await expect.poll(()=>page.evaluate(()=>window.__printCalls.length),{timeout:120000}).toBe(n+1);const popup=ctx.pages().at(-1),session=await ctx.newCDPSession(popup);writeFileSync(join(out,name+'.html'),await popup.content());const pdf=await session.send('Page.printToPDF',{printBackground:true,preferCSSPageSize:true});writeFileSync(path,Buffer.from(pdf.data,'base64'));await session.detach();await popup.close();}
-  else{const pending=page.waitForEvent('download',{timeout:120000});await trigger();const d=await pending;await d.saveAs(path);assert.equal(await d.failure(),null);}
+  const prior=await counts(),path=join(out,name+'.'+format);let suggestedName='';
+  if(format==='pdf'){const n=await page.evaluate(()=>window.__printCalls.length);await trigger();await expect.poll(()=>page.evaluate(()=>window.__printCalls.length),{timeout:120000}).toBe(n+1);const popup=ctx.pages().at(-1),session=await ctx.newCDPSession(popup);suggestedName=await popup.title();assert(/^\d{4}-\d{2}-\d{2}-/.test(suggestedName));writeFileSync(join(out,name+'.html'),await popup.content());const pdf=await session.send('Page.printToPDF',{printBackground:true,preferCSSPageSize:true});writeFileSync(path,Buffer.from(pdf.data,'base64'));await session.detach();await popup.close();}
+  else{const pending=page.waitForEvent('download',{timeout:120000});await trigger();const d=await pending;suggestedName=d.suggestedFilename();assert(/^\d{4}-\d{2}-\d{2}-/.test(suggestedName));assert(suggestedName.length<=175);await d.saveAs(path);assert.equal(await d.failure(),null);}
   const stored=(await qa.db.setup.query('select snapshot,request from compliance_private.exports order by at desc limit 1')).rows[0];assert.equal(stored.request.format,format);assert.equal(stored.request.kind,kind);assert.deepEqual([...stored.request.ids].sort(),[...ids].sort());if(kind==='framework')assert.deepEqual(stored.request.filters.departmentIds,deps);
   assert.deepEqual(await counts(),{exports:prior.exports+1,audits:prior.audits+1});assert.equal(await business(),before);
   const canonical=join(out,name+'-canonical.json');writeFileSync(canonical,JSON.stringify(stored.snapshot,null,2));
-  const entry={name,path,format,kind,request:stored.request,expectedItems,canonical,sha256:digest(path),canonicalSha256:digest(canonical)};
+  const entry={name,path,suggestedName,format,kind,request:stored.request,expectedItems,canonical,sha256:digest(path),canonicalSha256:digest(canonical)};
   if(format==='xlsx'){
    const book=new ExcelJS.Workbook();await book.xlsx.load(readFileSync(path));const codes=new Set();for(const sheet of book.worksheets)sheet.eachRow(row=>{const code=row.getCell(stored.request.filters?.reportVariant==='remarks'?2:1).text;if(/^(?:\d+\.\d+\.\d+|D-\d+)$/.test(code))codes.add(code);});
    if(kind==='framework')assert.deepEqual([...codes].sort(),expectedItems.map(id=>seed.items.find(i=>i.id===id).code).sort());
    if(kind==='improvements'){
     const sheet=book.worksheets[0],titles=new Set();for(let r=5;r<=sheet.rowCount;r++){titles.add(sheet.getRow(r).getCell(2).text);assert.equal(sheet.getRow(r).getCell(14).alignment.wrapText,true);assert(sheet.getRow(r).getCell(12).value instanceof Date);}
-    assert.deepEqual([...titles].sort(),ids.map(id=>seed.improvements.find(r=>r.id===id).title).sort());assert.equal(sheet.views[0].ySplit,4);assert.equal(sheet.autoFilter,`A4:${sheet.getColumn(sheet.columnCount).letter}${sheet.rowCount}`);assert(sheet.getColumn(14).width>sheet.getColumn(1).width);assert(!sheet.model.merges.some(m=>Number(/\d+/.exec(m)[0])>=4));
+    assert.deepEqual([...titles].sort(),ids.map(id=>stored.snapshot.improvements.find(r=>r.id===id).title).sort());assert.equal(sheet.views[0].ySplit,4);assert.equal(sheet.autoFilter,`A4:${sheet.getColumn(sheet.columnCount).letter}${sheet.rowCount}`);assert(sheet.getColumn(14).width>sheet.getColumn(1).width);assert(!sheet.model.merges.some(m=>Number(/\d+/.exec(m)[0])>=4));
     if(ids.includes('report-action-00')){assert.equal(book.worksheets.length,4);assert(book.worksheets[1].getCell('G5').text.includes('PROGRESS_MARKER_COMPLETE'));assert(book.worksheets[2].getCell('D5').text.includes('MILESTONE_MARKER_COMPLETE'));}
    }
    entry.sheets=book.worksheets.map(s=>s.name);
@@ -84,6 +85,35 @@ try{
  await run('main-cross-page-45-Excel-exact-canonical-cohort',()=>download('main-all-matching','xlsx','improvements',seed.improvements.filter(r=>r.title.startsWith('MATCH')).map(r=>r.id),[],[],()=>page.getByRole('button',{name:/^匯出已選Excel/}).click()));
  await run('narrow-zero-restore-and-clear-selection',async()=>{await search().fill('MATCH Action 00');await expect(page.locator('.list-selection-summary')).toContainText('已選: 1');await search().fill('NO_MATCH_XYZ');await expect(page.getByRole('button',{name:'全部選中',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:/^匯出已選Excel/})).toBeDisabled();await search().fill('MATCH');await expect(page.locator('.list-selection-summary')).toContainText('已選: 45');await page.getByRole('button',{name:'取消全部勾選',exact:true}).click();await expect(page.locator('.list-selection-summary')).toContainText('已選: 0');await search().fill('MATCH Action 00');await mainBoxes().check();});
  for(const format of ['pdf','xlsx'])await run('main-single-'+format+'-progress-milestones-preserved',()=>download('main-single-'+format,format,'improvements',['report-action-00'],[],[],()=>page.getByRole('button',{name:format==='pdf'?/^列印已選／另存PDF/:/^匯出已選Excel/}).click()));
+ await run('multi-main-four-dimensions-union-intersection-canonical-Excel',async()=>{
+  await search().fill('');await page.locator('.secondary-filters>summary').click();
+  const pick=async(label,values)=>{const d=page.locator('.improvement-multifilter').filter({has:page.locator('summary[aria-label="'+label+'"]')});await d.locator('summary').click();for(const cb of await d.getByRole('checkbox').all()){const text=(await cb.locator('..').innerText()).trim();await cb.setChecked(values.some(v=>text.includes(v)));}await d.locator('summary').click();};
+  await pick('來源（多選）',['管理審查會議','管理層指令']);await pick('章節（多選）',['TMSA 1','TMSA 2']);await pick('部門（多選）',['海技組','船工處']);await pick('人員（多選）',[user.user.name,qa.users.operator.user.name]);
+  await expect(page.locator('.list-selection-summary')).toContainText('符合篩選: 2');await page.getByRole('button',{name:'全部選中',exact:true}).click();
+  await download('multi-main','xlsx','improvements',['multi-action-00','multi-action-01'],[],[],()=>page.getByRole('button',{name:/^匯出已選Excel/}).click());
+  for(const lang of ['zh','en']){if(lang==='en')await page.getByRole('button',{name:'Switch language',exact:true}).click();await page.setViewportSize({width:390,height:844});for(const d of await page.locator('.improvement-multifilter').all()){await d.locator('summary').click();const box=await d.boundingBox();assert(box.x>=0&&box.x+box.width<=391);const cb=await d.getByRole('checkbox').first().boundingBox();assert(cb.width<=18);await snap('multi-main-'+lang+'-'+(await d.locator('summary').innerText()).replace(/[^a-z]/gi,''));await d.locator('summary').click();}assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));}
+  await page.getByRole('button',{name:'Switch language',exact:true}).click();await page.setViewportSize({width:1440,height:1000});await page.getByRole('button',{name:'清除篩選及選取',exact:true}).click();
+ });
+ await nav('報告中心');await page.getByLabel('報告種類',{exact:true}).selectOption('improvements');
+ await run('multi-report-center-same-four-dimensions-and-PDF',async()=>{
+  for(const [label,wanted] of [['來源（多選）',['管理審查會議','管理層指令']],['章節（多選）',['TMSA 1','TMSA 2']],['部門（多選）',['海技組','船工處']],['人員（多選）',[user.user.name,qa.users.operator.user.name]]]){const d=page.locator('.improvement-multifilter').filter({has:page.locator('summary[aria-label="'+label+'"]')});await d.locator('summary').click();for(const cb of await d.getByRole('checkbox').all()){const text=(await cb.locator('..').innerText()).trim();await cb.setChecked(wanted.some(v=>text.includes(v)));}await d.locator('summary').click();}
+  await page.getByRole('button',{name:'全選符合篩選結果',exact:true}).click();await page.getByLabel('文件格式',{exact:true}).selectOption('pdf');await download('multi-reports','pdf','improvements',['multi-action-00','multi-action-01']);
+ });
+ await run('multi-report-center-expanded-desktop-mobile-zh-en',async()=>{
+  for(const lang of ['zh','en']){
+   if(lang==='en')await page.getByRole('button',{name:'Switch language',exact:true}).click();
+   for(const width of [1440,390]){
+    await page.setViewportSize({width,height:width===390?844:1000});
+    for(const [index,d] of (await page.locator('.improvement-multifilter').all()).entries()){
+     await d.locator('summary').click();const box=await d.locator('.multi-select').boundingBox();assert(box.x>=0&&box.x+box.width<=width+1);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+     const boxes=await d.getByRole('checkbox').evaluateAll(ns=>ns.map(n=>({width:n.getBoundingClientRect().width,checked:n.checked})));assert(boxes.every(n=>n.width<=18&&n.width>=12));assert.equal(boxes.filter(n=>n.checked).length,2);
+     await snap(`multi-report-${lang}-${width}-${index}`);await d.locator('summary').click();
+    }
+   }
+  }
+  await page.getByRole('button',{name:'Switch language',exact:true}).click();await page.setViewportSize({width:1440,height:1000});
+ });
+ await page.getByLabel('報告種類',{exact:true}).selectOption('framework');await page.getByLabel('文件格式',{exact:true}).selectOption('xlsx');
  await snap('main-selected-desktop');await nav('報告中心');
  const chapterBoxes=()=>page.getByRole('group',{name:'完整分章選取',exact:true}).getByRole('checkbox');
  const setDepartments=async(labels)=>{const group=page.getByRole('group',{name:'部門篩選（多選）',exact:true});for(const cb of await group.getByRole('checkbox').all()){const text=(await cb.locator('..').innerText()).trim();await cb.setChecked(labels.includes(text));}};

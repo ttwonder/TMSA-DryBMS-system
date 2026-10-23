@@ -46,5 +46,5 @@ test('milestones: original PDF builder retains full-width stage and history rows
  const {state,record}=milestoneFixture(),before=JSON.stringify(state),lines:reports.ReportFieldLine[]=[];
  const bytes=await reports.buildImprovementsPdf(state,[record.id],'zh',undefined,{fontBytes:new Uint8Array(readFileSync('public/fonts/NotoSansTC-Regular.ttf')),fallbackFontBytes:['ReportSupplement-Regular.ttf','ReportSymbols-Regular.ttf'].map(n=>new Uint8Array(readFileSync('public/fonts/'+n))),onFieldLine:l=>lines.push(l)});
  assert(bytes.length>1000);assert(lines.some(l=>/^improvements:\d+:6:/.test(l.fieldId)&&l.width>1000),'Complete milestone goals need full-width rows');
- assert(lines.some(l=>/^improvements:\d+:7:/.test(l.fieldId)&&l.width>1000),'Complete milestone changes need full-width rows');assert(lines.every(l=>l.size>=14));assert.equal(JSON.stringify(state),before);
+ assert(lines.some(l=>/^improvements:\d+:7:/.test(l.fieldId)&&l.width>1000),'Complete milestone changes need full-width rows');assert(lines.every(l=>l.size===12||l.size===17));assert.equal(JSON.stringify(state),before);
 });

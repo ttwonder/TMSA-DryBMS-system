@@ -1,3 +1,5 @@
+import {reportDescriptor} from './reportNaming';
+import {ImprovementFilterSelect} from './ImprovementFilterSelect';
 import {useReportPrint,printProvided} from './useReportPrint';
 import {RichTextEditor,RichText} from './RichTextEditor';
 import {richTextToPlainText,isRichTextEmpty} from './richText';
@@ -113,7 +115,7 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
   const visible = useMemo(() => filterImprovementList(state, filters), [state, filters]);
   const paged = improvementPage(visible, page);
   const listView = improvementListView(filters);
-  const inspectionSources = useMemo(() => [...state.inspections].sort((a,b) => b.date.localeCompare(a.date) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id)), [state.inspections]);
+  const managementReviewOnly=(filters.sources??(filters.source?[filters.source]:[])).length===1&&(filters.sources??[filters.source])[0]==='management_review';
   useEffect(() => { if (page !== paged.page) setPage(paged.page); }, [page, paged.page]);
   const goToPage = (next: number) => { setPage(next); pageTop.current?.scrollIntoView({block:'start'}); };
   const ids = effectiveSelection(selected, visible);
@@ -276,9 +278,10 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
       if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
       const canonical=await authorizeReportSnapshot(ctx,{format,kind:'improvements',ids,filters});
       if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
-      const bytes=await buildImprovementsExcel(canonical,ids,ctx.lang);
+      const descriptor=reportDescriptor(canonical,{format,kind:'improvements',ids,filters},ctx.lang);
+      const bytes=await buildImprovementsExcel(canonical,ids,ctx.lang,{reportScope:descriptor.scope});
       if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
-      downloadReportBytes(bytes,`improvements-${canonical.serverTime.slice(0,10)}.${format}`,format==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'application/pdf');
+      downloadReportBytes(bytes,descriptor.filename,format==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'application/pdf');
       ctx.notify(format==='xlsx'?t('Excel已產生並啟動下載。','Excel generated and download started.'):t('PDF已產生並啟動下載。', 'PDF generated and download started.'), 'success');
     } catch (error) { ctx.notify(error instanceof Error ? error.message : String(error), 'error'); }
     finally { setExporting(false); }
@@ -300,22 +303,22 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
 
   return <>
     {!ctx.inlineTarget && <>
-    <PageHeading title={filters.source === 'management_review' ? t('管審會執行計劃清單', 'Management review execution plan') : t('待改善項目', 'Improvement actions')} subtitle={t('提出日期為獨立日期；最近更新日期篩選為UTC，並非回溯快照。', 'Proposed date is independent. Last updated filters use UTC, not historical reconstruction.')} actions={<>{can('createImprovements') && <button className="btn primary" disabled={editor.busy || !!draft} onClick={create}>{t('新增改善', 'New action')}</button>}{can('exportReports') && <><button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportSelected('pdf')}>{exporting ? t('產生中…', 'Generating…') : `${t('列印已選／另存PDF', 'Print selected / Save as PDF')} (${ids.length})`}</button><button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportSelected('xlsx')}>{exporting ? t('產生中…', 'Generating…') : `${t('匯出已選Excel', 'Export selected Excel')} (${ids.length})`}</button></>}</>} />
+    <PageHeading title={managementReviewOnly ? t('管審會執行計劃清單', 'Management review execution plan') : t('待改善項目', 'Improvement actions')} subtitle={t('提出日期為獨立日期；最近更新日期篩選為UTC，並非回溯快照。', 'Proposed date is independent. Last updated filters use UTC, not historical reconstruction.')} actions={<>{can('createImprovements') && <button className="btn primary" disabled={editor.busy || !!draft} onClick={create}>{t('新增改善', 'New action')}</button>}{can('exportReports') && <><button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportSelected('pdf')}>{exporting ? t('產生中…', 'Generating…') : `${t('列印已選／另存PDF', 'Print selected / Save as PDF')} (${ids.length})`}</button><button className="btn neutral" disabled={!ids.length || exporting} onClick={() => void exportSelected('xlsx')}>{exporting ? t('產生中…', 'Generating…') : `${t('匯出已選Excel', 'Export selected Excel')} (${ids.length})`}</button></>}</>} />
     <nav className="improvement-list-views" aria-label={t('改善清單', 'Improvement lists')}>
       {(['all', 'unfinished', 'completed'] as ImprovementListView[]).map(view => <button key={view} className={`btn ${listView === view ? 'primary' : 'neutral'}`} aria-pressed={listView === view} onClick={() => setFilters(old => withImprovementListView(old, view))}>{view === 'all' ? t('總表', 'All actions') : view === 'unfinished' ? t('未完成', 'Unfinished') : t('已完成', 'Completed')}</button>)}
-      <button className={`btn ${filters.source === 'management_review' ? 'primary' : 'neutral'}`} aria-pressed={filters.source === 'management_review'} onClick={() => setFilters(old => ({ ...old, source: old.source === 'management_review' ? '' : 'management_review' }))}>{t('管審會執行計劃清單', 'Management review execution plan')}</button>
+      <button className={`btn ${managementReviewOnly ? 'primary' : 'neutral'}`} aria-pressed={managementReviewOnly} onClick={() => setFilters(old => ({ ...old, source: undefined, sources: managementReviewOnly ? [] : ['management_review'] }))}>{t('管審會執行計劃清單', 'Management review execution plan')}</button>
     </nav>
     <div className="toolbar improvement-filters">
       <label className="field">{t('搜尋', 'Search')}<input value={filters.query || ''} onChange={event => setFilter('query', event.target.value)} placeholder={t('標題、內容、章節、Item或進度', 'Title, content, chapter, item or progress')} /></label>
-      <label className="field">{t('框架', 'Framework')}<select value={filters.frameworkId || 'all'} onChange={event => setFilters(old => ({ ...old, frameworkId: event.target.value as ImprovementListFilters['frameworkId'], chapterId: '' }))}><option value="all">{t('全部', 'All')}</option><option>TMSA</option><option>DRYBMS</option></select></label>
-      <label className="field">{t('章節', 'Chapter')}<select value={filters.chapterId || ''} onChange={event => setFilter('chapterId', event.target.value)}><option value="">{t('全部', 'All')}</option>{state.chapters.filter(chapter => !filters.frameworkId || filters.frameworkId === 'all' || chapter.frameworkId === filters.frameworkId).map(chapter => <option key={chapter.id} value={chapter.id}>{chapter.frameworkId} {chapter.code} · {bi(chapter.name, ctx.lang)}</option>)}</select></label>
+      <label className="field">{t('框架', 'Framework')}<select value={filters.frameworkId || 'all'} onChange={event => setFilters(old => ({ ...old, frameworkId: event.target.value as ImprovementListFilters['frameworkId'], chapterId: '', chapterIds: [] }))}><option value="all">{t('全部', 'All')}</option><option>TMSA</option><option>DRYBMS</option></select></label>
+      <ImprovementFilterSelect state={state} lang={ctx.lang} filters={filters} dimension="chapterIds" onChange={setFilters}/>
       <label className="field">{t('狀態', 'Status')}<select value={filters.status || ''} onChange={event => setFilter('status', event.target.value)}><option value="">{t('全部', 'All')}</option>{(['open', 'in_progress', 'closed'] as const).map(status => <option key={status} value={status}>{statusLabel(status)}</option>)}</select></label>
-      <label className="field improvement-source-filter">{t('來源', 'Source')}<select value={filters.source || ''} onChange={event => setFilter('source', event.target.value)}><option value="">{t('全部來源', 'All sources')}</option><option value="non_external">{improvementSourceLabel('non_external', ctx.lang)}</option>{STANDALONE_IMPROVEMENT_SOURCES.map(source => <option key={source} value={source}>{improvementSourceLabel(source, ctx.lang)}</option>)}{inspectionSources.map(inspection => <option key={inspection.id} value={`inspection:${inspection.id}`}>{inspection.date} · {inspection.frameworkId} · {richTextToPlainText(inspection.title)}</option>)}</select></label>
+      <ImprovementFilterSelect state={state} lang={ctx.lang} filters={filters} dimension="sources" onChange={setFilters}/>
       <label className="field">{t('提出起日', 'Proposed from')}<input type="date" value={filters.proposedFrom || ''} onChange={event => setFilter('proposedFrom', event.target.value)} /></label>
       <label className="field">{t('提出迄日', 'Proposed to')}<input type="date" value={filters.proposedTo || ''} onChange={event => setFilter('proposedTo', event.target.value)} /></label>
-      <details className="secondary-filters"><summary>{t('更多篩選（部門／人員／日期）', 'More filters (department / person / dates)')}{[filters.departmentId, filters.personId, filters.urgency, filters.from, filters.to].some(Boolean) && <span className="filter-active"> · {t('已套用', 'Active')}</span>}</summary><div className="secondary-filter-fields">
-      <label className="field">{t('部門', 'Department')}<select value={filters.departmentId || ''} onChange={event => setFilter('departmentId', event.target.value)}><option value="">{t('全部', 'All')}</option>{state.settings.departments.map(dept => <option key={dept.id} value={dept.id}>{bi(dept.name, ctx.lang)}</option>)}</select></label>
-      <label className="field">{t('執行人', 'Assignee')}<select value={filters.personId || ''} onChange={event => setFilter('personId', event.target.value)}><option value="">{t('全部', 'All')}</option>{state.people.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+      <details className="secondary-filters"><summary>{t('更多篩選（部門／人員／日期）', 'More filters (department / person / dates)')}{[filters.departmentIds?.length,filters.personIds?.length,filters.departmentId, filters.personId, filters.urgency, filters.from, filters.to].some(Boolean) && <span className="filter-active"> · {t('已套用', 'Active')}</span>}</summary><div className="secondary-filter-fields">
+      <ImprovementFilterSelect state={state} lang={ctx.lang} filters={filters} dimension="departmentIds" onChange={setFilters}/>
+      <ImprovementFilterSelect state={state} lang={ctx.lang} filters={filters} dimension="personIds" onChange={setFilters}/>
       <label className="field">{t('急迫程度', 'Urgency')}<select value={filters.urgency || ''} onChange={event => setFilter('urgency', event.target.value)}><option value="">{t('全部', 'All')}</option>{(['urgent', 'high', 'medium', 'low'] as const).map(urgency => <option key={urgency} value={urgency}>{urgencyLabel(urgency)}</option>)}</select></label>
       <label className="field">{t('最近更新起日', 'Last updated from')}<input type="date" value={filters.from || ''} onChange={event => setFilter('from', event.target.value)} /></label>
       <label className="field">{t('最近更新迄日', 'Last updated to')}<input type="date" value={filters.to || ''} onChange={event => setFilter('to', event.target.value)} /></label>
