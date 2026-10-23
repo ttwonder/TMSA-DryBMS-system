@@ -17,6 +17,9 @@ const receipt={status:'RUNNING',layer:'真實UI＋測試資料＋owned native Po
 const seed=syntheticSeed(),base=seed.chapters[0];
 for(let n=2;n<=12;n++)seed.chapters.push({...base,id:`layout-chapter-${n}`,code:String(n),order:n,name:{zh:n===12?'最後章節：完整長名稱仍可捲動選取且不截斷內容':'安全管理與責任 '+n,en:n===12?'Last chapter: the complete long chapter name remains available for scrolling and selection':'Safety management '+n}});
 seed.improvements=[{id:'layout-existing',version:0,createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z',updatedBy:'',title:'QA layout existing',content:{en:'Existing English content',zh:'既有中文內容'},itemIds:['item-a'],departmentIds:[],assigneeIds:[],source:'non_external',urgency:'medium',status:'open',percent:0,targetDate:'',plan:'Existing plan',events:[],closedAt:null,closedBy:null,sources:[]}];
+const sourceRefs=[{source:'TMSA',file:'Synthetic evidence.pdf',pages:[3],note:'QA source detail marker — preserve this evidence'}],sourceItems=seed.items.filter(i=>i.frameworkId==='TMSA');
+seed.inspections=[{id:'layout-inspection',version:0,createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z',updatedBy:'',frameworkId:'TMSA',title:'Synthetic source inspection',organization:'Synthetic QA',date:'2026-01-01',type:'formal',status:'final',imported:true,snapshot:{framework:structuredClone(seed.frameworks[0]),chapters:structuredClone(seed.chapters.filter(c=>c.frameworkId==='TMSA')),items:structuredClone(sourceItems),scoringVersion:'company-20-equal-stage-v1'},results:sourceItems.map(i=>({itemId:i.id,response:'no',conformity:'none',reviewed:true,observation:{en:'',zh:''},recommendation:{en:'',zh:''}})),findings:[{id:'layout-finding',itemIds:['item-a'],classification:'finding',observation:{en:'Synthetic actionable finding',zh:'合成外部檢查缺失'},recommendation:{en:'Retain source',zh:'保留來源'},sources:structuredClone(sourceRefs)}]}];
+seed.improvements.push({...structuredClone(seed.improvements[0]),id:'layout-external',title:'QA layout external',source:'external',inspectionId:'layout-inspection',findingId:'layout-finding',sourceKey:'layout-inspection:layout-finding',sources:structuredClone(sourceRefs)});
 let qa,vite,browser,page,current='setup';
 const dialog=()=>page.getByRole('dialog');
 const labels=lang=>lang==='zh'?['標題（英文）','標題（繁中）','內容（英文）','內容（繁中）']:['Title (English)','Title (Traditional Chinese)','Content (English)','Content (Traditional Chinese)'];
@@ -28,7 +31,7 @@ const lowerGeometry=async(lang)=>dialog().evaluate((root,n)=>{
  const group=name=>[...root.querySelectorAll('fieldset.multi-select')].find(e=>e.querySelector('legend')?.textContent===name);
  const plan=root.querySelector('[role="textbox"][aria-label="'+n.plan+'"]'),source=[...root.querySelector('.modal-body').children].find(e=>e.matches('.notice')&&e.querySelector('strong'));
  const fields=[n.urgency,n.proposed,n.target].map(name=>field(name));
- return{departments:box(group(n.departments)),assignees:box(group(n.assignees)),headShortcut:box(root.querySelector('.department-head-shortcut')),fields:fields.map(box),controls:fields.map(e=>box(e.querySelector('input,select'))),plan:box(plan.closest('.rich-editor')),planField:box(plan.closest('.field')),source:box(source),milestones:box(root.querySelector('.milestone-section')),content:box(root.querySelector('[role="textbox"][aria-label="'+(n.plan==='改善計劃'?'內容（英文）':'Content (English)')+'"]').closest('.rich-editor')),planFont:parseFloat(getComputedStyle(plan).fontSize)};
+ return{departments:box(group(n.departments)),assignees:box(group(n.assignees)),headShortcut:box(root.querySelector('.department-head-shortcut')),fields:fields.map(box),controls:fields.map(e=>box(e.querySelector('input,select'))),plan:box(plan.closest('.rich-editor')),planField:box(plan.closest('.field')),source:source?box(source):null,form:box(root.querySelector('.form-grid')),milestones:box(root.querySelector('.milestone-section')),content:box(root.querySelector('[role="textbox"][aria-label="'+(n.plan==='改善計劃'?'內容（英文）':'Content (English)')+'"]').closest('.rich-editor')),planFont:parseFloat(getComputedStyle(plan).fontSize)};
 },lowerLabels(lang));
 const picture=async name=>{const p=join(out,name+'.png');await page.screenshot({path:p});receipt.screenshots.push(p);};
 const run=async(id,fn)=>{current=id;const count=receipt.violations.length;await fn();receipt.cases.push({id,status:receipt.violations.length===count?'PASS':'FAIL'});};
@@ -70,7 +73,9 @@ try{
    }
    if(width<=620&&!(lower.departments.bottom<=lower.assignees.y&&lower.assignees.bottom<=lower.headShortcut.y&&lower.headShortcut.bottom<=urgency.y&&urgency.bottom<=proposed.y&&proposed.bottom<=target.y))fail('Narrow screens must retain the department, assignee and date controls in readable normal flow');
    if(Math.abs(lower.plan.x-lower.content.x)>2||Math.abs(lower.plan.width-lower.content.width)>2||Math.abs(lower.plan.height-lower.content.height)>2||lower.planFont<16)fail('Action plan must match the full-width compact content editor without shrinking text');
-   if(lower.planField.y<lower.source.bottom||lower.planField.bottom>lower.milestones.y)fail('Action plan must appear after the source result and before specific milestones');
+   if(entry==='full'&&lower.source)fail('Full edit must omit the source-details panel while retaining the source selector');
+   if(entry==='create'&&!lower.source)fail('New improvement must retain its source-details panel');
+   if(lower.planField.y<(lower.source??lower.form).bottom||lower.planField.bottom>lower.milestones.y)fail('Action plan must follow the source controls/result and precede specific milestones');
    await dialog().getByRole('group',{name:n.departments,exact:true}).evaluate(el=>el.scrollIntoView({block:'start'}));await picture(current+'-lower');
    if(width<=620){await dialog().getByRole('textbox',{name:n.plan,exact:true}).scrollIntoViewIfNeeded();await picture(current+'-plan');}
    const picker=dialog().locator('.improvement-reference-picker'),framework=picker.locator('.irp-frameworks').getByRole('checkbox',{name:'TMSA',exact:true});await framework.check();
@@ -88,6 +93,13 @@ try{
   await ctx.close();
  }
  assert.deepEqual(await ledger(),before,'Layout browsing and cancelled text/reference edits must not write business records');
+ await run('external-full-edit-hides-details-only-and-readonly-detail-retains-evidence',async()=>{
+  const ctx=await open(1024,'zh','eye'),row=page.locator('.improvement-table tbody tr').filter({hasText:'QA layout external'});await row.getByRole('button',{name:'完整編輯',exact:true}).click();
+  await expect(dialog().getByLabel('來源檢查')).toHaveValue('layout-inspection');await expect(dialog().getByLabel('來源發現')).toHaveValue('layout-finding');await expect(dialog().getByLabel('來源檢查')).toBeDisabled();await expect(dialog().getByLabel('來源發現')).toBeDisabled();
+  if((await lowerGeometry('zh')).source)receipt.violations.push({case:current,message:'External full edit must omit the expanded source-details panel, not its source selectors'});
+  await dialog().getByRole('group',{name:'負責部門',exact:true}).evaluate(el=>el.scrollIntoView({block:'start'}));await picture('external-full-edit-without-source-details');await cancel();
+  await row.getByRole('button',{name:'QA layout external',exact:true}).click();await expect(dialog()).toContainText('QA source detail marker — preserve this evidence');await picture('external-readonly-detail-retains-source');await dialog().getByRole('button',{name:'Close',exact:true}).click();await expect(dialog()).toHaveCount(0);assert.deepEqual(await ledger(),before);await ctx.close();
+ });
  assert.equal(receipt.violations.length,0,JSON.stringify(receipt.violations));
  await run('original-create-save-reopen-rich-text-and-cross-framework-references',async()=>{
   await open(1440,'zh','normal');await page.getByRole('button',{name:'新增改善',exact:true}).click();
@@ -99,7 +111,7 @@ try{
   await dialog().locator('label.field').filter({hasText:/^來源/}).locator('select').selectOption('company_safety_meeting');
   const picker=dialog().locator('.improvement-reference-picker');await picker.locator('.irp-frameworks').getByRole('checkbox',{name:'TMSA',exact:true}).check();await picker.getByRole('checkbox',{name:/^關聯章節 TMSA 12 ·/}).check();await picker.getByRole('button',{name:'選擇小項目 TMSA 1',exact:true}).click();await picker.getByRole('checkbox',{name:/^TMSA 1\.1\.1 ·/}).check();await picker.locator('.irp-frameworks').getByRole('checkbox',{name:'DRYBMS',exact:true}).check();await picker.getByRole('checkbox',{name:/^關聯章節 DRYBMS 1 ·/}).check();
   await dialog().getByRole('button',{name:'確認保存',exact:true}).click();await expect(dialog()).toHaveCount(0);
-  const saved=(await ledger()).find(r=>r.kind==='improvement'&&r.id!=='layout-existing');assert(saved);const record=saved.body;
+  const saved=(await ledger()).find(r=>r.kind==='improvement'&&r.body.title.startsWith('QA layout saved'));assert(saved);const record=saved.body;
   assert.deepEqual(record.chapterIds.slice().sort(),['chapter-DRYBMS','layout-chapter-12']);assert.deepEqual(record.itemIds,['item-a']);assert.equal(richTextToPlainText(record.content.en),values[2]);assert.equal(richTextToPlainText(record.content.zh),values[3]);assert(richTextRuns(record.content.en).some(run=>run.color==='red'&&run.text.includes('Full-width English content')));
   assert.equal(record.urgency,'urgent');assert.equal(record.proposedDate,'2026-10-23');assert.equal(record.targetDate,'2026-12-15');assert.equal(record.source,'company_safety_meeting');assert.equal(richTextToPlainText(record.plan),planText);assert(richTextRuns(record.plan).some(run=>run.color==='blue'&&run.text.includes('Full-width action plan')));
   await page.locator('.improvement-table tbody tr').filter({hasText:'QA layout saved'}).getByRole('button',{name:'完整編輯',exact:true}).click();await expect(dialog().getByRole('textbox',{name:labels('zh')[2],exact:true})).toHaveText(values[2],{useInnerText:true});await picture('saved-full-edit');await cancel();assert.deepEqual((await ledger()).find(r=>r.id===record.id),saved);
@@ -115,6 +127,19 @@ try{
   const saved=(await ledger()).find(r=>r.id===receipt.savedRecordId);assert.equal(saved.version,prior.version+1);assert.equal(saved.body.urgency,'high');assert.equal(saved.body.proposedDate,'2026-10-24');assert.equal(saved.body.targetDate,'2026-12-31');assert.equal(richTextToPlainText(saved.body.plan),planText);assert(richTextRuns(saved.body.plan).some(run=>run.color==='green'&&run.text.includes('Updated action plan')));
   for(const key of ['title','content','source','chapterIds','itemIds','departmentIds','assigneeIds','events','milestones','milestoneEvents'])assert.deepEqual(saved.body[key],prior.body[key],key+' must remain unchanged');
   page=peerPage;const row=page.locator('.improvement-table tbody tr').filter({hasText:'QA layout saved'});await expect(row).toContainText('2026-12-31',{timeout:18000});await row.getByRole('button',{name:'完整編輯',exact:true}).click();await expect(dialog().getByRole('textbox',{name:'改善計劃',exact:true})).toHaveText(planText,{useInnerText:true});await expect(dialog().getByLabel('提出日期',{exact:true})).toHaveValue('2026-10-24');await expect(dialog().getByLabel('目標日期',{exact:true})).toHaveValue('2026-12-31');await dialog().getByRole('group',{name:'負責部門',exact:true}).evaluate(el=>el.scrollIntoView({block:'start'}));await picture('saved-peer-full-edit-lower');await cancel();assert.deepEqual((await ledger()).find(r=>r.id===receipt.savedRecordId),saved);await peer.close();page=ownerPage;
+ });
+ await run('external-save-preserves-source-identities-evidence-and-peer-detail',async()=>{
+  const priorLedger=await ledger(),prior=priorLedger.find(r=>r.id==='layout-external'),ownerPage=page;
+  const row=page.locator('.improvement-table tbody tr').filter({hasText:'QA layout external'});await row.getByRole('button',{name:'完整編輯',exact:true}).click();
+  await expect(dialog()).not.toContainText('QA source detail marker');const planText='Updated external plan\n來源資料保持不變';await dialog().getByRole('textbox',{name:'改善計劃',exact:true}).fill(planText);
+  await dialog().getByRole('button',{name:'確認保存',exact:true}).click();await expect(dialog()).toHaveCount(0);
+  const afterLedger=await ledger(),saved=afterLedger.find(r=>r.id==='layout-external');assert.equal(saved.version,prior.version+1);assert.equal(richTextToPlainText(saved.body.plan),planText);
+  for(const key of ['source','inspectionId','findingId','sourceKey','sources','itemIds','chapterIds','content','events','milestones','milestoneEvents'])assert.deepEqual(saved.body[key],prior.body[key],key+' must survive hidden source details');
+  assert(saved.body.sources.length>0);assert.deepEqual(afterLedger.filter(r=>r.id!=='layout-external'),priorLedger.filter(r=>r.id!=='layout-external'),'No source inspection or other business record may change');
+  const peer=await open(1024,'zh','eye',qa.users.peer),peerRow=page.locator('.improvement-table tbody tr').filter({hasText:'QA layout external'});await peerRow.getByRole('button',{name:'完整編輯',exact:true}).click();
+  await expect(dialog().getByRole('textbox',{name:'改善計劃',exact:true})).toHaveText(planText,{useInnerText:true});assert.equal((await lowerGeometry('zh')).source,null);await expect(dialog().getByLabel('來源檢查')).toHaveValue('layout-inspection');await expect(dialog().getByLabel('來源發現')).toHaveValue('layout-finding');
+  await dialog().getByRole('group',{name:'負責部門',exact:true}).evaluate(el=>el.scrollIntoView({block:'start'}));await picture('external-saved-peer-full-edit');await cancel();
+  await peerRow.getByRole('button',{name:'QA layout external',exact:true}).click();await expect(dialog()).toContainText('QA source detail marker — preserve this evidence');await expect(dialog()).toContainText('Synthetic evidence.pdf');await dialog().getByRole('button',{name:'Close',exact:true}).click();assert.deepEqual(await ledger(),afterLedger);await peer.close();page=ownerPage;
  });
  assert.deepEqual(receipt.errors,[]);assert.deepEqual(receipt.blocked,[]);receipt.status='PASS';
 }catch(error){receipt.status='FAIL';receipt.failure={case:current,message:String(error.stack)};await page?.screenshot({path:join(out,'failure.png')}).catch(()=>{});process.exitCode=1;}
