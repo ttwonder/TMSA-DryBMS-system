@@ -3,13 +3,13 @@ import type {ExportRequest,PageProps,PlatformState,Language} from './types.ts';
 import type {Filters} from './domain.ts';
 import {hasPermission} from './domain.ts';
 import {authorizeReportSnapshot,selectedRemarkRows,renderFrameworkReport,renderRemarksReport,renderImprovementsReport,renderInspectionReport,renderOverviewReport} from './reports.ts';
-import {reportDescriptor} from './reportNaming.ts';
+import {reportDescriptor,type ReportNamingSurface} from './reportNaming.ts';
 import {HtmlReport} from './reportHtml.ts';
 export type PrintRequest=Omit<ExportRequest,'snapshotToken'>;
 export const printProvided=(ctx:Pick<PageProps,'t'>)=>ctx.t('已提供授權列印快照；請在瀏覽器選擇列印或另存為 PDF。是否保存由您決定。','Authorized snapshot provided for printing; choose Print or Save as PDF in the browser. Saving is your choice.');
-export async function buildPrintReport(state:PlatformState,request:PrintRequest,lang:Language):Promise<string>{
+export async function buildPrintReport(state:PlatformState,request:PrintRequest,lang:Language,surface:ReportNamingSurface='report-center'):Promise<string>{
  const deps=(request.filters as {departmentIds?:string[]}|undefined)?.departmentIds;
- const descriptor=reportDescriptor(state,request,lang);
+ const descriptor=reportDescriptor(state,request,lang,surface);
  const create:typeof HtmlReport.create=async(title,language,snapshot,options,operational)=>{const report=await HtmlReport.create(title,language,snapshot,options,operational);report.setSuggestedName(descriptor.name);report.paragraph(descriptor.scope);return report;};
  if(request.kind==='framework')return ((request.filters as {reportVariant?:string}|undefined)?.reportVariant==='remarks'?renderRemarksReport:renderFrameworkReport)(create,state,request.frameworkId!,lang,request.ids,{departmentIds:deps});
  if(request.kind==='improvements')return renderImprovementsReport(create,state,request.ids,lang);
@@ -37,7 +37,7 @@ export function useReportPrint(ctx:PageProps,scopeKey=''){
  if(old.api!==ctx.api||old.session!==ctx.api.sessionToken||old.id!==ctx.user.id||old.scopeKey!==scopeKey){epoch.current={api:ctx.api,session:ctx.api.sessionToken,id:ctx.user.id,scopeKey,n:old.n+1};close();}
  useEffect(()=>{if(!ctx.user.active||!hasPermission(ctx.state.settings.rolePermissions,ctx.user,'exportReports'))close();},[ctx.user,ctx.state.settings.rolePermissions]);
  useEffect(()=>()=>{epoch.current.n++;close();},[]);
- return async(request:PrintRequest)=>{
+ return async(request:PrintRequest,surface:ReportNamingSurface='report-center')=>{
   const initiating={...epoch.current},origin=latest.current;
   const unchanged=()=>{const now=latest.current;return epoch.current.n===initiating.n&&now.api===initiating.api&&now.user.id===initiating.id&&now.api.sessionToken===initiating.session&&now.user.active&&hasPermission(now.state.settings.rolePermissions,now.user,'exportReports');};
   if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
@@ -46,7 +46,7 @@ export function useReportPrint(ctx:PageProps,scopeKey=''){
    if((request.filters as {reportVariant?:string}|undefined)?.reportVariant==='remarks'&&!selectedRemarkRows(origin.state,request.frameworkId!,request.ids,(request.filters as {departmentIds?:string[]}|undefined)?.departmentIds).length)throw new Error(origin.t('所選章節沒有已填寫的備註。','No remarks in selected chapters.'));
    const canonical=await authorizeReportSnapshot(origin,request);
    if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
-   const html=await buildPrintReport(canonical,request,origin.lang);
+   const html=await buildPrintReport(canonical,request,origin.lang,surface);
    if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
    await ticket.show(html);
   }catch(error){ticket.cancel();throw error;}

@@ -3,7 +3,9 @@ import type {ImprovementListFilters} from './improvementList';
 import {bi} from './domain.ts';
 import {improvementSourceLabel} from './improvementTracking.ts';
 import {richTextToPlainText} from './richText.ts';
-export function reportDescriptor(state:PlatformState,request:Omit<ExportRequest,'snapshotToken'>,lang:Language){
+/** Local presentation only: never included in an export request or server filter. */
+export type ReportNamingSurface='report-center'|'improvement-list';
+export function reportDescriptor(state:PlatformState,request:Omit<ExportRequest,'snapshotToken'>,lang:Language,surface:ReportNamingSurface='report-center'){
  const t=(zh:string,en:string)=>lang==='zh'?zh:en,f=(request.filters??{}) as ImprovementListFilters&{reportVariant?:string},parts:string[]=[];
  const values=(multi:string[]|undefined,one:string|undefined)=>multi??(one?[one]:[]);
  const add=(label:string,ids:string[],resolve:(id:string)=>string)=>{if(ids.length)parts.push(label+'='+ids.map(resolve).join('+'));};
@@ -21,12 +23,18 @@ export function reportDescriptor(state:PlatformState,request:Omit<ExportRequest,
  if(f.urgency)parts.push(t('急迫度','Urgency')+'='+({urgent:t('緊急','Urgent'),high:t('高','High'),medium:t('中','Medium'),low:t('低','Low')}[f.urgency]??f.urgency));
  for(const [key,label] of [['from',t('更新起','Updated from')],['to',t('更新迄','Updated to')],['proposedFrom',t('提出起','Proposed from')],['proposedTo',t('提出迄','Proposed to')]] as const)if(f[key])parts.push(label+'='+f[key]);
  if(request.kind==='inspection'){const i=state.inspections.find(i=>i.id===request.ids[0]);parts.push(i?`${i.date} ${i.frameworkId} ${richTextToPlainText(i.title)}`:missing);}
- const kind=f.reportVariant==='remarks'?t('條目備註','Item remarks'):({framework:t('完整自評','Assessment'),improvements:t('改善項目','Improvements'),inspection:t('歷史檢查','Inspection'),overview:t('總覽','Overview')}[request.kind]);
+ const kind=request.kind==='framework'&&f.reportVariant==='remarks'?t('條目備註','Item remarks'):({framework:t('框架完整自評','Full framework assessment'),improvements:t('明選改善項目','Selected improvements'),inspection:t('凍結歷史檢查','Frozen inspection'),overview:t('管控總覽','Management overview')}[request.kind]);
  const scope=parts.length?parts.join(' · '):t('不限篩選','All filters');
  const selection=request.kind==='improvements'?t(`明選${request.ids.length}筆`,`Selected ${request.ids.length}`):'';
- const full=[state.serverTime.slice(0,10),kind,selection,scope].filter(Boolean).join('-');
- const sanitized=richTextToPlainText(full).replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').replace(/\s+/g,' ').replace(/[. ]+$/g,'');
- const suffix=t('-完整篩選見文件','-full scope in report');
- const name=sanitized.length>170?sanitized.slice(0,170-suffix.length)+suffix:sanitized;
+ const clean=(value:string)=>richTextToPlainText(value).replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').replace(/\s+/g,' ').trim().replace(/[. ]+$/g,'');
+ const labels=(ids:string[],resolve:(id:string)=>string)=>ids.length?[...new Set(ids)].map(id=>clean(resolve(id))||missing).join('+'):t('全部','All');
+ const departments=labels(values(f.departmentIds,f.departmentId),id=>bi(state.settings.departments.find(d=>d.id===id)?.name,lang));
+ const framework=request.kind==='inspection'?state.inspections.find(i=>i.id===request.ids[0])?.frameworkId:request.frameworkId;
+ const people=labels(values(f.personIds,f.personId),id=>state.people.find(p=>p.id===id)?.name||'');
+ const sources=labels(values(f.sources,f.source).map(id=>id.startsWith('inspection:')?'external':id),id=>improvementSourceLabel(id as Parameters<typeof improvementSourceLabel>[0],lang,state.settings));
+ const isList=request.kind==='improvements'&&surface==='improvement-list';
+ const prefix=request.kind==='improvements'?`${departments}-${people} ${sources}`:`${departments} ${framework||missing}`;
+ const suffix=`${isList?t('待改善項目','Improvement actions'):'-'+kind} ${state.serverTime.slice(0,10)}`;
+ const name=(prefix.length+suffix.length>170?prefix.slice(0,170-suffix.length-1)+'…':prefix)+suffix;
  return {name,scope:[selection,scope].filter(Boolean).join(' · '),filename:name+'.'+request.format};
 }

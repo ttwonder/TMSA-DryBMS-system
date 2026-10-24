@@ -279,12 +279,12 @@ export default function Improvements(ctx: PageProps & { focusId?: string; inline
     const unchanged=()=>exportOwner.current.api===initiating.api&&exportOwner.current.actor===initiating.actor&&exportOwner.current.session===initiating.session&&initiating.api.sessionToken===initiating.session;
     setExporting(true);
     try {
-      if(format==='pdf'){await printReport({format,kind:'improvements',ids,filters});ctx.notify(printProvided(ctx),'success');return;}
+      if(format==='pdf'){await printReport({format,kind:'improvements',ids,filters},'improvement-list');ctx.notify(printProvided(ctx),'success');return;}
       const {authorizeReportSnapshot,buildImprovementsExcel,downloadReportBytes}=await import('./reports');
       if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
       const canonical=await authorizeReportSnapshot(ctx,{format,kind:'improvements',ids,filters});
       if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
-      const descriptor=reportDescriptor(canonical,{format,kind:'improvements',ids,filters},ctx.lang);
+      const descriptor=reportDescriptor(canonical,{format,kind:'improvements',ids,filters},ctx.lang,'improvement-list');
       const bytes=await buildImprovementsExcel(canonical,ids,ctx.lang,{reportScope:descriptor.scope});
       if(!unchanged())throw new Error('EXPORT_SESSION_CHANGED');
       downloadReportBytes(bytes,descriptor.filename,format==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'application/pdf');

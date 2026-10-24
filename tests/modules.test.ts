@@ -180,7 +180,7 @@ test('improvement export sends explicit intersected IDs and canonical authorized
   const code = source('Improvements');
   assert.match(code, /effectiveSelection/);
   assert.match(code, /authorizeReportSnapshot\(ctx/);
-  assert.match(code, /printReport\(\{format,kind:'improvements',ids,filters\}\)/);
+  assert.match(code, /printReport\(\{format,kind:'improvements',ids,filters\},'improvement-list'\)/);
   assert.match(readFileSync('src/useReportPrint.ts','utf8'), /buildPrintReport\(canonical,request/);
   assert.match(code, /buildImprovementsExcel\(canonical/);
   assert.match(code, /if\s*\(!ids\.length\)/);
