@@ -24,7 +24,7 @@ test('genuine bullet arrows and subscript remain selectable source codepoints at
  const dir=resolve(process.env.REPORT_LAYOUT_QA_DIR??resolve(tmpdir(),'tmsa-report-controls'));await mkdir(dir,{recursive:true});
  const path=resolve(dir,'fallback-glyphs.pdf');await writeFile(path,await buildFrameworkPdf(state,'TMSA','zh',undefined,{fontBytes,fallbackFontBytes}));
  const text=execFileSync('uv',['run','--offline','--with','pymupdf==1.26.5','python','-c','import sys,pymupdf;d=pymupdf.open(sys.argv[1]);print("\\n".join(p.get_text() for p in d))',path],{encoding:'utf8'});
- assert.ok(text.includes(source));assert.equal(JSON.stringify(state),before);
+ assert.ok(text.replace(/\s/g,'').includes(source.replace(/\s/g,'')),'all original codepoints retained across physical wrap lines');assert.equal(JSON.stringify(state),before);
 });
 test('unapproved unsupported control code remains fail-closed rather than broad replacement',async()=>{
  await assert.rejects(buildFrameworkPdf(fixture('UNAPPROVED\u0098END'),'TMSA','zh',undefined,{fontBytes,fallbackFontBytes}),/no glyph for U\+98/);

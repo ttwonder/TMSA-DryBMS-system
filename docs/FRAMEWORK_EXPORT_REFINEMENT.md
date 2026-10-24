@@ -1,0 +1,35 @@
+# 框架輸出精簡修訂
+
+## 最新範本與優先關係
+採用使用者最新保存的七欄範本（SHA256 `724126394c98c8473ea4a1f6ae0d42e9adbcc3d7d7cbd83bcf9a64766800d547`），僅擷取格式，不複製私有正文。此批只改框架輸出，不刪資料庫欄位；備註／改善／歷史／總覽維持原預設。
+
+精簡 XLSX/PDF：Item、KPI、BPG、Y/N、canonical 年份目前自評、佐證、中文部門。每章保存選中啟用項目；一 Item 一資料列，stable ID 不按代碼合併。XLSX 標題第一列、欄頭第二列，正常12pt，正文完整同格；超高只局部逐步縮至11／10pt，仍超高明示用PDF全文，不續列、不截斷。任何正文格超過32767字元停止Excel並指出Item。範圍註記放資料末端，不塞入自評。末端註記前設隱藏空隔列，避免原生Excel把合併註記納入AutoFilter／排序。排序後須AutoFit。
+
+完整資訊 PDF：報告中心新增「框架完整資訊」，PDF-only；原協議 `kind=framework`、`filters.reportVariant=complete`。保留完整框架要求、自評、佐證、人工備註／五態、reviewed／conformity／execution、級別、責任部門／人員、來源缺口／分析資訊與整章計分。以既有canonical授權快照產生；GM builder主動排除備註／狀態及改善整塊。無SQL變更。
+
+## 已實際完成
+- 原behavioral RED、舊6份產物/native與父流程英文框架中文部門檔名/scope regression完整保留。
+- 新mounted RED：真server GM報告中心說明仍提受限備註/狀態。只修Reports.tsx restricted文案，同一真UI路徑GREEN，一般角色文案不變。
+- 最後npm test 488/488；typecheck/build/node syntax/git diff --check均exit0。完整301檔input manifest涵蓋src/tests/scripts/supabase/public及root package/config，前後不變。
+- 原App/CSS＋isolated native PostgreSQL migration23＋真ApiClient產生14份實際文件：5 XLSX、9 Chromium PDF。保留原6個scenario，新增server GM/operator完整PDF；英文marine及marine+technical部門OR×章節AND；saved-empty不回退、未存自評回退Item部門、no-match/active-empty/空選零export及export audit；DRYBMS原章及自訂章、inactive排除、Y/?、rich bold-blue及完整換行。
+- 每次返回canonical與private.exports.snapshot完全相等；GM viewScope由server提供，remarks/remarksStatus keys缺席，improvements/auditLogs空集合；可見報告中心及完整PDF不含受限整塊。operator同fixture正向保留人工備註及改善全文。輸出前後業務records及非export audit完全相等。
+- 完整資訊已選取的中英文桌面/390px手機PNG與geometry通過，PDF-only格式控制停用。英文UI部門選項仍Management，框架檔名及descriptor scope為管理組。
+- 新9份PDF真bytes以PyMuPDF核對每個所選KPI/Guidance/自評/佐證及適用人工備註非空行、範圍外markers缺席、頁界與DRY粗體藍色。100個OVERFLOW、28個SHRINK及中文尾行完整，全文txt及首尾頁PNG保留。
+- 5份實際下載均通過owned Excel唯讀/禁止宏links、逐sheet Activate後freeze、精確AutoFilter末列/七欄cell關聯、僅N驗紅底紅字、佐證紅字、DRY富文字藍色粗體/12pt、篩選/雙向排序/AutoFit/原檔hash不變及owned PID停止。COM Characters呼叫失敗保留，只修驗證器。
+- 409.5pt極長列仍可見受限，native明列LIMITED_USE_PDF_FULL_TEXT及PASS_WITH_KNOWN_OVERFLOW_LIMITATION；同格全文及PDF警示保留，不能稱無裁切。
+- public/dist共40檔（XLSX解壓XML亦查）針對本次fixture/private markers掃描零命中；不是全站公司來源審計。
+- 父流程讀回實際英文完整PDF，發現部門篩選說明仍用英文部門；補behavioral RED→GREEN，只將該說明切為中文標籤。既有兩份已授權合成快照以原renderer重產PDF，完整327行次／頁界與中文說明讀回PASS；這是renderer replay，不另算mounted/native情境。原17情境及5份native XLSX證據沿用，XLSX另逐Item七格對canonical獨立精確核對。
+- 父流程另核最新參考原檔hash不變；7個長原文片段對本批18個預定檔案與public/dist共58檔（含XLSX解壓XML）零命中，公開產物的合成fixture markers亦零命中。
+
+## 明確限制與交付邊界
+- 原生既有item_code_unique禁止同框架重複code；import_seed真拒絕DUPLICATE_RECORD。不改SQL/validator放行fixture。same-code由獨立builder regression驗兩stable ID/item.order/不同自評/inactive排除，不能稱native/mounted same-code PASS；這是既有資料模型邊界，不為測試放寬正式規則。
+- 新fixture未擴全部originals或五態全排列；保留既有完整builder/單元回歸。PDF為stub window.print＋真Page.pdf，沒有重試原生另存/列印對話框，不是正式Supabase驗收。
+- 本機提交須與四類有限獨立review批准的精確候選一致，實際提交與批准狀態以delivery收據為準；Push／部署／正式SQL仍由使用者決定。所有失敗成功證據保留，不刪資料夾；角色/權威/lease/CAS/ACK不變。
+
+## 證據與命令
+- 舊qa-evidence/framework-export-refinement/handback.json僅歷史carry，不當新候選hash。
+- 新UI：qa-evidence/framework-export-refinement/browser-2026-10-24T05-00-58.921Z/receipt.json。
+- 同目錄native-7af06154.json與closure-pdf-verification.json；新gate為closure-gates-20261024-130529.json，完整logs由收據定位。
+- npm run qa:framework-export；npm run qa:framework-export-native -- <receipt.json>（既有uv offline依賴，未新安裝）。
+- PDF解析器位於Hermes scratch/framework-closure-pdf.py，hash/命令在closure-handback-*.json；native verifier最後修復不改產品/既有產物bytes，其新證據取代前次native失敗。
+- 最終父流程：parent-final-64fafe9d/receipt.json；兩份部門完整PDF修正：parent-department-2026-10-24T05-18-03.726Z/receipt.json及closure-pdf-verification.json。兩者位於qa-evidence/framework-export-refinement/。

@@ -10,8 +10,8 @@ export const printProvided=(ctx:Pick<PageProps,'t'>)=>ctx.t('已提供授權列�
 export async function buildPrintReport(state:PlatformState,request:PrintRequest,lang:Language,surface:ReportNamingSurface='report-center'):Promise<string>{
  const deps=(request.filters as {departmentIds?:string[]}|undefined)?.departmentIds;
  const descriptor=reportDescriptor(state,request,lang,surface);
- const create:typeof HtmlReport.create=async(title,language,snapshot,options,operational)=>{const report=await HtmlReport.create(title,language,snapshot,options,operational);report.setSuggestedName(descriptor.name);report.paragraph(descriptor.scope);return report;};
- if(request.kind==='framework')return ((request.filters as {reportVariant?:string}|undefined)?.reportVariant==='remarks'?renderRemarksReport:renderFrameworkReport)(create,state,request.frameworkId!,lang,request.ids,{departmentIds:deps});
+ const create:typeof HtmlReport.create=async(title,language,snapshot,options,operational)=>{const report=await HtmlReport.create(title,language,snapshot,options,operational);report.setSuggestedName(descriptor.name);if(request.kind!=='framework'||(request.filters as {reportVariant?:string}|undefined)?.reportVariant==='remarks')report.paragraph(descriptor.scope);return report;};
+ if(request.kind==='framework')return ((request.filters as {reportVariant?:string}|undefined)?.reportVariant==='remarks'?renderRemarksReport:renderFrameworkReport)(create,state,request.frameworkId!,lang,request.ids,{departmentIds:deps,reportScope:descriptor.scope,...((request.filters as {reportVariant?:string}|undefined)?.reportVariant==='complete'?{reportVariant:'complete' as const}:{})});
  if(request.kind==='improvements')return renderImprovementsReport(create,state,request.ids,lang);
  if(request.kind==='inspection')return renderInspectionReport(create,state,request.ids[0],lang);
  return renderOverviewReport(create,state,request.frameworkId!,lang,request.ids,{filters:request.filters as Filters});

@@ -48,6 +48,18 @@ test('filename: regular kinds, framework identity, canonical date, fallback and 
  s.settings.departments[1].name={zh:' ',en:' '};assert(reportDescriptor(s,request,'zh').name.startsWith('不可用選項+海務 '));
 });
 
+test('framework simple and complete keep Chinese departments in English filename and scope without changing other reports',async()=>{
+ const s=reportingFixture();s.settings.departments[0].name={zh:'管理組',en:'Management'};
+ const before=structuredClone(s);
+ for(const reportVariant of [undefined,'complete']){
+  const req:Omit<ExportRequest,'snapshotToken'>={kind:'framework',format:'pdf',frameworkId:'TMSA',ids:['chapter-TMSA'],filters:{departmentIds:['marine','tech'],...(reportVariant?{reportVariant}:{})}};
+  const d=reportDescriptor(s,req,'en');assert(d.name.startsWith('管理組+工務 TMSA-'));assert(d.scope.includes('Departments=管理組+工務'));assert(!d.scope.includes('Management+Technical'));
+  const html=await buildPrintReport(s,req,'en');assert(html.includes(d.name));assert(html.includes('Departments=管理組+工務'));
+ }
+ for(const kind of ['framework','improvements','overview'] as const){const d=reportDescriptor(s,{kind,format:'pdf',frameworkId:'TMSA',ids:['chapter-TMSA'],filters:{departmentIds:['marine'],reportVariant:'remarks'}},'en');assert(d.name.startsWith('Management'));assert(d.scope.includes('Departments=Management'));}
+ assert.deepEqual(s,before);
+});
+
 test('filename: report center uses selected department, framework, UI kind and canonical date',()=>{
  const s=reportingFixture();s.settings.departments[0].name={zh:'管理組',en:'Management'};
  const request:Omit<ExportRequest,'snapshotToken'>={kind:'framework',format:'xlsx',frameworkId:'TMSA',ids:['chapter-TMSA'],filters:{departmentIds:['marine'],reportVariant:'remarks'}};

@@ -8,6 +8,8 @@
     "build": "node node_modules/typescript/bin/tsc --noEmit && node node_modules/vite/bin/vite.js build",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "qa:framework-export": "node --experimental-strip-types scripts/verify-framework-export-refinement.mjs",
+    "qa:framework-export-native": "uv run --offline --no-project --python 3.12 --with openpyxl --with pywin32 python scripts/verify-framework-export-native.py",
     "qa:native": "node scripts/verify-native.mjs",
     "qa:browser": "node scripts/verify-browser.mjs",
     "qa:layout": "node --experimental-strip-types scripts/verify-layout.mjs",

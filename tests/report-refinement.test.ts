@@ -47,7 +47,7 @@ test('refinement: Excel 12pt, one ordinary row, no note band and individually si
 test('refinement closure: a long comparison field spans the page instead of stretching unrelated short columns',async()=>{
  const s=reportingFixture();s.items[0].guidance={en:Array.from({length:80},(_,i)=>'DENSE_'+i+' Complete guidance text.').join(' '),zh:'完整指引末端'};
  const html=await buildPrintReport(s,{kind:'framework',format:'pdf',frameworkId:'TMSA',ids:['chapter-TMSA']},'en');
- assert.match(html,/<td colspan="100"[^>]*><div class="field-label">[\s\S]*?Best Practice Guidance[\s\S]*?DENSE_0/);
+ assert.match(html,/<table class="framework-simple">[\s\S]*?Best Practice Guidance[\s\S]*?DENSE_0/);
  assert(html.includes('DENSE_79 Complete guidance text.'));assert(html.includes('完整指引末端'));
 });
 test('refinement closure: fixed short lines keep a compact comparison row when widening cannot save height',async()=>{
@@ -72,7 +72,7 @@ test('refinement closure: FrameworkPage Excel filename shortening keeps the full
  const saved={document:globalThis.document,fetch:globalThis.fetch,create:URL.createObjectURL,revoke:URL.revokeObjectURL,setTimeout:globalThis.setTimeout};let artifact:Blob|undefined,filename='';
  const anchor={href:'',download:'',style:{},click(){filename=this.download;},remove(){}};
  Object.assign(globalThis,{document:{createElement:(tag:string)=>tag==='canvas'?{getContext:()=>null}:anchor,body:{appendChild(){}}},fetch:async()=>new Response(readFileSync('public/templates/tmsa-template.xlsx')),setTimeout:(fn:()=>void)=>{fn();return 0;}});URL.createObjectURL=(blob:Blob)=>{artifact=blob;return 'blob:fixture';};URL.revokeObjectURL=()=>{};
- try{await downloadFrameworkExcel(s,'TMSA','en',['chapter-TMSA']);assert(artifact);const book=new ExcelJS.Workbook();await book.xlsx.load(await artifact.arrayBuffer());assert.equal(filename,'All TMSA-Full framework assessment 2026-03-03.xlsx');assert.equal(filename,reportDescriptor(s,{kind:'framework',format:'xlsx',frameworkId:'TMSA',ids:['chapter-TMSA']},'en').filename);assert(book.worksheets[0].getCell('A1').text.includes('Chapters=TMSA 1 '+s.chapters[0].name.en),'the exact long scope must be readable, not only the chapter title');}
+ try{await downloadFrameworkExcel(s,'TMSA','en',['chapter-TMSA']);assert(artifact);const book=new ExcelJS.Workbook();await book.xlsx.load(await artifact.arrayBuffer());assert.equal(filename,'All TMSA-Full framework assessment 2026-03-03.xlsx');assert.equal(filename,reportDescriptor(s,{kind:'framework',format:'xlsx',frameworkId:'TMSA',ids:['chapter-TMSA']},'en').filename);assert(book.worksheets[0].getSheetValues().flat().join(' ').includes('Chapters=TMSA 1 '+s.chapters[0].name.en),'the exact long scope must be readable, not only the chapter title');}
  finally{Object.assign(globalThis,{document:saved.document,fetch:saved.fetch,setTimeout:saved.setTimeout});URL.createObjectURL=saved.create;URL.revokeObjectURL=saved.revoke;}
 });
 test('refinement: shared report ordering urgency, target, independent proposal, missing last, stable ID tie',async()=>{

@@ -47,14 +47,14 @@ for(const frameworkId of ['TMSA','DRYBMS'] as const)for(const lang of ['zh','en'
   const saved=new ExcelJS.Workbook();await saved.xlsx.load(output as unknown as ExcelJS.Buffer);
   assert.equal(saved.worksheets.length,state.chapters.length);
   for(const sheet of saved.worksheets){
-    assert.equal(sheet.getCell('E2').text,'',`${sheet.name}: removed intro must not be exported`);
+    assert.equal(sheet.getCell('E2').text,'2026 Self Assessment\n目前自評');
     const original=frameworkId==='TMSA'?book.getWorksheet(sheet.name):book.worksheets[0];
-    assert.equal(sheet.getRow(2).height,original?.getRow(2).height??24,`${sheet.name}: no enlarged empty intro row`);
-    assert.equal(sheet.getCell('A6').text,'Item','Keep existing header coordinates');
+    assert.equal(sheet.getRow(2).height,47.65,`${sheet.name}: compact reference header`);
+    assert.equal(sheet.getCell('A2').text,'Item','Latest reference supersedes A6');
     const view=sheet.views[0];assert.ok(view.state==='frozen','Keep frozen view');
-    assert.equal(view.ySplit,6,'Keep freeze-pane coordinates');
+    assert.equal(view.ySplit,2,'Latest reference freezes two rows');
     assert.ok(sheet.getCell('A1').value,'Keep chapter title');
-    const seen:string[]=[];sheet.eachRow(row=>{if(row.number>=7&&row.getCell(1).value)seen.push(row.getCell(1).text);});
+    const seen:string[]=[];sheet.eachRow(row=>{if(row.number>=3&&row.getCell(1).value)seen.push(row.getCell(1).text);});
     assert.ok(seen.length||!state.items.some(i=>i.chapterId===state.chapters.find(c=>sheet.getCell('A1').text.startsWith(c.code+' '))?.id),'Keep body records');
   }
   assert.equal(JSON.stringify(state),before,'Export presentation must not change source/scoring data');
@@ -69,12 +69,12 @@ test('framework XLSX fills original Item coordinates and retains twenty styled s
   const saved=new ExcelJS.Workbook();await saved.xlsx.load(output as unknown as ExcelJS.Buffer);
   assert.equal(saved.worksheets.length,20);
   const first=state.items[0],loc=first.sources[0],sheet=saved.getWorksheet(loc.sheet!)!;
-  assert.equal(sheet.getCell(loc.cell!).text,first.code);
-  assert.equal(sheet.getCell(`B${loc.cell!.slice(1)}`).text,`${first.kpi.en}\n${first.kpi.zh}`);
-  assert.equal(sheet.getCell('E6').text.includes('2026'),true);
-  assert.equal(sheet.getColumn(1).width,book.worksheets[0].getColumn(1).width);
-  assert.ok(sheet.getCell(loc.cell!).border.left?.style);
-  assert.ok(sheet.getCell(`F${loc.cell!.slice(1)}`).alignment.wrapText);
+  assert.equal(sheet.getCell('A3').text,first.code);
+  assert.equal(sheet.getCell('B3').text,`${first.kpi.en}\n${first.kpi.zh}`);
+  assert.equal(sheet.getCell('E2').text.includes('2026'),true);
+  assert.equal(sheet.getColumn(1).width,7.86328125);
+  assert.ok(sheet.getCell('A3').border.left?.style);
+  assert.ok(sheet.getCell('F3').alignment.wrapText);
   if(process.env.REPORT_QA_DIR){await mkdir(process.env.REPORT_QA_DIR,{recursive:true});await writeFile(resolve(process.env.REPORT_QA_DIR,'framework-20.xlsx'),output);await writeFile(resolve(process.env.REPORT_QA_DIR,'xlsx-expectations.json'),JSON.stringify({sheets:book.worksheets.map(s=>s.name),itemCodes:state.items.map(i=>i.code),required:['QA KPI 1.1.1','測試目前自評 1.1.1'],uniqueItems:288}));await writeFile(resolve(process.env.REPORT_QA_DIR,'framework-state.json'),JSON.stringify(state));}
 });
 
@@ -108,9 +108,9 @@ test('long bilingual XLSX fields reconstruct exactly and include custom chapters
   assert.equal(saved.worksheets.length,21);
   const sheet=saved.getWorksheet(first.sources[0].sheet!)!;
   const rows:ExcelJS.Row[]=[];sheet.eachRow(row=>{if(row.getCell(1).text===first.code)rows.push(row);});
-  assert.ok(rows.length>2);
+  assert.equal(rows.length,1);
   const size=rows[0].getCell(2).font.size!;
-  assert.equal(size,12);
+  assert.equal(size,10);
   assert.equal(rows.map(row=>row.getCell(2).text).join(''),reports.bilingual(first.kpi));
   const planned=rows.map(row=>({text:row.getCell(2).text,en:'',zh:''}));
   const seen=new Set<string>();for(const s of saved.worksheets)s.eachRow(r=>{if(r.getCell(1).text)seen.add(r.getCell(1).text);});
@@ -171,7 +171,7 @@ test('DRYBMS exports preserve analysis/source-gap labels and use shared conserva
   const {frameworkScore}=await import('../src/domain.ts');assert.equal(frameworkScore(state,'DRYBMS').rows[0].provisional,true);assert.notEqual(frameworkScore(state,'DRYBMS').score,4);
   const output=await reports.buildFrameworkExcel(state,'DRYBMS','en',undefined,{templateBytes:bytes});const book=new ExcelJS.Workbook();await book.xlsx.load(output as unknown as ExcelJS.Buffer);
   assert.equal(book.worksheets.length,1);const text=book.worksheets[0].getSheetValues().flat().join(' ');
-  assert.ok(text.includes('NOT an official DRYBMS'));assert.ok(text.includes('DRY_QA_SOURCE_GAP'));assert.ok(text.includes('FULL_SOURCE_ORIGINAL_MARKER'));
+  assert(!text.includes('DRY_QA_SOURCE_GAP'),'source metadata moved to complete PDF');const {buildPrintReport}=await import('../src/useReportPrint.ts');const full=await buildPrintReport(state,{kind:'framework',format:'pdf',frameworkId:'DRYBMS',ids:[chapter.id],filters:{reportVariant:'complete'}},'en');assert(full.includes('NOT an official DRYBMS'));assert(full.includes('DRY_QA_SOURCE_GAP'));assert(full.includes('FULL_SOURCE_ORIGINAL_MARKER'));
   const fontBytes=new Uint8Array(await readFile('public/fonts/NotoSansTC-Regular.ttf'));
   const pdf=await reports.buildFrameworkPdf(state,'DRYBMS','en',undefined,{fontBytes});
   if(process.env.REPORT_QA_DIR){await writeFile(resolve(process.env.REPORT_QA_DIR,'drybms.xlsx'),output);await writeFile(resolve(process.env.REPORT_QA_DIR,'drybms.pdf'),pdf);await writeFile(resolve(process.env.REPORT_QA_DIR,'drybms-expectations.json'),JSON.stringify({required:['DRY-ANALYSIS-001','DRY_QA_SOURCE_GAP','FULL_SOURCE_ORIGINAL_MARKER','NOT an official DRYBMS'],forbidden:[],minimumOther:14}));}

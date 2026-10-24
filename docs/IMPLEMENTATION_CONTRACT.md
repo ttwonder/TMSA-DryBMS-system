@@ -240,3 +240,7 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 ## 待改善來源目錄管理（023 獨立追加）
 
 來源 ID 與原語義保持；沿既有 optional `SystemSettings.improvementSources` 管理雙語標籤及啟用狀態，只允 active Owner/admin 明確 Save。自訂來源為 `custom:<UUID v4>` standalone，不得冒充 external identity。停用只阻新增，歷史仍可保存／結案／重開／匯出。舊 client 省略目錄要在 validator 前保留原值；GM 在 read/sync/canonical export/persistence 前移除目錄。已授權 snapshot 不跟隨 live 改名。此追加不變更前九項報表版面／12pt／多選／排序／密度，亦不改 001–022。完整契約、023/readback 交接、真本機驗證邊界見 [IMPROVEMENT_SOURCE_CATALOG.md](IMPROVEMENT_SOURCE_CATALOG.md)。
+
+## 最新追加：框架精簡與完整資訊輸出
+
+使用者最新已保存七欄Excel範本優先於舊A6／續列／自動metadata條款：精簡Excel與PDF僅當前七欄，一項一列、同格全文，正常12pt，超高可局部縮至10pt，仍超高明示PDF；超過32767字元停止Excel。另增PDF-only完整資訊（framework＋reportVariant=complete），權限／canonical／GM隔離不變。完整範圍、驗證與尚未關閉項目見 [FRAMEWORK_EXPORT_REFINEMENT.md](FRAMEWORK_EXPORT_REFINEMENT.md)。本機候選不是正式完成。

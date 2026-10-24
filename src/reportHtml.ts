@@ -42,7 +42,10 @@ export class HtmlReport implements ReportWriter<string> {
   const select=(indexes:number[]):PdfGroupRow=>({headers:indexes.map(i=>row.headers[i]),cells:indexes.map(i=>row.cells[i]),ratios:indexes.map(i=>weights[i]),...(row.statusColumn!==undefined&&indexes.includes(row.statusColumn)?{statusColumn:indexes.indexOf(row.statusColumn),status:row.status}:{})});
   return [...(short.length?[select(short)]:[]),...tall.map(i=>select([i]))];
  }
- table(headers:string[],ratios:number[],rows:PdfRow[],_layout:'auto'|'overview'='auto'){
+ table(headers:string[],ratios:number[],rows:PdfRow[],_layout:'auto'|'overview'|'framework-simple'='auto'){
+  if(_layout==='framework-simple'){
+   const total=ratios.reduce((a,b)=>a+b,0);this.blocks.push(`<table class="framework-simple"><colgroup>${ratios.map(r=>`<col style="width:${100*r/total}%">`).join('')}</colgroup><thead><tr>${headers.map(h=>`<th>${reportRichHtml(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.cells.map((c,i)=>`<td${i===3&&c==='N'?' class="response-no"':''}>${reportRichHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);return;
+  }
   for(const row of rows){const bands=this.compactRows({headers,cells:row.cells,ratios});if(bands.length===1)this.band(row.key,headers,row.cells,ratios,undefined,undefined,row.warning);else this.groupedTable(row.key,bands,'',row.warning);}
  }
  groupedTable(key:string,rows:PdfGroupRow[],_prefix:string,warning=false){
@@ -52,5 +55,5 @@ export class HtmlReport implements ReportWriter<string> {
   })).join('');
   this.blocks.push(`<table class="grouped${warning?' warning':''}"><colgroup>${'<col style="width:1%">'.repeat(100)}</colgroup><thead><tr><th class="record-key" colspan="100">${reportRichHtml(key)}</th></tr></thead><tbody>${body}</tbody></table>`);
  }
- async finish(){return `<!doctype html><html lang="${this.lang==='zh'?'zh-Hant':'en'}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'"><title>${escapeReportHtml(richTextToPlainText(this.title))}</title><style>${css}</style></head><body><aside class="screen-note">${this.lang==='zh'?'授權報告快照。使用瀏覽器列印／另存為 PDF；關閉預覽不代表已保存。可按 Ctrl+P 再次列印。':'Authorized report snapshot. Print / Save as PDF in the browser; closing preview does not confirm saving. Use Ctrl+P to print again.'}</aside><main>${this.blocks.join('')}</main></body></html>`;}
+ async finish(){return `<!doctype html><html lang="${this.lang==='zh'?'zh-Hant':'en'}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'"><title>${escapeReportHtml(richTextToPlainText(this.title))}</title><style>${css}.framework-simple th{background:#b8cce4;text-align:center}.framework-simple th:nth-child(n+4):nth-child(-n+6),.framework-simple td:nth-child(n+4):nth-child(-n+6){background:#ffff00}.framework-simple td:nth-child(5),.framework-simple td:nth-child(6){font-family:"Times New Roman","標楷體",serif}.framework-simple td:nth-child(6){color:#ff0000}.framework-simple td:nth-child(1),.framework-simple td:nth-child(7){font-family:"標楷體",serif;text-align:center}.framework-simple td.response-no{background:#ffc7ce!important;color:#9c0006}.framework-simple td{padding:2pt 3pt}.framework-simple td:nth-child(4){text-align:center}</style></head><body><aside class="screen-note">${this.lang==='zh'?'授權報告快照。使用瀏覽器列印／另存為 PDF；關閉預覽不代表已保存。可按 Ctrl+P 再次列印。':'Authorized report snapshot. Print / Save as PDF in the browser; closing preview does not confirm saving. Use Ctrl+P to print again.'}</aside><main>${this.blocks.join('')}</main></body></html>`;}
 }

@@ -18,7 +18,7 @@ import type { Assessment, BiText, Chapter, ExportRequest, FrameworkId, Improveme
 import { assessmentFor, currentIncludesTmsa14, inspectionIncludesTmsa14, departmentsLabel, filteredImprovements, frameworkScore, hasPermission, inspectionScore, openIssuesFor, peopleLabel, type Filters } from './domain.ts';
 
 export interface ReportFieldLine {fieldId:string;page:number;x:number;baseline:number;width:number;size:number}
-export interface ReportBuildOptions { reportScope?:string; departmentIds?:string[]; templateBytes?:Uint8Array; fontBytes?:Uint8Array; fallbackFontBytes?:Uint8Array[]; boldFontBytes?:Uint8Array; boldFallbackFontBytes?:Uint8Array[]; onFieldLine?:(line:ReportFieldLine)=>void; }
+export interface ReportBuildOptions { onWarning?:(message:string)=>void; reportVariant?:'complete'; reportScope?:string; departmentIds?:string[]; templateBytes?:Uint8Array; fontBytes?:Uint8Array; fallbackFontBytes?:Uint8Array[]; boldFontBytes?:Uint8Array; boldFallbackFontBytes?:Uint8Array[]; onFieldLine?:(line:ReportFieldLine)=>void; }
 const assetUrl = (path:string) => `${(import.meta as ImportMeta & {env?:{BASE_URL?:string}}).env?.BASE_URL ?? '/'}${path}`;
 async function assetBytes(path:string):Promise<Uint8Array> {
   const response=await fetch(assetUrl(path));
@@ -179,124 +179,67 @@ export async function ensureNativeExcelCompatibility(bytes:Uint8Array):Promise<U
   }
   return zip.generateAsync({type:'uint8array',compression:'DEFLATE'});
 }
-function newChapterSheet(book:ExcelJS.Workbook,name:string,styleSource?:ExcelJS.Worksheet):ExcelJS.Worksheet {
-  const sheet=book.addWorksheet(name.slice(0,31).replace(/[\\/?*\[\]:]/g,'_'));
-  for(let c=1;c<=7;c++) sheet.getColumn(c).width=styleSource?.getColumn(c).width??[10,32,55,6,62,42,12][c-1];
-  for(let r=1;r<=7;r++) {
-    sheet.getRow(r).height=styleSource?.getRow(r).height??(r===6?45:24);
-    for(let c=1;c<=7;c++)sheet.getCell(r,c).style=clone(styleSource?.getCell(r===7?7:r,c).style??{});
-  }
-  sheet.mergeCells('A1:G1');
-  sheet.pageSetup=clone(styleSource?.pageSetup??{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0});
-  sheet.views=[{state:'frozen',ySplit:6,xSplit:1}];
-  return sheet;
-}
 function responseText(a:Pick<Assessment,'response'>|undefined){return a?.response==='yes'?'Y':a?.response==='no'?'N':'?';}
-
-/** Real OOXML; TMSA always starts from the sanitized 20-sheet source-style asset. */
+const frameworkWidths=[7.86328125,23.796875,58.265625,4.1328125,58.265625,37.265625,7.73046875];
+const frameworkColumnNames=['標楷體','Arial','Arial','Arial','Times New Roman','Times New Roman','標楷體'];
+const currentFrameworkCells=(state:PlatformState,item:StandardItem):string[]=>{
+ const a=assessmentFor(state,item.id);
+ return [item.code,bilingual(item.kpi),bilingual(item.guidance),responseText(a),bilingual(a?.selfAssessment),bilingual(a?.evidence),departmentsLabel(state,a?.departmentIds??item.departmentIds,'zh')];
+};
+const currentFrameworkHeaders=(state:PlatformState)=>['Item','Key Performance Indicator\n關鍵績效指標','Best Practice Guidance\n最佳實務指引','Y/N',`${/^\d{4}/.exec(state.serverTime)?.[0]??'Current'} Self Assessment\n目前自評`,'Evidence\n佐證','PIC\n部門'];
+/** Latest approved seven-column reference; source asset is validated, never copied. */
 export async function buildFrameworkExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
-  const selected=selectedFrameworkItems(state,frameworkId,chapterIds,options.departmentIds);
-  if(!selected.length)throw noFrameworkItems();
-  const chapters=selectedChapters(state,frameworkId,chapterIds).filter(c=>!options.departmentIds?.length||selected.some(i=>i.chapterId===c.id));
-  const [ExcelJS,JSZip]=await Promise.all([loadExcel(),loadZip()]);
-  const template=new ExcelJS.Workbook();
-  const templateBytes=options.templateBytes??await assetBytes('templates/tmsa-template.xlsx');
-  const templateArchive=await JSZip.loadAsync(templateBytes);
-  if(Object.keys(templateArchive.files).some(path=>/comments\d*\.xml$/i.test(path)))throw new Error('Template annotations/comments are forbidden / 空白樣板不得包含來源註解');
-  await template.xlsx.load(templateBytes as unknown as ExcelJS.Buffer);
-  if(template.worksheets.length!==20)throw new Error('TMSA style template must have 20 sheets');
-  const book=frameworkId==='TMSA'?template:new ExcelJS.Workbook();
-  const reference=template.worksheets[0];
-  const selectedSheets=new Set<number>();
-  const year=/^\d{4}/.exec(state.serverTime)?.[0]??'Current';
-  for(const chapter of chapters) {
-    const items=selected.filter(i=>i.chapterId===chapter.id).sort((a,b)=>a.order-b.order||a.code.localeCompare(b.code));
-    let sheet=frameworkId==='TMSA'?book.getWorksheet(`E${chapter.code}`):undefined;
-    if(!sheet&&frameworkId==='TMSA')sheet=book.worksheets.find(s=>items.some(i=>i.sources.some(loc=>loc.sheet===s.name))&&!selectedSheets.has(s.id));
-    if(!sheet)sheet=newChapterSheet(book,`${frameworkId==='TMSA'?'E':'D'}${chapter.code}`,reference);
-    if(selectedSheets.has(sheet.id))throw new Error('Two chapters map to the same source sheet');
-    selectedSheets.add(sheet.id);
-    const originalItems=new Map<string,number>();
-    sheet.eachRow(row=>{const value=row.getCell(1).text;if(/^\d+[A-Za-z]?\.\d+\.\d+$/.test(value))originalItems.set(value,row.number);});
-    const firstRow=Math.min(...originalItems.values(),7),header=firstRow-1;
-    const lastOriginal=Math.max(...originalItems.values(),firstRow-1);
-    // Clear every template body value, including H historical values. Never export inherited content.
-    for(let r=firstRow;r<=sheet.rowCount;r++)for(let c=1;c<=Math.max(9,sheet.columnCount);c++) {
-      const cell=sheet.getCell(r,c);if(!cell.isMerged)cell.value=null;
-    }
-    const occupied=new Set<number>();let customRow=lastOriginal+1;
-    const placements=items.map(item=>{
-      let row=originalItems.get(item.code);
-      if(!row)row=(item.aliases??[]).map(alias=>originalItems.get(alias)).find(Boolean);
-      if(!row) {
-        const loc=item.sources.find(s=>s.sheet===sheet!.name&&/^A\d+$/.test(s.cell??''));
-        const number=Number(loc?.cell?.slice(1));if(number>=firstRow&&number<=lastOriginal)row=number;
-      }
-      if(!row||occupied.has(row))row=customRow++;
-      occupied.add(row);return {item,row};
-    }).sort((a,b)=>b.row-a.row);
-    // Proportional narrative adjustment only. Item/status/PIC widths are source-exact.
-    for(const [column,min] of [[2,32],[3,48],[5,54],[6,36]] as const)sheet.getColumn(column).width=Math.max(sheet.getColumn(column).width??min,min);
-    const labels=lang==='zh'?['Item','Key Performance Indicator\n關鍵績效指標','Best Practice Guidance\n最佳實務指引','Y/N',`${year} Self Assessment\n目前自評`,'Evidence\n佐證','PIC\n部門']:['Item','Key Performance Indicator','Best Practice Guidance','Y/N',`${year} Self Assessment`,'Evidence','PIC'];
-    labels.forEach((value,i)=>{sheet!.getCell(header,i+1).value=value;});
-    richCell(sheet.getCell('A1'),`${chapter.code} ${bilingual(chapter.name)}`);
-    sheet.getCell('A1').alignment={...sheet.getCell('A1').alignment,wrapText:true,vertical:'middle'};
-    sheet.getRow(1).height=Math.max(sheet.getRow(1).height??24,48);
-    if(options.reportScope){const cell=sheet.getCell('A1'),title=cell.text;cell.value={richText:[{text:title+'\n',font:{...cell.font,size:18}},{text:options.reportScope,font:{...cell.font,size:12}}]};const width=Array.from({length:7},(_,i)=>(sheet!.getColumn(i+1).width??10)*5.1).reduce((a,b)=>a+b,0)-12;sheet.getRow(1).height=Math.max(48,splitMeasured(title,width,18,cell.font.name??'Microsoft JhengHei',1).length*22+splitMeasured(options.reportScope,width,12,cell.font.name??'Microsoft JhengHei',1).length*15.4+4);}
-    // Omit the requested scoring-introduction block; retain the template's normal row height and coordinates.
-    sheet.getCell('E2').value=null;
-    sheet.getCell('E2').alignment={wrapText:true,vertical:'top'};
-    sheet.getRow(header).height=Math.max(sheet.getRow(header).height??24,52);
-    for(const {item,row} of placements) {
-      const a=assessmentFor(state,item.id),issues=state.viewScope==='management_viewer'?[]:openIssuesFor(state,item.id);
-      const values:BiText[]=[{en:item.code,zh:''},item.kpi,itemGuidance(item),{en:responseText(a),zh:''},assessmentNarrative(state,a),evidenceNarrative(a),{en:departmentsLabel(state,a?.departmentIds??item.departmentIds,'en'),zh:departmentsLabel(state,a?.departmentIds??item.departmentIds,'zh')}];
-      if(issues.length){values[4]={en:`${values[4].en}\n\n[Open improvements: ${issues.map(x=>x.id).join(', ')}]`,zh:`${values[4].zh}\n\n[未結案改善：${issues.map(x=>x.id).join(', ')}]`};}
-      const styleRow=sheet.getRow(row),styles=Array.from({length:7},(_,i)=>clone(styleRow.getCell(i+1).style));
-      const fontSize=12;
-      const maxLines=23;
-      const chunks=values.map((value,c)=>splitMeasured(bilingual(value),Math.max(12,templateColumnContentWidth(sheet!.getColumn(c+1).width??10)),fontSize,styles[c].font?.name??'Microsoft JhengHei',maxLines).map(text=>({text})));
-      const count=Math.max(...chunks.map(x=>x.length));
-      if(count>1)sheet.spliceRows(row+1,0,...Array.from({length:count-1},()=>[]));
-      for(let segment=0;segment<count;segment++) {
-        const target=sheet.getRow(row+segment);
-        let maxHeight=0;
-        for(let column=1;column<=7;column++) {
-          const cell=target.getCell(column);cell.style=clone(styles[column-1]);
-          const value=column===1?item.code:column===4?responseText(a):chunks[column-1][segment]?.text??'';
-          cell.alignment={...cell.alignment,vertical:'top',wrapText:true,shrinkToFit:false};
-          cell.font={...cell.font,size:fontSize};tableBorder(cell);
-          richCell(cell,value);
-          const pixelWidth=Math.max(12,templateColumnContentWidth(sheet.getColumn(column).width??10));
-          const lineCount=splitMeasured(value,pixelWidth,fontSize,cell.font.name??'Noto Sans TC',1).length;
-          maxHeight=Math.max(maxHeight,lineCount*15.4+1.5);
-        }
-        if(count>1) {
-          const cell=target.getCell(7);cell.value=`${cell.text}\n${tr(lang,'續','Cont.')} ${segment+1}/${count}`;
-          maxHeight+=15.4;
-        }
-        // Source has one 409.6pt legacy floor (Excel's maximum is 409.5).
-        // Clamp only that inherited floor, never the measured text requirement.
-        const measuredHeight=Math.max(17,maxHeight);
-        if(measuredHeight>409.5)throw new Error(`Excel continuation height exceeds limit: ${item.code}`);
-        target.height=measuredHeight;if(segment){target.outlineLevel=1;target.getCell(1).font={...target.getCell(1).font,color:{argb:'FFFFFFFF'}};}
-      }
-    }
-    const end=Math.max(firstRow,sheet.rowCount);
-    for(let row=header;row<=end;row++)for(let col=1;col<=7;col++){const cell=sheet.getCell(row,col);tableBorder(cell);cell.alignment={...cell.alignment,wrapText:true,vertical:'top'};}
-    sheet.eachRow(row=>{if(row.number>1)row.eachCell(cell=>{cell.font={...cell.font,size:12};if(cell.value&&typeof cell.value==='object'&&'richText' in cell.value)cell.value.richText.forEach(run=>{run.font={...run.font,size:12};});});});
-    // Department excerpts retain source coordinates/styles, without blank template pages.
-    for(let row=firstRow;row<=end;row++)sheet.getRow(row).hidden=!sheet.getCell(row,1).text;
-    for(let column=8;column<=sheet.columnCount;column++)sheet.getColumn(column).hidden=true;
-    sheet.autoFilter={from:{row:header,column:1},to:{row:end,column:7}};
-    sheet.views=[{state:'frozen',xSplit:1,ySplit:header}];
-    sheet.pageSetup={...sheet.pageSetup,printArea:`A1:G${end}`,printTitlesRow:`1:${header}`,fitToPage:true,fitToWidth:1,fitToHeight:0};
-    sheet.headerFooter={...sheet.headerFooter,oddFooter:'&L&12'+frameworkId+'&C&12&P / &N'};
+ const selected=selectedFrameworkItems(state,frameworkId,chapterIds,options.departmentIds);if(!selected.length)throw noFrameworkItems();
+ const chapters=selectedChapters(state,frameworkId,chapterIds).filter(c=>selected.some(i=>i.chapterId===c.id));
+ const [Excel,JSZip]=await Promise.all([loadExcel(),loadZip()]);
+ const templateBytes=options.templateBytes??await assetBytes('templates/tmsa-template.xlsx'),archive=await JSZip.loadAsync(templateBytes);
+ if(Object.keys(archive.files).some(p=>/comments\d*\.xml$/i.test(p)))throw new Error('Template annotations/comments are forbidden / 空白樣板不得包含來源註解');
+ const template=new Excel.Workbook();await template.xlsx.load(templateBytes as unknown as ExcelJS.Buffer);
+ if(template.worksheets.length!==20)throw new Error('TMSA style template must have 20 sheets');
+ const book=new Excel.Workbook(),warnings:string[]=[];
+ for(const chapter of chapters){
+  let name=`${frameworkId==='TMSA'?'E':'D'}${chapter.code}`.replace(/[\\/?*\[\]:]/g,'_').slice(0,26);if(book.getWorksheet(name))name+='_'+(book.worksheets.length+1);
+  const sheet=book.addWorksheet(name),items=selected.filter(i=>i.chapterId===chapter.id).sort((a,b)=>a.order-b.order||a.code.localeCompare(b.code));
+  frameworkWidths.forEach((w,c)=>sheet.getColumn(c+1).width=w);
+  sheet.mergeCells('A1:D1');const title=sheet.getCell('A1');richCell(title,bilingual({en:`${chapter.code} ${chapter.name.en}`,zh:`${chapter.code} ${chapter.name.zh}`}));title.font={name:'Times New Roman',size:14,bold:true};title.alignment={wrapText:true,vertical:'middle'};
+  const titleWidth=frameworkWidths.slice(0,4).reduce((n,w)=>n+w*5.25,0)-12;
+  sheet.getRow(1).height=Math.max(44.65,splitMeasured(title.text,titleWidth,14,'Times New Roman',1).length*18+4);
+  sheet.getCell('E1').value=tr(lang,'更新日期','Updated');sheet.getCell('F1').value=new Date(state.serverTime.slice(0,10)+'T00:00:00Z');sheet.getCell('F1').numFmt='yyyy/mm/dd';
+  for(const col of [5,6]){sheet.getCell(1,col).font={name:'標楷體',size:14,bold:true};sheet.getCell(1,col).alignment={horizontal:col===5?'right':'left',vertical:'middle'};}
+  sheet.getRow(2).height=47.65;
+  currentFrameworkHeaders(state).forEach((label,c)=>{const cell=sheet.getCell(2,c+1);cell.value=label;cell.font={name:'Arial',size:12,bold:true};cell.alignment={wrapText:true,vertical:'top',horizontal:'center'};cell.fill={type:'pattern',pattern:'solid',fgColor:c>=3&&c<=5?{argb:'FFFFFF00'}:{argb:'FFB8CCE4'}};tableBorder(cell);});
+  for(const [index,item] of items.entries()){
+   const row=sheet.getRow(index+3),values=currentFrameworkCells(state,item);let height=18,overflow=false;
+   values.forEach((value,c)=>{
+    if(richTextToPlainText(value).length>32767)throw new Error(`Excel 32767-character limit: ${frameworkId} Item ${item.code} (${item.id}), column ${c+1}. Excel stopped; use PDF for complete text. / 超過 Excel 單格32767字元限制，已停止輸出，請用PDF查看全文。`);
+    const cell=row.getCell(c+1),width=templateColumnContentWidth(frameworkWidths[c]);let size=12;
+    const required=()=>splitMeasured(value,width,size,frameworkColumnNames[c],1).length*(size*1.3)+3;
+    while(size>10&&required()>409.5)size--;
+    const measured=required();height=Math.max(height,measured);overflow ||= measured>409.5;
+    cell.font={name:frameworkColumnNames[c],size,color:{argb:c===5?'FFFF0000':'FF000000'}};
+    cell.alignment={wrapText:true,vertical:'top',horizontal:[0,3,6].includes(c)?'center':'left',shrinkToFit:false};
+    if(c>=3&&c<=5)cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFF00'}};
+    if(c===3&&value==='N'){cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFC7CE'}};cell.font.color={argb:'FF9C0006'};}
+    tableBorder(cell);richCell(cell,value);
+   });
+   row.height=Math.min(409.5,height);
+   if(overflow)warnings.push(`${frameworkId} Item ${item.code}: `+tr(lang,'全文保留同一格；已局部縮至10pt，仍超過Excel可見列高，請用PDF查看全文。','Full text remains in one cell; reduced locally to 10pt but exceeds Excel visible row height. Use PDF for the complete text.'));
   }
-  for(const sheet of [...book.worksheets])if(!selectedSheets.has(sheet.id))book.removeWorksheet(sheet.id);
-  book.creator=PRODUCT_NAME_EN;book.lastModifiedBy='Authorized report snapshot';book.company='';
-  return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
+  const dataEnd=items.length+2;
+  sheet.addConditionalFormatting({ref:`D3:D${dataEnd}`,rules:[{type:'cellIs',operator:'equal',formulae:['"N"'],priority:1,style:{fill:{type:'pattern',pattern:'solid',fgColor:{argb:'FFFFC7CE'}},font:{color:{argb:'FF9C0006'}}}}]});
+  let end=dataEnd;const scope=options.reportScope;if(scope||warnings.length){end++;sheet.getRow(end).hidden=true;}
+  for(const note of [scope,...warnings.filter(w=>items.some(i=>w.startsWith(`${frameworkId} Item ${i.code}:`)))].filter((v):v is string=>!!v)){
+   const width=frameworkWidths.reduce((n,w)=>n+w*5.25,0)-12;
+   for(const chunk of splitMeasured(note,width,12,'Arial',24)){end++;sheet.mergeCells(`A${end}:G${end}`);const c=sheet.getCell(end,1);c.value=chunk;c.font={name:'Arial',size:12};c.alignment={wrapText:true,vertical:'top'};sheet.getRow(end).height=Math.min(409.5,splitMeasured(chunk,width,12,'Arial',1).length*16+4);}
+  }
+  sheet.views=[{state:'frozen',xSplit:1,ySplit:2}];sheet.autoFilter=`A2:G${dataEnd}`;
+  sheet.pageSetup={paperSize:8 as ExcelJS.PaperSize,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,printArea:`A1:G${end}`,printTitlesRow:'1:2',margins:{left:.2,right:.2,top:.25,bottom:.3,header:.1,footer:.1}};
+  sheet.headerFooter={oddFooter:'&L&12'+frameworkId+'&C&12&P / &N'};
+ }
+ if(warnings.length)options.onWarning?.(warnings.join('\n'));
+ book.creator=PRODUCT_NAME_EN;book.lastModifiedBy='Authorized report snapshot';
+ return ensureNativeExcelCompatibility(new Uint8Array(await book.xlsx.writeBuffer()));
 }
-
 // Operational registers use independent filterable columns, never merged data cells.
 const reportDate=(value:string|null|undefined)=>value?.slice(0,10)??'';
 const excelDate=(value:string|null|undefined):Date|null=>{const day=reportDate(value);return /^\d{4}-\d{2}-\d{2}$/.test(day)?new Date(day+'T00:00:00Z'):null;};
@@ -563,7 +506,16 @@ class TextPdf {
     this.y-=8;
   }
   heading(text:string){if(this.y-70<BOTTOM)this.newPage();this.paragraph(text,17);}
-  table(headers:string[],_ratios:number[],rows:PdfRow[],layout:'auto'|'overview'='auto') {
+  table(headers:string[],_ratios:number[],rows:PdfRow[],layout:'auto'|'overview'|'framework-simple'='auto') {
+    if(layout==='framework-simple'){
+      const block=this.blockIndex++,total=_ratios.reduce((a,b)=>a+b,0),widths=_ratios.map(r=>(PAGE_WIDTH-MARGIN*2)*r/total),heads=headers.map((h,c)=>this.wrap(h,widths[c]-8)),hh=Math.max(...heads.map(h=>h.length))*PDF_LEADING+8;
+      const header=()=>{if(this.y-hh-24<BOTTOM)this.newPage();let x=MARGIN;heads.forEach((lines,c)=>{this.page.drawRectangle({x,y:this.y-hh,width:widths[c],height:hh,color:c>=3&&c<=5?rgb(1,1,0):rgb(.72,.8,.9),borderWidth:.6,borderColor:rgb(.2,.2,.2)});lines.forEach((line,n)=>this.draw(line,x+4,this.y-16-n*PDF_LEADING,12));x+=widths[c];});this.y-=hh;};header();
+      rows.forEach((row,r)=>{const lines=row.cells.map((v,c)=>this.wrap(v,widths[c]-8)),count=Math.max(...lines.map(l=>l.length));let offset=0;
+       while(offset<count){if(this.y-24<BOTTOM){this.newPage();header();}const take=Math.min(count-offset,Math.floor((this.y-BOTTOM-8)/PDF_LEADING)),height=take*PDF_LEADING+8;let x=MARGIN;
+        lines.forEach((list,c)=>{const no=c===3&&row.cells[c]==='N';this.page.drawRectangle({x,y:this.y-height,width:widths[c],height,color:no?rgb(1,.78,.81):c>=3&&c<=5?rgb(1,1,0):rgb(1,1,1),borderWidth:.6,borderColor:rgb(.2,.2,.2)});list.slice(offset,offset+take).forEach((line,n)=>{this.draw(line,x+4,this.y-16-n*PDF_LEADING,12,no?rgb(.61,0,.02):c===5?rgb(1,0,0):rgb(0,0,0));this.onFieldLine?.({fieldId:`t:${block}:${r}:${c}`,page:this.document.getPageCount()-1,x:x+4,baseline:PAGE_HEIGHT-(this.y-16-n*PDF_LEADING),width:widths[c]-8,size:12});});x+=widths[c];});this.y-=height;offset+=take;
+       }
+      });this.y-=4;return;
+    }
     const block=this.blockIndex++;
     // Content-sized bands retain field order without tall empty auxiliary columns.
     const width=PAGE_WIDTH-MARGIN*2;
@@ -663,7 +615,7 @@ class TextPdf {
 export interface ReportWriter<T> {
  readonly embedsSnapshotMetadata?:boolean;
  heading(text:string):void; paragraph(text:string,size?:number):void;
- table(headers:string[],ratios:number[],rows:PdfRow[],layout?:'auto'|'overview'):void;
+ table(headers:string[],ratios:number[],rows:PdfRow[],layout?:'auto'|'overview'|'framework-simple'):void;
  groupedTable(key:string,rows:PdfGroupRow[],prefix:string):void;
  finish():Promise<T>;
 }
@@ -690,11 +642,18 @@ export async function renderFrameworkReport<T>(create:ReportFactory<T>,state:Pla
   if(!selected.length)throw noFrameworkItems();
   const chapters=selectedChapters(state,frameworkId,chapterIds).filter(c=>!filtered||selected.some(i=>i.chapterId===c.id)),framework=state.frameworks.find(f=>f.id===frameworkId)!;
   const title=`${frameworkId} · ${filtered?tr(lang,'部門自評摘錄','Department assessment extract'):tr(lang,'完整自評報告','Full self-assessment report')}`;
-  const pdf=await create(title,lang,state,options);snapshotIntro(pdf,state,lang,title);
+  const complete=options.reportVariant==='complete';
+  const pdf=await create(title,lang,state,options,true);
+  if(!complete){
+    for(const chapter of chapters){pdf.heading(`${chapter.code} ${bilingual(chapter.name)}`);pdf.paragraph(`${tr(lang,'更新日期','Updated')}: ${state.serverTime.slice(0,10)}`);
+      pdf.table(currentFrameworkHeaders(state),frameworkWidths,selected.filter(i=>i.chapterId===chapter.id).sort((a,b)=>a.order-b.order||a.code.localeCompare(b.code)).map(item=>({key:item.code,cells:currentFrameworkCells(state,item)})),'framework-simple');}
+    if(options.reportScope)pdf.paragraph(options.reportScope);return pdf.finish();
+  }
+  pdf.heading(`${frameworkId} · ${tr(lang,'框架完整資訊','Complete framework information')}`);if(options.reportScope)pdf.paragraph(options.reportScope);
   pdf.paragraph(bilingual(framework.scopeLabel));pdf.paragraph(bilingual(framework.description));
   pdf.paragraph(state.viewScope==='management_viewer'?tr(lang,'英文上、繁中下。Y/N、完成更新、符合程度及執行狀態各自獨立。停用條目不列入目前報告。','English above Traditional Chinese. Y/N, review, conformity and execution are independent. Inactive items are excluded from current reports.'):tr(lang,'英文上、繁中下。Y/N、完成更新、符合程度、執行狀態、改善結案各自獨立。停用條目不列入目前報告。','English above Traditional Chinese. Y/N, review, conformity, execution and improvement closure are independent. Inactive items are excluded from current reports.'),PDF_AUX);
   const score=frameworkScore(state,frameworkId,chapters.map(c=>c.id));
-  if(filtered)pdf.paragraph(`${tr(lang,'部門篩選','Department filter')}: ${departmentsLabel(state,options.departmentIds!,lang)}. ${tr(lang,'下方僅列符合部門與章節的條目；分數與完成數仍使用完整章節，不按部門重算。','Only items matching departments and chapters are listed; scores and reviewed counts still use complete chapters, not a department-only recalculation.')}`,PDF_AUX);
+  if(filtered)pdf.paragraph(`${tr(lang,'部門篩選','Department filter')}: ${departmentsLabel(state,options.departmentIds!,'zh')}. ${tr(lang,'下方僅列符合部門與章節的條目；分數與完成數仍使用完整章節，不按部門重算。','Only items matching departments and chapters are listed; scores and reviewed counts still use complete chapters, not a department-only recalculation.')}`,PDF_AUX);
   else if(frameworkId==='TMSA')pdf.paragraph(tmsa14ReportScope(currentIncludesTmsa14(state),score.totalChapters,lang),PDF_AUX);
   pdf.paragraph(`${tr(lang,'所選分章等權平均','Equal-weight mean of selected complete chapters')}: ${score.score===null?tr(lang,'未完整評定','Not fully assessed'):score.score.toFixed(2)+' / 4'}${score.provisional?tr(lang,'（暫估 / 來源缺口）',' (provisional / source gap)'):''}`);
   for(const chapter of chapters) {
@@ -704,7 +663,22 @@ export async function renderFrameworkReport<T>(create:ReportFactory<T>,state:Pla
     if(chapter.aim)pdf.paragraph(bilingual(chapter.aim));
     pdf.paragraph(`${tr(lang,'本章分數','Chapter score')}: ${chapterScore.score===null?tr(lang,'未評','Not assessed'):chapterScore.score.toFixed(2)+' / 4'}${chapterScore.provisional?tr(lang,'（暫估）',' (provisional)'):''} | ${tr(lang,'完成更新','Reviewed')}: ${chapterScore.updated}/${chapterScore.total}`,PDF_AUX);
     const items=selected.filter(i=>i.chapterId===chapter.id).sort((a,b)=>a.order-b.order);
-    pdf.table(frameworkHeaders(lang,state.viewScope==='management_viewer'),frameworkRatios,itemPdfRows(state,items,lang));
+    for(const item of items){const a=assessmentFor(state,item.id),restricted=state.viewScope==='management_viewer';
+      const guidance=itemGuidance({...item,sourceOriginals:item.sourceOriginals?.map(o=>({...o,id:''}))});
+      const rows:PdfGroupRow[]=[
+        {headers:['Item',tr(lang,'級別','Level'),'Y/N',tr(lang,'完成更新','Reviewed'),tr(lang,'符合程度','Conformity'),tr(lang,'執行狀態','Execution')],cells:[item.code,String(item.level),responseText(a),a?.reviewed?'Y':'N',a?.conformity??'—',a?.executionStatus??'—']},
+        {headers:[tr(lang,'部門','Departments'),tr(lang,'執行人','Assignees')],cells:[departmentsLabel(state,a?.departmentIds??item.departmentIds,'zh'),peopleLabel(state,a?.assigneeIds??[])]},
+        {headers:['Key Performance Indicator / 關鍵績效指標'],cells:[bilingual(item.kpi)]},
+        {headers:['Best Practice Guidance / 最佳實務指引'],cells:[bilingual(guidance)]},
+        {headers:[tr(lang,'目前自評','Current assessment')],cells:[bilingual(a?.selfAssessment)]},
+        {headers:[tr(lang,'佐證','Evidence')],cells:[bilingual(a?.evidence)]}
+      ];
+      if(!restricted){rows.push({headers:[tr(lang,'備註狀態','Remarks status')],cells:[remarksStatusLabel(a?.remarksStatus,lang)],statusColumn:0,status:remarksStatusDefinition(a?.remarksStatus)},{headers:[tr(lang,'手動備註','Manual remarks')],cells:[a?.remarks??'']});const open=openIssuesFor(state,item.id);if(open.length)rows.push({headers:[tr(lang,'未結案改善','Open improvements')],cells:[open.map(i=>[i.title,bilingual(i.content),i.plan].filter(Boolean).join('\n')).join('\n')]});}
+      if(a?.note)rows.push({headers:[tr(lang,'來源附註','Source note')],cells:[bilingual(a.note)]});
+      if(a?.sources.length)rows.push({headers:[tr(lang,'自評來源','Assessment sources')],cells:[sourcesText(a.sources)]});
+      for(const original of a?.initialDepartmentResponses??[])rows.push({headers:[tr(lang,'初始部門回覆','Initial departmental response'),tr(lang,'初始佐證','Initial evidence')],cells:[`${departmentsLabel(state,[original.departmentId],'zh')} · ${original.response??'?'}\n${bilingual(original.assessment)}`,bilingual(original.evidence)]});
+      pdf.groupedTable(`${frameworkId} ${item.code}`,rows,'framework-complete');
+    }
   }
   return pdf.finish();
 }
@@ -820,7 +794,7 @@ export function downloadReportBytes(bytes:Uint8Array,filename:string,mime:string
   try{anchor.click();}finally{anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),60_000);}
 }
 const reportFilename=(state:PlatformState,name:string,extension:string)=>`${name}-${state.serverTime.slice(0,10)||'snapshot'}.${extension}`;
-export async function downloadFrameworkExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[]):Promise<void>{const descriptor=reportDescriptor(state,{kind:'framework',format:'xlsx',frameworkId,ids:chapterIds??state.chapters.filter(c=>c.active&&c.frameworkId===frameworkId).map(c=>c.id)},lang);downloadReportBytes(await buildFrameworkExcel(state,frameworkId,lang,chapterIds,{reportScope:descriptor.scope}),descriptor.filename,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');}
+export async function downloadFrameworkExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],onWarning?:(message:string)=>void):Promise<void>{const descriptor=reportDescriptor(state,{kind:'framework',format:'xlsx',frameworkId,ids:chapterIds??state.chapters.filter(c=>c.active&&c.frameworkId===frameworkId).map(c=>c.id)},lang);downloadReportBytes(await buildFrameworkExcel(state,frameworkId,lang,chapterIds,{reportScope:descriptor.scope,onWarning}),descriptor.filename,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');}
 export async function downloadFrameworkPdf(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[]):Promise<void>{downloadReportBytes(await buildFrameworkPdf(state,frameworkId,lang,chapterIds),reportFilename(state,frameworkId+'-assessment','pdf'),'application/pdf');}
 export async function downloadImprovementsPdf(state:PlatformState,ids:string[],lang:Language,title?:string):Promise<void>{downloadReportBytes(await buildImprovementsPdf(state,ids,lang,title),reportFilename(state,'improvements','pdf'),'application/pdf');}
 export async function downloadInspectionPdf(state:PlatformState,inspectionId:string,lang:Language):Promise<void>{downloadReportBytes(await buildInspectionPdf(state,inspectionId,lang),reportFilename(state,'inspection','pdf'),'application/pdf');}

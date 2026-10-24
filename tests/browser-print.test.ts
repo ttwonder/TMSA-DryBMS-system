@@ -25,7 +25,7 @@ for(const lang of ['zh','en'] as const)for(const kind of ['framework','inspectio
  const state=reportingFixture();state.snapshotToken='performance-v1:'+ '0123456789abcdef'.repeat(4);
  const ids=kind==='inspection'?[state.inspections[0].id]:['chapter-TMSA'];
  const html=await buildPrintReport(state,request(kind,ids),lang);
- assert(html.includes(state.snapshotToken),'complete canonical snapshot identifier must be readable in the report');
+ assert.equal(html.includes(state.snapshotToken),kind!=='framework','simple framework intentionally excludes technical identifiers; other report contracts unchanged');
  assert.doesNotMatch(html,/完整值見PDF文件內容|full value in PDF properties/);
 });
 test('print selection preserves empty saved assignments and refuses empty remarks / active collection',async()=>{
