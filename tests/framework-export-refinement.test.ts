@@ -16,7 +16,7 @@ test('DRY custom same-code rows preserve stable-ID associations and item order i
  const s=reportingFixture(),original=s.items.find(i=>i.frameworkId==='DRYBMS')!,assessment=s.assessments.find(a=>a.itemId===original.id)!;
  s.items=[{...original,id:'same-second',code:'SAME',order:2,kpi:{en:'SECOND_KPI',zh:''}},{...original,id:'same-first',code:'SAME',order:1,kpi:{en:'FIRST_KPI',zh:''}},{...original,id:'same-inactive',code:'SAME',order:0,active:false,kpi:{en:'INACTIVE_KPI',zh:''}}];
  s.assessments=[{...assessment,id:'first-a',itemId:'same-first',response:'yes',conformity:'all',selfAssessment:{en:'FIRST_CURRENT',zh:''}},{...assessment,id:'second-a',itemId:'same-second',selfAssessment:{en:'SECOND_CURRENT',zh:''}}];
- const bytes=await buildFrameworkExcel(s,'DRYBMS','en',[original.chapterId],{templateBytes});const book=new ExcelJS.Workbook();await book.xlsx.load(bytes as unknown as ExcelJS.Buffer);const sh=book.worksheets[0];assert.equal(sh.getCell('A3').text,'SAME');assert.equal(sh.getCell('A4').text,'SAME');assert.equal(sh.getCell('B3').text,'FIRST_KPI');assert.equal(sh.getCell('E3').text,'FIRST_CURRENT');assert.equal(sh.getCell('B4').text,'SECOND_KPI');assert.equal(sh.getCell('E4').text,'SECOND_CURRENT');assert.equal(sh.autoFilter,'A2:G4');
+ const bytes=await buildFrameworkExcel(s,'DRYBMS','en',[original.chapterId],{templateBytes});const book=new ExcelJS.Workbook();await book.xlsx.load(bytes as unknown as ExcelJS.Buffer);const sh=book.worksheets[0];assert.equal(sh.getCell('A3').text,'SAME');assert.equal(sh.getCell('A4').text,'SAME');assert.equal(sh.getCell('B3').text,'FIRST_KPI');assert.equal(sh.getCell('E3').text,'FIRST_CURRENT');assert.equal(sh.getCell('B4').text,'SECOND_KPI');assert.equal(sh.getCell('E4').text,'SECOND_CURRENT');assert.equal(sh.autoFilter,'A2:H4');
  const html=await buildPrintReport(s,{kind:'framework',format:'pdf',frameworkId:'DRYBMS',ids:[original.chapterId]},'en');assert(html.indexOf('FIRST_KPI')<html.indexOf('SECOND_KPI'));assert(html.includes('FIRST_CURRENT')&&html.includes('SECOND_CURRENT'));assert(!html.includes('INACTIVE_KPI'));
 });
 test('complete print variant is not the simple projection',async()=>{const s=reportingFixture();const html=await buildPrintReport(s,{kind:'framework',format:'pdf',frameworkId:'TMSA',ids:['chapter-TMSA'],filters:{reportVariant:'complete'}},'en');assert(html.includes('REMARKS_'));});
@@ -32,13 +32,13 @@ test('framework tall cells shrink locally, retain full text, warn and refuse the
  i.guidance.en='LONG\n'.repeat(100)+'END';b=new ExcelJS.Workbook();await b.xlsx.load(await buildFrameworkExcel(s,'TMSA','en',[i.chapterId],{templateBytes,onWarning:m=>warning=m}) as unknown as ExcelJS.Buffer);assert.equal(b.worksheets[0].getCell('C3').text,i.guidance.en);assert.equal(b.worksheets[0].getRow(3).height,409.5);assert(warning.includes(i.code)&&warning.includes('PDF'));
  i.guidance.en='x'.repeat(32768);await assert.rejects(()=>buildFrameworkExcel(s,'TMSA','en',[i.chapterId],{templateBytes}),/32767.*1.1.1/);
 });
-test('framework reference: seven columns at row 2, current-only content and one complete Item per row',async()=>{
+test('framework reference: eight columns at row 2, current-only content and one complete Item per row',async()=>{
  const s=reportingFixture(),item=s.items.find(i=>i.frameworkId==='TMSA')!,a=s.assessments.find(a=>a.itemId===item.id)!;
  s.items=[item];item.guidance={en:'COMPLETE_GUIDANCE',zh:'完整指引'};a.response='no';a.departmentIds=[];
  a.selfAssessment={en:'CURRENT_ONLY',zh:'目前自評'};a.note={en:'EXCLUDED_NOTE',zh:'不應列出'};
  const b=new ExcelJS.Workbook();await b.xlsx.load(await buildFrameworkExcel(s,'TMSA','en',[item.chapterId],{templateBytes}) as unknown as ExcelJS.Buffer);const sh=b.worksheets[0];
  assert.equal(sh.getCell('A2').text,'Item');assert.equal(sh.getCell('A3').text,item.code);assert.equal(sh.rowCount,3);
- assert.equal(sh.getCell('C3').text,bilingual(item.guidance));assert.equal(sh.getCell('E3').text,bilingual(a.selfAssessment));assert.equal(sh.getCell('G3').text,'');
+ assert.equal(sh.getCell('C3').text,bilingual(item.guidance));assert.equal(sh.getCell('E3').text,a.selfAssessment.en);assert.equal(sh.getCell('F3').text,a.selfAssessment.zh);assert.equal(sh.getCell('H3').text,'');
  assert.equal(sh.getCell('D3').font.color?.argb,'FF9C0006');assert.equal(sh.getCell('E3').font.size,12);
- assert(sh.getCell('F1').value instanceof Date);assert.equal(sh.autoFilter,'A2:G3');assert('ySplit' in sh.views[0]&&sh.views[0].ySplit===2);
+ assert(sh.getCell('F1').value instanceof Date);assert.equal(sh.autoFilter,'A2:H3');assert('ySplit' in sh.views[0]&&sh.views[0].ySplit===2);
 });

@@ -244,3 +244,7 @@ TMSA與DRYBMS的KPI/Guidance顯示時合併PDF短行，按句子自然換行，�
 ## 最新追加：框架精簡與完整資訊輸出
 
 使用者最新已保存七欄Excel範本優先於舊A6／續列／自動metadata條款：精簡Excel與PDF僅當前七欄，一項一列、同格全文，正常12pt，超高可局部縮至10pt，仍超高明示PDF；超過32767字元停止Excel。另增PDF-only完整資訊（framework＋reportVariant=complete），權限／canonical／GM隔離不變。完整範圍、驗證與尚未關閉項目見 [FRAMEWORK_EXPORT_REFINEMENT.md](FRAMEWORK_EXPORT_REFINEMENT.md)。本機候選不是正式完成。
+
+## 最新追加：框架自評英文／中文同列拆格
+
+此節依使用者最新要求取代前節七欄：精簡XLSX／PDF改為八欄，僅自評拆英文在左／中文在右、同列等寬；兩欄各沿舊自評欄58.265625，其他欄寬及資料欄原樣。完整資訊PDF的自評亦同列等寬，可跨頁，不被通用長文重排為上下。空語言獨立空，富文字／完整非空行／canonical年度保留；單格32767限制逐語檢查，32k＋32k可分格保存。Excel一Item一列、正常12pt及局部11／10pt／409.5全文警告、排序後AutoFit不變。角色、scope、授權、儲存、SQL及其他報表不改；新實際UI／nativeExcel／PDF證據及限制見FRAMEWORK_EXPORT_REFINEMENT.md最新追加。

@@ -180,14 +180,14 @@ export async function ensureNativeExcelCompatibility(bytes:Uint8Array):Promise<U
   return zip.generateAsync({type:'uint8array',compression:'DEFLATE'});
 }
 function responseText(a:Pick<Assessment,'response'>|undefined){return a?.response==='yes'?'Y':a?.response==='no'?'N':'?';}
-const frameworkWidths=[7.86328125,23.796875,58.265625,4.1328125,58.265625,37.265625,7.73046875];
-const frameworkColumnNames=['標楷體','Arial','Arial','Arial','Times New Roman','Times New Roman','標楷體'];
+const frameworkWidths=[7.86328125,23.796875,58.265625,4.1328125,58.265625,58.265625,37.265625,7.73046875];
+const frameworkColumnNames=['標楷體','Arial','Arial','Arial','Times New Roman','Times New Roman','Times New Roman','標楷體'];
 const currentFrameworkCells=(state:PlatformState,item:StandardItem):string[]=>{
  const a=assessmentFor(state,item.id);
- return [item.code,bilingual(item.kpi),bilingual(item.guidance),responseText(a),bilingual(a?.selfAssessment),bilingual(a?.evidence),departmentsLabel(state,a?.departmentIds??item.departmentIds,'zh')];
+ return [item.code,bilingual(item.kpi),bilingual(item.guidance),responseText(a),compactRichText(a?.selfAssessment.en??''),compactRichText(a?.selfAssessment.zh??''),bilingual(a?.evidence),departmentsLabel(state,a?.departmentIds??item.departmentIds,'zh')];
 };
-const currentFrameworkHeaders=(state:PlatformState)=>['Item','Key Performance Indicator\n關鍵績效指標','Best Practice Guidance\n最佳實務指引','Y/N',`${/^\d{4}/.exec(state.serverTime)?.[0]??'Current'} Self Assessment\n目前自評`,'Evidence\n佐證','PIC\n部門'];
-/** Latest approved seven-column reference; source asset is validated, never copied. */
+const currentFrameworkHeaders=(state:PlatformState)=>['Item','Key Performance Indicator\n關鍵績效指標','Best Practice Guidance\n最佳實務指引','Y/N',...['English Self Assessment\n英文自評','Chinese Self Assessment\n中文自評'].map(label=>`${/^\d{4}/.exec(state.serverTime)?.[0]??'Current'} ${label}`),'Evidence\n佐證','PIC\n部門'];
+/** Approved reference with equal-width English/Chinese assessment columns. */
 export async function buildFrameworkExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
  const selected=selectedFrameworkItems(state,frameworkId,chapterIds,options.departmentIds);if(!selected.length)throw noFrameworkItems();
  const chapters=selectedChapters(state,frameworkId,chapterIds).filter(c=>selected.some(i=>i.chapterId===c.id));
@@ -207,7 +207,7 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
   sheet.getCell('E1').value=tr(lang,'更新日期','Updated');sheet.getCell('F1').value=new Date(state.serverTime.slice(0,10)+'T00:00:00Z');sheet.getCell('F1').numFmt='yyyy/mm/dd';
   for(const col of [5,6]){sheet.getCell(1,col).font={name:'標楷體',size:14,bold:true};sheet.getCell(1,col).alignment={horizontal:col===5?'right':'left',vertical:'middle'};}
   sheet.getRow(2).height=47.65;
-  currentFrameworkHeaders(state).forEach((label,c)=>{const cell=sheet.getCell(2,c+1);cell.value=label;cell.font={name:'Arial',size:12,bold:true};cell.alignment={wrapText:true,vertical:'top',horizontal:'center'};cell.fill={type:'pattern',pattern:'solid',fgColor:c>=3&&c<=5?{argb:'FFFFFF00'}:{argb:'FFB8CCE4'}};tableBorder(cell);});
+  currentFrameworkHeaders(state).forEach((label,c)=>{const cell=sheet.getCell(2,c+1);cell.value=label;cell.font={name:'Arial',size:12,bold:true};cell.alignment={wrapText:true,vertical:'top',horizontal:'center'};cell.fill={type:'pattern',pattern:'solid',fgColor:c>=3&&c<=6?{argb:'FFFFFF00'}:{argb:'FFB8CCE4'}};tableBorder(cell);});
   for(const [index,item] of items.entries()){
    const row=sheet.getRow(index+3),values=currentFrameworkCells(state,item);let height=18,overflow=false;
    values.forEach((value,c)=>{
@@ -216,9 +216,9 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
     const required=()=>splitMeasured(value,width,size,frameworkColumnNames[c],1).length*(size*1.3)+3;
     while(size>10&&required()>409.5)size--;
     const measured=required();height=Math.max(height,measured);overflow ||= measured>409.5;
-    cell.font={name:frameworkColumnNames[c],size,color:{argb:c===5?'FFFF0000':'FF000000'}};
-    cell.alignment={wrapText:true,vertical:'top',horizontal:[0,3,6].includes(c)?'center':'left',shrinkToFit:false};
-    if(c>=3&&c<=5)cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFF00'}};
+    cell.font={name:frameworkColumnNames[c],size,color:{argb:c===6?'FFFF0000':'FF000000'}};
+    cell.alignment={wrapText:true,vertical:'top',horizontal:[0,3,7].includes(c)?'center':'left',shrinkToFit:false};
+    if(c>=3&&c<=6)cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFF00'}};
     if(c===3&&value==='N'){cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFC7CE'}};cell.font.color={argb:'FF9C0006'};}
     tableBorder(cell);richCell(cell,value);
    });
@@ -230,10 +230,10 @@ export async function buildFrameworkExcel(state:PlatformState,frameworkId:Framew
   let end=dataEnd;const scope=options.reportScope;if(scope||warnings.length){end++;sheet.getRow(end).hidden=true;}
   for(const note of [scope,...warnings.filter(w=>items.some(i=>w.startsWith(`${frameworkId} Item ${i.code}:`)))].filter((v):v is string=>!!v)){
    const width=frameworkWidths.reduce((n,w)=>n+w*5.25,0)-12;
-   for(const chunk of splitMeasured(note,width,12,'Arial',24)){end++;sheet.mergeCells(`A${end}:G${end}`);const c=sheet.getCell(end,1);c.value=chunk;c.font={name:'Arial',size:12};c.alignment={wrapText:true,vertical:'top'};sheet.getRow(end).height=Math.min(409.5,splitMeasured(chunk,width,12,'Arial',1).length*16+4);}
+   for(const chunk of splitMeasured(note,width,12,'Arial',24)){end++;sheet.mergeCells(`A${end}:H${end}`);const c=sheet.getCell(end,1);c.value=chunk;c.font={name:'Arial',size:12};c.alignment={wrapText:true,vertical:'top'};sheet.getRow(end).height=Math.min(409.5,splitMeasured(chunk,width,12,'Arial',1).length*16+4);}
   }
-  sheet.views=[{state:'frozen',xSplit:1,ySplit:2}];sheet.autoFilter=`A2:G${dataEnd}`;
-  sheet.pageSetup={paperSize:8 as ExcelJS.PaperSize,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,printArea:`A1:G${end}`,printTitlesRow:'1:2',margins:{left:.2,right:.2,top:.25,bottom:.3,header:.1,footer:.1}};
+  sheet.views=[{state:'frozen',xSplit:1,ySplit:2}];sheet.autoFilter=`A2:H${dataEnd}`;
+  sheet.pageSetup={paperSize:8 as ExcelJS.PaperSize,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,printArea:`A1:H${end}`,printTitlesRow:'1:2',margins:{left:.2,right:.2,top:.25,bottom:.3,header:.1,footer:.1}};
   sheet.headerFooter={oddFooter:'&L&12'+frameworkId+'&C&12&P / &N'};
  }
  if(warnings.length)options.onWarning?.(warnings.join('\n'));
@@ -342,7 +342,7 @@ export interface PdfRow {key:string;cells:string[];warning?:boolean}
 interface PdfLine {text:string;indent:number}
 interface PdfRun {font:PDFFont;text:string;color?:keyof typeof RICH_COLORS}
 const hasBold=(value:unknown):boolean=>typeof value==='string'?richTextRuns(value).some(run=>run.bold):!!value&&typeof value==='object'&&Object.values(value).some(hasBold);
-export interface PdfGroupRow {headers:string[];cells:string[];ratios?:number[];statusColumn?:number;status?:{background:string;color:string};entries?:{headers:string[];cells:string[];ratios:number[]}[]}
+export interface PdfGroupRow {layout?:'parallel-languages';headers:string[];cells:string[];ratios?:number[];statusColumn?:number;status?:{background:string;color:string};entries?:{headers:string[];cells:string[];ratios:number[]}[]}
 const PDF_BODY=12,PDF_AUX=12,PDF_LEADING=16,PDF_PAD=4;
 const PAGE_WIDTH=1190.55,PAGE_HEIGHT=841.89,MARGIN=34,BOTTOM=64;
 class TextPdf {
@@ -509,10 +509,10 @@ class TextPdf {
   table(headers:string[],_ratios:number[],rows:PdfRow[],layout:'auto'|'overview'|'framework-simple'='auto') {
     if(layout==='framework-simple'){
       const block=this.blockIndex++,total=_ratios.reduce((a,b)=>a+b,0),widths=_ratios.map(r=>(PAGE_WIDTH-MARGIN*2)*r/total),heads=headers.map((h,c)=>this.wrap(h,widths[c]-8)),hh=Math.max(...heads.map(h=>h.length))*PDF_LEADING+8;
-      const header=()=>{if(this.y-hh-24<BOTTOM)this.newPage();let x=MARGIN;heads.forEach((lines,c)=>{this.page.drawRectangle({x,y:this.y-hh,width:widths[c],height:hh,color:c>=3&&c<=5?rgb(1,1,0):rgb(.72,.8,.9),borderWidth:.6,borderColor:rgb(.2,.2,.2)});lines.forEach((line,n)=>this.draw(line,x+4,this.y-16-n*PDF_LEADING,12));x+=widths[c];});this.y-=hh;};header();
+      const header=()=>{if(this.y-hh-24<BOTTOM)this.newPage();let x=MARGIN;heads.forEach((lines,c)=>{this.page.drawRectangle({x,y:this.y-hh,width:widths[c],height:hh,color:c>=3&&c<=6?rgb(1,1,0):rgb(.72,.8,.9),borderWidth:.6,borderColor:rgb(.2,.2,.2)});lines.forEach((line,n)=>this.draw(line,x+4,this.y-16-n*PDF_LEADING,12));x+=widths[c];});this.y-=hh;};header();
       rows.forEach((row,r)=>{const lines=row.cells.map((v,c)=>this.wrap(v,widths[c]-8)),count=Math.max(...lines.map(l=>l.length));let offset=0;
        while(offset<count){if(this.y-24<BOTTOM){this.newPage();header();}const take=Math.min(count-offset,Math.floor((this.y-BOTTOM-8)/PDF_LEADING)),height=take*PDF_LEADING+8;let x=MARGIN;
-        lines.forEach((list,c)=>{const no=c===3&&row.cells[c]==='N';this.page.drawRectangle({x,y:this.y-height,width:widths[c],height,color:no?rgb(1,.78,.81):c>=3&&c<=5?rgb(1,1,0):rgb(1,1,1),borderWidth:.6,borderColor:rgb(.2,.2,.2)});list.slice(offset,offset+take).forEach((line,n)=>{this.draw(line,x+4,this.y-16-n*PDF_LEADING,12,no?rgb(.61,0,.02):c===5?rgb(1,0,0):rgb(0,0,0));this.onFieldLine?.({fieldId:`t:${block}:${r}:${c}`,page:this.document.getPageCount()-1,x:x+4,baseline:PAGE_HEIGHT-(this.y-16-n*PDF_LEADING),width:widths[c]-8,size:12});});x+=widths[c];});this.y-=height;offset+=take;
+        lines.forEach((list,c)=>{const no=c===3&&row.cells[c]==='N';this.page.drawRectangle({x,y:this.y-height,width:widths[c],height,color:no?rgb(1,.78,.81):c>=3&&c<=6?rgb(1,1,0):rgb(1,1,1),borderWidth:.6,borderColor:rgb(.2,.2,.2)});list.slice(offset,offset+take).forEach((line,n)=>{this.draw(line,x+4,this.y-16-n*PDF_LEADING,12,no?rgb(.61,0,.02):c===6?rgb(1,0,0):rgb(0,0,0));this.onFieldLine?.({fieldId:`t:${block}:${r}:${c}`,page:this.document.getPageCount()-1,x:x+4,baseline:PAGE_HEIGHT-(this.y-16-n*PDF_LEADING),width:widths[c]-8,size:12});});x+=widths[c];});this.y-=height;offset+=take;
        }
       });this.y-=4;return;
     }
@@ -583,7 +583,7 @@ class TextPdf {
         const ratios=row.ratios??row.cells.map(()=>1),total=ratios.reduce((a,b)=>a+b,0),widths=ratios.map(r=>width*r/total);
         const heads=row.headers.map((t,c)=>this.wrap(t,widths[c]-PDF_PAD*2,PDF_AUX));
         const headerHeight=Math.max(...heads.map(h=>h.length))*20+8;
-        const lines=row.cells.map((t,c)=>this.wrap(t||'—',widths[c]-PDF_PAD*2));
+        const lines=row.cells.map((t,c)=>this.wrap(logical.layout==='parallel-languages'?t:t||'—',widths[c]-PDF_PAD*2));
         const count=Math.max(...lines.map(l=>l.length));let offset=0;
         while(offset<count){
           if(this.y-headerHeight-PDF_LEADING-PDF_PAD*2<BOTTOM)continuation();
@@ -651,7 +651,7 @@ export async function renderFrameworkReport<T>(create:ReportFactory<T>,state:Pla
   }
   pdf.heading(`${frameworkId} · ${tr(lang,'框架完整資訊','Complete framework information')}`);if(options.reportScope)pdf.paragraph(options.reportScope);
   pdf.paragraph(bilingual(framework.scopeLabel));pdf.paragraph(bilingual(framework.description));
-  pdf.paragraph(state.viewScope==='management_viewer'?tr(lang,'英文上、繁中下。Y/N、完成更新、符合程度及執行狀態各自獨立。停用條目不列入目前報告。','English above Traditional Chinese. Y/N, review, conformity and execution are independent. Inactive items are excluded from current reports.'):tr(lang,'英文上、繁中下。Y/N、完成更新、符合程度、執行狀態、改善結案各自獨立。停用條目不列入目前報告。','English above Traditional Chinese. Y/N, review, conformity, execution and improvement closure are independent. Inactive items are excluded from current reports.'),PDF_AUX);
+  pdf.paragraph(state.viewScope==='management_viewer'?tr(lang,'自評英文左、繁中右等寬；其他雙語英文上、繁中下。Y/N、完成更新、符合程度及執行狀態各自獨立。停用條目不列入目前報告。','Assessments: English left, Chinese right, equal width; other bilingual fields: English above Chinese. Y/N, review, conformity and execution are independent. Inactive items are excluded from current reports.'):tr(lang,'自評英文左、繁中右等寬；其他雙語英文上、繁中下。Y/N、完成更新、符合程度、執行狀態、改善結案各自獨立。停用條目不列入目前報告。','Assessments: English left, Chinese right, equal width; other bilingual fields: English above Chinese. Y/N, review, conformity, execution and improvement closure are independent. Inactive items are excluded from current reports.'),PDF_AUX);
   const score=frameworkScore(state,frameworkId,chapters.map(c=>c.id));
   if(filtered)pdf.paragraph(`${tr(lang,'部門篩選','Department filter')}: ${departmentsLabel(state,options.departmentIds!,'zh')}. ${tr(lang,'下方僅列符合部門與章節的條目；分數與完成數仍使用完整章節，不按部門重算。','Only items matching departments and chapters are listed; scores and reviewed counts still use complete chapters, not a department-only recalculation.')}`,PDF_AUX);
   else if(frameworkId==='TMSA')pdf.paragraph(tmsa14ReportScope(currentIncludesTmsa14(state),score.totalChapters,lang),PDF_AUX);
@@ -670,7 +670,7 @@ export async function renderFrameworkReport<T>(create:ReportFactory<T>,state:Pla
         {headers:[tr(lang,'部門','Departments'),tr(lang,'執行人','Assignees')],cells:[departmentsLabel(state,a?.departmentIds??item.departmentIds,'zh'),peopleLabel(state,a?.assigneeIds??[])]},
         {headers:['Key Performance Indicator / 關鍵績效指標'],cells:[bilingual(item.kpi)]},
         {headers:['Best Practice Guidance / 最佳實務指引'],cells:[bilingual(guidance)]},
-        {headers:[tr(lang,'目前自評','Current assessment')],cells:[bilingual(a?.selfAssessment)]},
+        {headers:['English Self Assessment / 英文自評','Chinese Self Assessment / 中文自評'],cells:[compactRichText(a?.selfAssessment.en??''),compactRichText(a?.selfAssessment.zh??'')],ratios:[1,1],layout:'parallel-languages'},
         {headers:[tr(lang,'佐證','Evidence')],cells:[bilingual(a?.evidence)]}
       ];
       if(!restricted){rows.push({headers:[tr(lang,'備註狀態','Remarks status')],cells:[remarksStatusLabel(a?.remarksStatus,lang)],statusColumn:0,status:remarksStatusDefinition(a?.remarksStatus)},{headers:[tr(lang,'手動備註','Manual remarks')],cells:[a?.remarks??'']});const open=openIssuesFor(state,item.id);if(open.length)rows.push({headers:[tr(lang,'未結案改善','Open improvements')],cells:[open.map(i=>[i.title,bilingual(i.content),i.plan].filter(Boolean).join('\n')).join('\n')]});}

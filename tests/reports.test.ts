@@ -47,7 +47,7 @@ for(const frameworkId of ['TMSA','DRYBMS'] as const)for(const lang of ['zh','en'
   const saved=new ExcelJS.Workbook();await saved.xlsx.load(output as unknown as ExcelJS.Buffer);
   assert.equal(saved.worksheets.length,state.chapters.length);
   for(const sheet of saved.worksheets){
-    assert.equal(sheet.getCell('E2').text,'2026 Self Assessment\n目前自評');
+    assert.equal(sheet.getCell('E2').text,'2026 English Self Assessment\n英文自評');
     const original=frameworkId==='TMSA'?book.getWorksheet(sheet.name):book.worksheets[0];
     assert.equal(sheet.getRow(2).height,47.65,`${sheet.name}: compact reference header`);
     assert.equal(sheet.getCell('A2').text,'Item','Latest reference supersedes A6');
@@ -115,7 +115,7 @@ test('long bilingual XLSX fields reconstruct exactly and include custom chapters
   const planned=rows.map(row=>({text:row.getCell(2).text,en:'',zh:''}));
   const seen=new Set<string>();for(const s of saved.worksheets)s.eachRow(r=>{if(r.getCell(1).text)seen.add(r.getCell(1).text);});
   assert.ok(seen.has('LOCAL-X'));assert.ok(!seen.has(inactive.code));
-  for(const row of rows){assert.ok(row.height!<=409.5);for(let c=1;c<=7;c++)for(const side of ['left','right','top','bottom'] as const)assert.ok(row.getCell(c).border[side]?.style);}
+  for(const row of rows){assert.ok(row.height!<=409.5);for(let c=1;c<=8;c++)for(const side of ['left','right','top','bottom'] as const)assert.ok(row.getCell(c).border[side]?.style);}
   if(process.env.REPORT_QA_DIR){await writeFile(resolve(process.env.REPORT_QA_DIR,'framework-long-custom.xlsx'),output);await writeFile(resolve(process.env.REPORT_QA_DIR,'long-expectations.json'),JSON.stringify({sheets:saved.worksheets.map(s=>s.name),itemCodes:state.items.filter(i=>i.active).map(i=>i.code),required:['END_EN','中文結尾','CUSTOM_ONLY'],forbiddenCodes:[inactive.code],nativeTextBand:[70,250,300,880],segments:planned.map((s,index)=>({sheet:sheet.name,cell:`B${rows[index].number}`,text:s.text})),fullFields:[{en:first.kpi.en,zh:first.kpi.zh,enSegments:planned.map(s=>s.en),zhSegments:planned.map(s=>s.zh)}]}));}
 });
 

@@ -6,7 +6,7 @@ import {resolve} from 'node:path';
 import {buildFrameworkPdf} from '../src/reports.ts';
 import {tmpdir} from 'node:os';
 import {layoutFixture} from './report-layout-fixture.ts';
-test('complete framework PDF retains wide narrative bands; simple projection uses approved seven columns',async()=>{
+test('complete framework PDF retains wide narrative bands; simple projection uses approved eight columns',async()=>{
  const dir=resolve(process.env.REPORT_LAYOUT_QA_DIR??resolve(tmpdir(),'tmsa-report-layout'));await mkdir(dir,{recursive:true});
  const state=layoutFixture(),fontBytes=new Uint8Array(await readFile('public/fonts/NotoSansTC-Regular.ttf'));
  const pdf=await buildFrameworkPdf(state,'TMSA','zh',undefined,{fontBytes,reportVariant:'complete'});const path=resolve(dir,'layout-long.pdf');await writeFile(path,pdf);

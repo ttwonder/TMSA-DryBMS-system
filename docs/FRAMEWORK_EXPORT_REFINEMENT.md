@@ -1,6 +1,30 @@
 # 框架輸出精簡修訂
 
-## 最新範本與優先關係
+## 最新追加：英文／中文自評同列等寬（取代前批七欄）
+
+- 使用者最新要求僅拆目前自評：精簡 XLSX／PDF 為 Item、KPI、BPG、Y/N、英文自評、中文自評、佐證、中文部門八欄。E／F 各沿原自評欄寬 58.265625，不把舊欄硬分半；其餘欄寬保持。Excel 一 Item 一實體列、A:H 篩選／列印／末端註記，資料列不合併。
+- 完整資訊 PDF 自評也英文左、中文右，同一邏輯列等寬。僅此 pair 使用平行標記及真正兩欄網格，避免通用長文滿寬重排與100格 colspan 像素累積誤差；其他欄位／報表流不改。長自評可跨頁，正常12pt，不用縮字湊PDF頁。
+- 兩語各自原文／富文字／非空行保留，空語言維持空，不互相fallback。Excel各語獨立32767字元上限；32k＋32k可保留，任一超限則指出該Item停止。原局部11／10pt、409.5pt警告與排序後AutoFit契約保留。不承諾所有極端長內容都降高或完全可見。
+- 不改資料儲存、角色、scope、授權、SQL、模板、private seed、其他頁面或業務操作。
+
+### 本批實際證據（不是沿用前批結果）
+- Excel 行為 RED：E 格仍混入中文；GREEN：純英文 E／純中文 F、等寬、富文字、12pt、八欄篩選與獨立字元限制。完整PDF RED：兩語未同列；GREEN：長內容pair不被重排、空值獨立、direct TextPdf geometry。direct PDF 是 builder 層，不冒稱 mounted。
+- 原 App＋真 ApiClient＋owned native PostgreSQL migration23 重新跑17情境、14份實際產物（5 XLSX、9 Chromium PDF）。保留GM／operator、EN／ZH、DRY自訂章、部門OR×章節AND、saved-empty、無自評fallback、no-match／空章／空選負控制；新增24＋24行自評與單語空值。canonical回傳與資料庫儲存快照一致，業務記錄／非export audit不變。
+- 新原生Excel5份全部正常唯讀開啟；八欄完整關聯、各sheet Activate、篩選／雙向排序／AutoFit、N色與佐證紅、富文字及原檔hash不變。自評兩欄 native ColumnWidth 均57.67（OOXML均58.265625）。24＋24短硬換行控制：舊同格409.5pt／10pt，新並排377.5pt／兩格12pt，native AutoFit需求369pt。此為特定控制，不是全資料通用降高保證。
+- 100行overflow仍標示 LIMITED_USE_PDF_FULL_TEXT／PASS_WITH_KNOWN_OVERFLOW_LIMITATION；正常非overflow未發現native初始列高裁切，不把409.5pt AutoFit飽和值當作無裁切證據。
+- 新9份PDF獨立解析核1564個非空行次、全文、頁界、至少12pt、粗體藍色；24行兩語逐行同頁同基線並分欄。mounted DOM精確語言streams、同y及等寬bbox另存各artifact。真Page.pdf不等於原生Save As或正式Supabase。
+- 完整gates：491/491 tests、typecheck、build、nodecheck、native Python compile及git diff --check通過。完整input manifests及public/dist40檔（XLSX解壓內容）marker零命中見 final-gates.json；最後文件追加不改產品／測試／腳本bytes。
+- 所有失敗收據保留：100欄網格1.5px誤差為mounted RED並以真正兩欄修正；空br innerText及相同order資料排序屬harness oracle，修oracle不改產品全文／scope。所有owned UI／API／PG及Excel PID已停止；native短路徑副本／render亦保留。
+
+### 本批位置及交接
+- `qa-evidence/framework-assessment-split/20261024-141638/`：RED／GREEN、舊builder控制XLSX、完整gate logs／manifest及本批handback。
+- `qa-evidence/framework-assessment-split/browser-2026-10-24T06-28-10.156Z/receipt.json`：17情境／14產物，逐份path、SHA256、canonical SHA256、角色、entry及request。
+- 同目錄 `native-92d1883b.json`（SHA256 adc1a8087ba3a0a08235962009bfed14758a9f80ade689c32aec8161191b066f）、`split-pdf-9e056320.json`（SHA256 e982695b6b4461db344a6e4c59fe29467e8455a6f9be95c54f4f7cc7c501f1a4）。
+- PDF驗證器 `C:/Users/tuotu/AppData/Local/hermes/cache/scratch/framework-assessment-split-pdf.py`；舊解析器及前批證據未覆寫。
+- 候選基底 `main`／`39b226729d3aabf06565964576ed01843fe43f3b`；唯一writer未stage／commit／Push／部署／正式SQL，交回父流程有限review與commit判斷。相同framework重複code仍受既有SQL禁止，builder雙stable-ID回歸保持；未冒稱native same-code驗證。
+
+## 前批七欄範本與證據（本批僅覆蓋自評分格）
+
 採用使用者最新保存的七欄範本（SHA256 `724126394c98c8473ea4a1f6ae0d42e9adbcc3d7d7cbd83bcf9a64766800d547`），僅擷取格式，不複製私有正文。此批只改框架輸出，不刪資料庫欄位；備註／改善／歷史／總覽維持原預設。
 
 精簡 XLSX/PDF：Item、KPI、BPG、Y/N、canonical 年份目前自評、佐證、中文部門。每章保存選中啟用項目；一 Item 一資料列，stable ID 不按代碼合併。XLSX 標題第一列、欄頭第二列，正常12pt，正文完整同格；超高只局部逐步縮至11／10pt，仍超高明示用PDF全文，不續列、不截斷。任何正文格超過32767字元停止Excel並指出Item。範圍註記放資料末端，不塞入自評。末端註記前設隱藏空隔列，避免原生Excel把合併註記納入AutoFilter／排序。排序後須AutoFit。

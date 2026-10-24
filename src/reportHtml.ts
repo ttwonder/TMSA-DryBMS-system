@@ -30,7 +30,7 @@ export class HtmlReport implements ReportWriter<string> {
  }
  /** Separate disproportionately tall fields; keep short metadata in one row. */
  private compactRows(row:PdfGroupRow):PdfGroupRow[]{
-  if(row.cells.length<2)return [row];
+  if(row.layout==='parallel-languages'||row.cells.length<2)return [row];
   const weights=row.ratios??row.cells.map(()=>1),total=weights.reduce((a,b)=>a+b,0);
   const countLines=(cell:string,width:number)=>richTextToPlainText(cell).split('\n').reduce((n,line)=>n+Math.max(1,Math.ceil(Array.from(line).reduce((sum,c)=>sum+(/[\u2e80-\uffff]/u.test(c)?12:6),0)/Math.max(20,width))),0);
   const lines=row.cells.map((cell,i)=>countLines(cell,1120*weights[i]/total-8));
@@ -49,11 +49,23 @@ export class HtmlReport implements ReportWriter<string> {
   for(const row of rows){const bands=this.compactRows({headers,cells:row.cells,ratios});if(bands.length===1)this.band(row.key,headers,row.cells,ratios,undefined,undefined,row.warning);else this.groupedTable(row.key,bands,'',row.warning);}
  }
  groupedTable(key:string,rows:PdfGroupRow[],_prefix:string,warning=false){
+  // A genuine two-column grid avoids accumulated rounding across 100 tracks.
+  // Keep this explicit language pair parallel, even for page-spanning prose.
+  if(rows.some(row=>row.layout==='parallel-languages')){
+   let segment:PdfGroupRow[]=[];
+   const flush=()=>{if(segment.length)this.groupedTable(key,segment,_prefix,warning);segment=[];};
+   for(const row of rows){
+    if(row.layout!=='parallel-languages'){segment.push(row);continue;}
+    flush();
+    this.blocks.push(`<table class="grouped parallel-assessments"><colgroup><col style="width:50%"><col style="width:50%"></colgroup><thead><tr><th class="record-key" colspan="2">${reportRichHtml(key)}</th></tr></thead><tbody><tr>${row.cells.map((cell,i)=>`<td><div class="field-label">${reportRichHtml(row.headers[i])}</div>${reportRichHtml(cell)}</td>`).join('')}</tr></tbody></table>`);
+   }
+   flush();return;
+  }
   const body=rows.flatMap(row=>(row.entries??[row]).flatMap(entry=>this.compactRows({...entry,statusColumn:row.statusColumn,status:row.status})).map(entry=>{
    const weights=entry.ratios??entry.cells.map(()=>1),total=weights.reduce((a,b)=>a+b,0);let used=0;
-   return `<tr>${entry.cells.map((cell,i)=>{const span=i===entry.cells.length-1?100-used:Math.max(1,Math.round(100*weights[i]/total));used+=span;const status=i===entry.statusColumn?entry.status:undefined;return `<td colspan="${span}"${status?` style="background:${/^#[0-9a-f]{6}$/i.test(status.background)?status.background:'#ffffff'};color:${/^#[0-9a-f]{6}$/i.test(status.color)?status.color:'#202c38'}"`:''}><div class="field-label">${reportRichHtml(entry.headers[i]??'')}</div>${reportRichHtml(cell||'—')}</td>`;}).join('')}</tr>`;
+   return `<tr>${entry.cells.map((cell,i)=>{const span=i===entry.cells.length-1?100-used:Math.max(1,Math.round(100*weights[i]/total));used+=span;const status=i===entry.statusColumn?entry.status:undefined;return `<td colspan="${span}"${status?` style="background:${/^#[0-9a-f]{6}$/i.test(status.background)?status.background:'#ffffff'};color:${/^#[0-9a-f]{6}$/i.test(status.color)?status.color:'#202c38'}"`:''}><div class="field-label">${reportRichHtml(entry.headers[i]??'')}</div>${reportRichHtml(entry.layout==='parallel-languages'?cell:cell||'—')}</td>`;}).join('')}</tr>`;
   })).join('');
   this.blocks.push(`<table class="grouped${warning?' warning':''}"><colgroup>${'<col style="width:1%">'.repeat(100)}</colgroup><thead><tr><th class="record-key" colspan="100">${reportRichHtml(key)}</th></tr></thead><tbody>${body}</tbody></table>`);
  }
- async finish(){return `<!doctype html><html lang="${this.lang==='zh'?'zh-Hant':'en'}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'"><title>${escapeReportHtml(richTextToPlainText(this.title))}</title><style>${css}.framework-simple th{background:#b8cce4;text-align:center}.framework-simple th:nth-child(n+4):nth-child(-n+6),.framework-simple td:nth-child(n+4):nth-child(-n+6){background:#ffff00}.framework-simple td:nth-child(5),.framework-simple td:nth-child(6){font-family:"Times New Roman","標楷體",serif}.framework-simple td:nth-child(6){color:#ff0000}.framework-simple td:nth-child(1),.framework-simple td:nth-child(7){font-family:"標楷體",serif;text-align:center}.framework-simple td.response-no{background:#ffc7ce!important;color:#9c0006}.framework-simple td{padding:2pt 3pt}.framework-simple td:nth-child(4){text-align:center}</style></head><body><aside class="screen-note">${this.lang==='zh'?'授權報告快照。使用瀏覽器列印／另存為 PDF；關閉預覽不代表已保存。可按 Ctrl+P 再次列印。':'Authorized report snapshot. Print / Save as PDF in the browser; closing preview does not confirm saving. Use Ctrl+P to print again.'}</aside><main>${this.blocks.join('')}</main></body></html>`;}
+ async finish(){return `<!doctype html><html lang="${this.lang==='zh'?'zh-Hant':'en'}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'"><title>${escapeReportHtml(richTextToPlainText(this.title))}</title><style>${css}.framework-simple th{background:#b8cce4;text-align:center}.framework-simple th:nth-child(n+4):nth-child(-n+7),.framework-simple td:nth-child(n+4):nth-child(-n+7){background:#ffff00}.framework-simple td:nth-child(5),.framework-simple td:nth-child(6),.framework-simple td:nth-child(7){font-family:"Times New Roman","標楷體",serif}.framework-simple td:nth-child(7){color:#ff0000}.framework-simple td:nth-child(1),.framework-simple td:nth-child(8){font-family:"標楷體",serif;text-align:center}.framework-simple td.response-no{background:#ffc7ce!important;color:#9c0006}.framework-simple td{padding:2pt 3pt}.framework-simple td:nth-child(4){text-align:center}</style></head><body><aside class="screen-note">${this.lang==='zh'?'授權報告快照。使用瀏覽器列印／另存為 PDF；關閉預覽不代表已保存。可按 Ctrl+P 再次列印。':'Authorized report snapshot. Print / Save as PDF in the browser; closing preview does not confirm saving. Use Ctrl+P to print again.'}</aside><main>${this.blocks.join('')}</main></body></html>`;}
 }
