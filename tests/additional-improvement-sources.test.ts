@@ -40,8 +40,8 @@ test('17 synthetic legacy non_external records display the new label without rew
  const audit=describeAudit({id:'qa',at:'2026-01-01',actorId:'qa-owner',actorName:'QA',action:'create',kind:'improvement',entityId:base.id,itemCodes:[],summary:'',operationId:'qa',before:null,after:{source:'non_external'}},'zh',state);
  assert(audit.changes.some(change=>change.after==='內部管理需求'));
  const book=new ExcelJS.Workbook();await book.xlsx.load(await buildImprovementsExcel(state,rows.map(row=>row.id),'zh') as unknown as ExcelJS.Buffer);
- const sheet=book.worksheets[0],headers=sheet.getRow(4).values as string[],column=headers.indexOf('來源');assert(column>0);
- const labels:string[]=[];sheet.eachRow(row=>{if(row.number>4&&row.getCell(column).text)labels.push(row.getCell(column).text);});
+ const sheet=book.worksheets[0],headers=sheet.getRow(2).values as string[],column=headers.indexOf('來源');assert(column>0);
+ const labels:string[]=[];sheet.eachRow(row=>{if(row.number>2&&row.getCell(column).text)labels.push(row.getCell(column).text);});
  assert.equal(labels.length,17);assert(labels.every(label=>label==='內部管理需求'));
  assert.equal(improvementSourceLabel('non_external','en'),'Internal management needs');
  assert.equal(JSON.stringify(state),before);

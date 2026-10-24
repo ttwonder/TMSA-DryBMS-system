@@ -306,10 +306,19 @@ function relatedCodes(state:PlatformState,row:Improvement,lang:Language){return 
 function businessSource(state:PlatformState,row:Improvement,lang:Language){return [improvementSourceLabel(row.source,lang,state.settings),row.source==='external'?state.inspections.find(i=>i.id===row.inspectionId)?.title:''].filter(Boolean).join('\n');}
 // Deduplicate only identical text AND formatting; equal words can carry distinct author emphasis.
 function fullImprovementContent(row:Improvement){const body=bilingual(row.content),title=compactRichText(row.title);return [body,compactRichText(row.content.en),compactRichText(row.content.zh)].includes(title)?body:compactRichText(title+'\n'+body);}
-function operationalSheet(book:ExcelJS.Workbook,name:string,headers:string[],widths:number[],description:string){
+function operationalSheet(book:ExcelJS.Workbook,name:string,headers:string[],widths:number[],description:string,compactTitle=false){
  const sheet=book.addWorksheet(name),size=12,fontName='Microsoft JhengHei';
  widths.forEach((w,i)=>sheet.getColumn(i+1).width=w);
  sheet.getCell('A1').value=name;sheet.getCell('A1').font={name:fontName,size:18,bold:true};sheet.getRow(1).height=30;
+ let header=4;
+ if(compactTitle){
+  // Uploaded layout: title and complete scope share the first row. Only an
+  // exceptionally long scope needs additional rows, never smaller type.
+  const width=widths.slice(2,6).reduce((sum,w)=>sum+w*5.25,0)-10;
+  const parts=splitMeasured(description,width,size,fontName,23);
+  parts.forEach((text,i)=>{const row=i+1;sheet.mergeCells(row,3,row,6);const cell=sheet.getCell(row,3);cell.value=text;cell.font={name:fontName,size};cell.alignment={wrapText:true,vertical:'top'};sheet.getRow(row).height=Math.max(30,(splitMeasured(text,width,size,fontName,1).length+(text.endsWith('\n')?1:0))*16.2+4);});
+  header=parts.length+1;
+ }else{
  sheet.mergeCells(2,1,3,headers.length);sheet.getCell('A2').value=description;sheet.getCell('A2').font={name:fontName,size};sheet.getCell('A2').alignment={wrapText:true,vertical:'top'};
  if(description){
   // Native 12pt JhengHei scope lines measure 16.08–16.11pt leading.
@@ -317,8 +326,9 @@ function operationalSheet(book:ExcelJS.Workbook,name:string,headers:string[],wid
   if(description.length>32767||height>819)throw new Error('Export filter description exceeds Excel header capacity');
   sheet.getRow(2).height=height/2;sheet.getRow(3).height=height/2;
  }else{sheet.unMergeCells(2,1,3,headers.length);sheet.getRow(2).hidden=true;sheet.getRow(3).hidden=true;}
- sheet.getRow(4).values=headers;sheet.getRow(4).height=46;
- headers.forEach((_,i)=>{const cell=sheet.getCell(4,i+1);cell.font={name:fontName,size,bold:true,color:{argb:'FF193447'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE1EAF0'}};});
+ }
+ sheet.getRow(header).values=headers;sheet.getRow(header).height=compactTitle?Math.max(34.15,...headers.map((text,i)=>splitMeasured(text,widths[i]*5.25-5,size,fontName,1).length*16.2+4)):46;
+ headers.forEach((_,i)=>{const cell=sheet.getCell(header,i+1);cell.font={name:fontName,size,bold:true,color:{argb:'FF193447'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE1EAF0'}};});
  return sheet;
 }
 // Improvement registers retain their numeric Part column. Six-column remarks
@@ -337,14 +347,14 @@ function operationalRows(sheet:ExcelJS.Worksheet,values:(string|Date|null|number
   if(height>409.5)throw new Error('Operational continuation exceeds Excel row height');
     // Content-specific heights; a later user sort requires Excel AutoFit.
   row.height=height;
-  if(part){row.outlineLevel=1;cells.forEach((v,i)=>{const c=row.getCell(i+1);if((i<2||partColumn===16&&i===5)&&chunks[i].length===1){c.font={...c.font,color:{argb:'FFFFFFFF'}};if(c.value&&typeof c.value==='object'&&'richText' in c.value)c.value.richText.forEach(run=>{run.font={...run.font,color:{argb:'FFFFFFFF'}};});};c.border={...c.border,top:{style:'hair',color:{argb:'FFE4EBF0'}},bottom:{style:'hair',color:{argb:'FFE4EBF0'}}};});}
+  if(part){row.outlineLevel=1;cells.forEach((v,i)=>{const c=row.getCell(i+1);if((i<2||partColumn===11&&i===18)&&chunks[i].length===1){c.font={...c.font,color:{argb:'FFFFFFFF'}};if(c.value&&typeof c.value==='object'&&'richText' in c.value)c.value.richText.forEach(run=>{run.font={...run.font,color:{argb:'FFFFFFFF'}};});};c.border={...c.border,top:{style:'hair',color:{argb:'FFE4EBF0'}},bottom:{style:'hair',color:{argb:'FFE4EBF0'}}};});}
   if(statusColumn&&status){const c=row.getCell(statusColumn);c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF'+status.background.slice(1)}};c.font={name:fontName,size,bold:true,color:{argb:'FF'+status.color.slice(1)}};}
  }
 }
-function finishOperationalSheet(sheet:ExcelJS.Worksheet){
- for(let c=1;c<=sheet.columnCount;c++){tableBorder(sheet.getCell(4,c));sheet.getCell(4,c).alignment={wrapText:true,vertical:'top'};}
- sheet.views=[{state:'frozen',ySplit:4}];sheet.autoFilter={from:{row:4,column:1},to:{row:Math.max(4,sheet.rowCount),column:sheet.columnCount}};
- sheet.pageSetup={paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,printTitlesRow:'4:4',printArea:`A1:${sheet.getColumn(sheet.columnCount).letter}${sheet.rowCount}`};sheet.headerFooter={oddFooter:'&L&12FPMC&C&12&P / &N'};
+function finishOperationalSheet(sheet:ExcelJS.Worksheet,header=4,printColumn=sheet.columnCount){
+ for(let c=1;c<=sheet.columnCount;c++){tableBorder(sheet.getCell(header,c));sheet.getCell(header,c).alignment={wrapText:true,vertical:'top'};}
+ sheet.views=[{state:'frozen',ySplit:header}];sheet.autoFilter={from:{row:header,column:1},to:{row:Math.max(header,sheet.rowCount),column:sheet.columnCount}};
+ sheet.pageSetup={paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,printTitlesRow:`${header}:${header}`,printArea:`A1:${sheet.getColumn(printColumn).letter}${sheet.rowCount}`};sheet.headerFooter={oddFooter:'&L&12FPMC&C&12&P / &N'};
 }
 export async function buildRemarksExcel(state:PlatformState,frameworkId:FrameworkId,lang:Language,chapterIds?:string[],options:ReportBuildOptions={}):Promise<Uint8Array> {
  const rows=selectedRemarkRows(state,frameworkId,chapterIds,options.departmentIds);if(!rows.length)throw noRemarks();
@@ -359,12 +369,16 @@ export async function buildRemarksExcel(state:PlatformState,frameworkId:Framewor
 export async function buildImprovementsExcel(state:PlatformState,ids:string[],lang:Language,options:ReportBuildOptions={}):Promise<Uint8Array>{
  const rows=selectedImprovementRows(state,ids),Excel=await loadExcel(),book=new Excel.Workbook();book.creator=PRODUCT_NAME_EN;
  const description=options.reportScope??tr(lang,'文件序號僅供本文件對應，非永久業務編號；同筆全文及計劃分段續列，短欄位重複。按文件序號、段次閱讀；全部進度見進度工作表，按文件序號、事件次序、段次閱讀。','Document numbers link this workbook only, not persistent business IDs. Complete content/plans use continuation rows with repeated short metadata. Read in document number/part order. All events are on Progress; read in document/event/part order.');
- const sheet=operationalSheet(book,tr(lang,'改善項目','Improvements'),lang==='zh'?['文件序號','標題','提出日期','來源','分類','關聯編號','涉及部門','執行人','急迫度','狀態','最新更新','目標日期','結案日期','完整內容','執行計劃','段次','完成率 (%)','已達成階段數','階段總數']:['Document no.','Title','Proposed date','Source','Classification','Related codes','Departments','Assignees','Urgency','Status','Updated','Target date','Closed date','Complete content','Plan','Part','Completion (%)','Achieved milestones','Total milestones'],[12,45,18,48,28,30,40,44,14,20,18,18,18,100,85,9,18,18,18],description);
+ const sheet=operationalSheet(book,tr(lang,'改善項目','Improvements'),lang==='zh'?['文件序號','標題','提出日期','來源','急迫度','完整內容','執行計劃','涉及部門','執行人','狀態','段次','完成率 (%)','已達成階段數','階段總數','最新更新','目標日期','結案日期','分類','關聯編號']:['Document no.','Title','Proposed date','Source','Urgency','Complete content','Plan','Departments','Assignees','Status','Part','Completion (%)','Achieved milestones','Total milestones','Updated','Target date','Closed date','Classification','Related codes'],[5.6640625,18.3984375,10.265625,16.86328125,7.59765625,94.1328125,50.265625,17.06640625,17.06640625,7.59765625,5.1328125,7.9296875,7.46484375,7.46484375,10.33203125,10.33203125,10.33203125,14.86328125,14.86328125],description,true);
+ const mainHeader=sheet.rowCount;
+ // Native Excel needs 30.8pt for these Chinese labels; retain the uploaded 34.15pt header.
+ if(lang==='zh')sheet.getRow(mainHeader).height=34.15;
  const progress=operationalSheet(book,tr(lang,'全部進度','Progress'),lang==='zh'?['文件序號','標題','事件次序','更新日期','更新人','狀態','內容','段次']:['Document no.','Title','Event order','Update date','Updated by','Status','Content','Part'],[12,45,12,18,44,20,100,9],description);
- rows.forEach((row,i)=>{operationalRows(sheet,[i+1,row.title,excelDate(row.proposedDate),businessSource(state,row,lang),row.source==='external'?findingClassificationLabel(improvementFindingClassification(state,row),lang):'—',relatedCodes(state,row,lang),departmentsLabel(state,row.departmentIds,lang)||'—',peopleLabel(state,row.assigneeIds)||'—',urgencyLabel(row,lang),improvementStatus(row.status,lang),excelDate(row.updatedAt),excelDate(row.targetDate),excelDate(row.closedAt),fullImprovementContent(row),row.plan,1,improvementPercent(row),row.milestones?.length?milestoneProgress(row).achieved:'',row.milestones?.length??''],16,[14,15]);
+ rows.forEach((row,i)=>{operationalRows(sheet,[i+1,row.title,excelDate(row.proposedDate),businessSource(state,row,lang),urgencyLabel(row,lang),fullImprovementContent(row),row.plan,departmentsLabel(state,row.departmentIds,lang)||'—',peopleLabel(state,row.assigneeIds)||'—',improvementStatus(row.status,lang),1,improvementPercent(row),row.milestones?.length?milestoneProgress(row).achieved:'',row.milestones?.length??'',excelDate(row.updatedAt),excelDate(row.targetDate),excelDate(row.closedAt),row.source==='external'?findingClassificationLabel(improvementFindingClassification(state,row),lang):'—',relatedCodes(state,row,lang)],11,[6,7]);
   row.events.forEach((event,n)=>operationalRows(progress,[i+1,row.title,n+1,excelDate(event.at),peopleLabel(state,[event.by])||'—',improvementStatus(event.status,lang),event.content,1],8,[7]));
  });
- finishOperationalSheet(sheet);finishOperationalSheet(progress);
+ sheet.eachRow(row=>{if(row.number>mainHeader)for(const c of [3,15,16,17])row.getCell(c).alignment={...row.getCell(c).alignment,wrapText:false,shrinkToFit:true};});
+ finishOperationalSheet(sheet,mainHeader,17);finishOperationalSheet(progress);
  if(rows.some(row=>row.milestones?.length || row.milestoneEvents?.length)) {
   const stageDescription=tr(lang,'依文件序號、階段次序、段次閱讀；同筆續列保留完整目標。預期與實際日期各自獨立，請整表排序。','Read in document/milestone/part order; continuation rows retain complete goals. Planned and actual dates are independent. Sort the whole range.');
   const stages=operationalSheet(book,tr(lang,'具體階段目標','Specific milestones'),lang==='zh'?['文件序號','標題','階段次序','完整階段目標','預期完成日期','達成狀態','實際達成日期','逾期達成','段次']:['Document no.','Title','Milestone order','Complete milestone goal','Planned completion date','Achievement','Actual achievement date','Achieved late','Part'],[12,45,14,110,20,18,20,18,9],stageDescription);

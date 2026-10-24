@@ -19,10 +19,10 @@ test('chapter links export actual XLSX business chapter codes, not empty links o
   const { state, record } = fixture(), before = JSON.stringify(state);
   const book = new ExcelJS.Workbook();
   await book.xlsx.load(await buildImprovementsExcel(state, [record.id], 'zh') as unknown as ExcelJS.Buffer);
-  const headers = book.worksheets[0].getRow(4).values as string[];
+  const headers = book.worksheets[0].getRow(2).values as string[];
   const column = headers.indexOf('關聯編號'); assert(column > 0);
   const values: string[] = [];
-  book.worksheets[0].eachRow(row => { if (row.number > 4) values.push(row.getCell(column).text); });
+  book.worksheets[0].eachRow(row => { if (row.number > 2) values.push(row.getCell(column).text); });
   assert(values.some(value => value.includes('TMSA 1（章節）') && value.includes('DRYBMS 1（章節）')));
   assert(values.every(value => !value.includes('1.1.1') && !value.includes('D-1')));
   assert.equal(JSON.stringify(state), before);

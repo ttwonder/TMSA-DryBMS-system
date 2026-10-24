@@ -83,7 +83,7 @@ test('refinement: shared report ordering urgency, target, independent proposal, 
  {...base,id:'b',urgency:'urgent',targetDate:'2026-02-01',proposedDate:'2026-01-01'},
  {...base,id:'a',urgency:'urgent',targetDate:'2026-02-01',proposedDate:'2026-01-01'}];
  const ids=s.improvements.map(r=>r.id);assert.deepEqual(selectedImprovementRows(s,ids).map(r=>r.id),['a','b','c','d','z']);
- const b=new ExcelJS.Workbook();await b.xlsx.load(await buildImprovementsExcel(s,ids,'en') as unknown as ExcelJS.Buffer);assert.equal(b.worksheets[0].getCell('I5').text,'urgent');
+ const b=new ExcelJS.Workbook();await b.xlsx.load(await buildImprovementsExcel(s,ids,'en') as unknown as ExcelJS.Buffer);assert.equal(b.worksheets[0].getCell('E3').text,'urgent');
  s.improvements=s.improvements.map(row=>({...row,title:row.id+'_ORDER',itemIds:[s.items.find(item=>item.frameworkId==='TMSA')!.id]}));
  const overview=await buildPrintReport(s,{kind:'overview',format:'pdf',frameworkId:'TMSA',ids:['chapter-TMSA']},'en');
  const issues=overview.split('Open issues and execution plans')[1];assert(issues);assert.deepEqual(Array.from(issues.matchAll(/([a-z])_ORDER/g),m=>m[1]),['a','b','c','d','z']);

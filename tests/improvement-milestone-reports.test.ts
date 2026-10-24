@@ -24,8 +24,8 @@ test('milestones: original workbook exports derived progress, complete stages an
  await book.xlsx.load(await reports.buildImprovementsExcel(state,[record.id],'zh') as unknown as ExcelJS.Buffer);
  assert.deepEqual(book.worksheets.map(s=>s.name),['改善項目','全部進度','具體階段目標','階段變更歷史']);
  const [main,,stages,history]=book.worksheets;
- assert.equal(main.getCell(5,17).value,0);assert.equal(main.getCell(5,18).value,0);assert.equal(main.getCell(5,19).value,2);
- for(const sheet of book.worksheets){assert(sheet.autoFilter);assert.equal(sheet.views[0].state,'frozen');assert.equal(sheet.model.merges.length,1);sheet.eachRow(row=>{if(row.number<=4)return;assert.equal(row.getCell(1).value,1);assert(row.height!<=409.5);row.eachCell(cell=>assert.notEqual(cell.type,ExcelJS.ValueType.Formula));});}
+ assert.equal(main.getCell(3,12).value,0);assert.equal(main.getCell(3,13).value,0);assert.equal(main.getCell(3,14).value,2);
+ for(const sheet of book.worksheets){assert(sheet.autoFilter);assert.equal(sheet.views[0].state,'frozen');assert.equal(sheet.model.merges.length,1);sheet.eachRow(row=>{if(row.number<=(sheet===main?2:4))return;assert.equal(row.getCell(1).value,1);assert(row.height!<=409.5);row.eachCell(cell=>assert.notEqual(cell.type,ExcelJS.ValueType.Formula));});}
  for(const [index,stage] of record.milestones!.entries()){
   const parts:ExcelJS.Row[]=[];stages.eachRow(row=>{if(row.number>4&&row.getCell(3).value===index+1)parts.push(row);});parts.sort((a,b)=>Number(a.getCell(9).value)-Number(b.getCell(9).value));
   assert.equal(parts.map(row=>row.getCell(4).text).join(''),compactBlankLines(stage.goal));
